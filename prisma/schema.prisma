@@ -24,6 +24,10 @@ model User {
   totpSecretEnc   String? // cifrato AES-256-GCM con APP_SECRET
   pendingTotpSecretEnc String? // 2FA in fase di attivazione (cifrato)
   totpEnabled     Boolean   @default(false)
+  // primo accesso con 2FA riuscito: prima di questa data (e solo dopo la
+  // verifica della password) il login può mostrare una sola volta il QR
+  // di registrazione dell'app di autenticazione
+  firstTotpLoginAt DateTime?
   disabled        Boolean   @default(false)
   failedLogins    Int       @default(0)
   lockedUntil     DateTime?

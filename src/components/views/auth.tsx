@@ -8,12 +8,16 @@ import { navigate } from "@/lib/client/router";
 import { api } from "@/lib/client/api";
 import { Alert } from "../ui-kit";
 
+// QR di prima configurazione 2FA (forma della risposta del server)
+type Enroll = { otpauth: string; qr: string; secret: string };
+
 export function LoginView() {
   const { boot, refreshBoot, toast } = useApp();
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
   const [hp, setHp] = useState("");
   const [needs2fa, setNeeds2fa] = useState(false);
+  const [enroll, setEnroll] = useState<Enroll | null>(null);
   const [code, setCode] = useState("");
   const [useBackup, setUseBackup] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -23,10 +27,10 @@ export function LoginView() {
     e.preventDefault();
     if (hp) return;
     setErr(null); setBusy(true);
-    const res = await api<{ needs2fa?: boolean }>("/api/auth/login", { body: { email, password: pw } });
+    const res = await api<{ needs2fa?: boolean; enrollment?: Enroll }>("/api/auth/login", { body: { email, password: pw } });
     setBusy(false);
     if (res.ok) {
-      if (res.needs2fa) setNeeds2fa(true);
+      if (res.needs2fa) { setNeeds2fa(true); setEnroll(res.enrollment || null); }
       else {
         await refreshBoot();
         toast("Accesso riuscito. Benvenuto su ZoomZoom.");
@@ -59,6 +63,14 @@ export function LoginView() {
         {needs2fa ? (
           <>
             <Alert kind="info">Inserisci il codice temporaneo a 6 cifre dalla tua app di autenticazione (Google Authenticator, Aegis, 1Password…).</Alert>
+            {enroll && !useBackup ? (
+              <div className="card card-pad-s mb2" style={{ textAlign: "center" }}>
+                <p className="small mb1"><b>Prima configurazione — mostrata solo adesso.</b></p>
+                <img src={enroll.qr} alt="QR code da inquadrare con l'app di autenticazione per aggiungere l'account" width={200} height={200} style={{ display: "block", margin: "0 auto 8px" }} />
+                <p className="small muted">Se non puoi inquadrare il QR, aggiungi la chiave a mano nell&apos;app (inserimento manuale, codice base32):</p>
+                <p className="mono small" style={{ wordBreak: "break-all", background: "var(--paper)", padding: 8, borderRadius: 6 }}>{enroll.secret}</p>
+              </div>
+            ) : null}
             <form onSubmit={step2}>
               <div className="field">
                 <label htmlFor="l2-code">{useBackup ? "Codice di backup" : "Codice 2FA"}</label>

@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { requireUser } from "@/lib/server/auth";
 import { generateTotpSecret, otpauthUri } from "@/lib/server/totp";
 import { encryptSecret } from "@/lib/server/crypto";
+import { totpEnrollment } from "@/lib/server/qr";
 import { getSettings } from "@/lib/server/settings";
 import { guard, handleError, fail } from "@/lib/server/http";
 
@@ -19,7 +20,9 @@ export async function POST(req: Request) {
     // segreto "in attesa" cifrato e non attivo: si attiva con /2fa/enable
     await db.user.update({ where: { id: user.id }, data: { pendingTotpSecretEnc: encryptSecret(secret) } });
     const settings = await getSettings();
-    return NextResponse.json({ ok: true, secret, otpauth: otpauthUri(secret, user.email, settings.siteName) });
+    // QR (data URL PNG) + URI testuale: entrambi mostrati una sola volta
+    const enrollment = await totpEnrollment(secret, user.email, settings.siteName);
+    return NextResponse.json({ ok: true, secret, otpauth: otpauthUri(secret, user.email, settings.siteName), qr: enrollment.qr });
   } catch (e) {
     return handleError(e);
   }

@@ -170,6 +170,7 @@ export function ProfileSettingsView() {
   const [totpStep, setTotpStep] = useState<"idle" | "pending" | "done">("idle");
   const [totpSecret, setTotpSecret] = useState("");
   const [otpauth, setOtpauth] = useState("");
+  const [totpQr, setTotpQr] = useState("");
   const [totpCode, setTotpCode] = useState("");
   const [backupCodes, setBackupCodes] = useState<string[] | null>(null);
   const [disableCode, setDisableCode] = useState("");
@@ -250,10 +251,13 @@ export function ProfileSettingsView() {
         ) : totpStep === "pending" ? (
           <>
             <Alert kind="info"><b>Passaggio 2 di 2.</b> Aggiungi la chiave alla tua app (Google Authenticator, Aegis, 1Password…) e inserisci il codice generato.</Alert>
-            <div className="card card-pad-s mb2">
+            <div className="card card-pad-s mb2" style={{ textAlign: "center" }}>
+              {totpQr ? (
+                <img src={totpQr} alt="QR code da inquadrare con l'app di autenticazione per aggiungere l'account" width={200} height={200} style={{ display: "block", margin: "0 auto 8px" }} />
+              ) : null}
               <p className="small mb1"><b>Chiave segreta (inserimento manuale):</b></p>
               <p className="mono" style={{ wordBreak: "break-all", background: "var(--paper)", padding: 8, borderRadius: 6 }}>{totpSecret}</p>
-              <p className="small mb1 mt2"><b>URI per le app (equivalente del QR code):</b></p>
+              <p className="small mb1 mt2"><b>URI per le app (alternativa testuale al QR):</b></p>
               <p className="mono small" style={{ wordBreak: "break-all", background: "var(--paper)", padding: 8, borderRadius: 6 }}>{otpauth}</p>
             </div>
             <form onSubmit={async e => {
@@ -290,8 +294,8 @@ export function ProfileSettingsView() {
           <>
             <Alert kind="warn"><b>2FA non attiva.</b> Aggiungi un secondo fattore con un&apos;app di codici temporanei (TOTP): rende molto più difficile l&apos;uso indebito del tuo account.</Alert>
             <button className="btn btn-primary" onClick={async () => {
-              const res = await api<{ secret: string; otpauth: string }>("/api/auth/2fa/start", { body: {} });
-              if (res.ok) { setTotpSecret(res.secret); setOtpauth(res.otpauth); setTotpStep("pending"); }
+              const res = await api<{ secret: string; otpauth: string; qr?: string }>("/api/auth/2fa/start", { body: {} });
+              if (res.ok) { setTotpSecret(res.secret); setOtpauth(res.otpauth); setTotpQr(res.qr || ""); setTotpStep("pending"); }
               else toast(res.error, "err");
             }}>Attiva la 2FA (app di autenticazione)</button>
           </>

@@ -5,6 +5,10 @@ import { cookies } from "next/headers";
 import { db } from "@/lib/db";
 import { randomToken, sha256 } from "./crypto";
 import { securityLog } from "./audit";
+import { getSettings } from "./settings";
+import type { TotpEnrollment } from "./qr";
+
+export type { TotpEnrollment };
 
 export type Role = "user" | "moderator" | "admin" | "superadmin";
 export const ROLE_LABELS: Record<Role, string> = {
@@ -123,8 +127,21 @@ export class AuthError extends Error {
 
 export type LoginResult =
   | { ok: true }
-  | { needs2fa: true }
+  | { needs2fa: true; enrollment?: TotpEnrollment }
   | { error: "invalid" | "locked" | "disabled" | "staffOnly" };
+
+/** QR di prima configurazione 2FA: costruito SOLO dopo verifica della password
+ *  e SOLO se l'utente non ha mai completato un accesso con codice (bootstrap). */
+async function firstLoginEnrollment(email: string, totpSecretEnc: string, area: "pubblica" | "amministrativa", isDemo: boolean): Promise<TotpEnrollment> {
+  const { decryptTotpSecret } = await import("./totp");
+  const { totpEnrollment } = await import("./qr");
+  const settings = await getSettings();
+  const secret = decryptTotpSecret(totpSecretEnc);
+  const enrollment = await totpEnrollment(secret, email, settings.siteName);
+  // tracciatura senza mai loggare il segreto
+  await securityLog("totp_enroll_qr_shown", "info", `QR di prima configurazione 2FA mostrato sull'area ${area} a ${email} (password già verificata).`, isDemo);
+  return enrollment;
+}
 
 export async function publicLogin(email: string, password: string, clientIp: string): Promise<LoginResult> {
   const em = String(email || "").trim().toLowerCase();
@@ -156,7 +173,14 @@ export async function publicLogin(email: string, password: string, clientIp: str
   if (u.disabled) return { error: "disabled" };
   if (["moderator", "admin", "superadmin"].includes(u.role)) return { error: "staffOnly" };
   await db.user.update({ where: { id: u.id }, data: { failedLogins: 0, lockedUntil: null } });
-  if (u.totpEnabled) return { needs2fa: true };
+  if (u.totpEnabled) {
+    // primo accesso 2FA mai completato: una sola volta, dopo la verifica
+    // della password, il passo 2FA include il QR per registrare l'app
+    if (!u.firstTotpLoginAt && u.totpSecretEnc) {
+      return { needs2fa: true, enrollment: await firstLoginEnrollment(u.email, u.totpSecretEnc, "pubblica", isDemo) };
+    }
+    return { needs2fa: true };
+  }
   await createSession(u.id, "public");
   return { ok: true };
 }
@@ -175,14 +199,18 @@ export async function publicLoginSecondFactor(email: string, password: string, c
     await securityLog("totp_failed", "warn", `Codice 2FA errato per ${u.email}.`, process.env.DEMO_MODE === "true");
     return { error: "invalid" };
   }
-  await db.user.update({ where: { id: u.id }, data: { failedLogins: 0, lockedUntil: null } });
+  // primo accesso 2FA riuscito: da qui in poi il QR non viene più mostrato
+  await db.user.update({
+    where: { id: u.id },
+    data: { failedLogins: 0, lockedUntil: null, ...(u.firstTotpLoginAt ? {} : { firstTotpLoginAt: new Date() }) },
+  });
   await createSession(u.id, "public");
   return { ok: true };
 }
 
 /* ---------- Login area amministrativa: password + TOTP obbligatori ---------- */
 
-export async function adminLogin(email: string, password: string, code: string): Promise<{ ok: boolean; error?: string }> {
+export async function adminLogin(email: string, password: string, code: string): Promise<{ ok: boolean; error?: string; enrollment?: TotpEnrollment }> {
   const em = String(email || "").trim().toLowerCase();
   const isDemo = process.env.DEMO_MODE === "true";
   const u = await db.user.findUnique({ where: { email: em } });
@@ -210,12 +238,23 @@ export async function adminLogin(email: string, password: string, code: string):
   if (!["moderator", "admin", "superadmin"].includes(u.role)) return { ok: false, error: "notStaff" };
   // 2FA obbligatoria per lo staff
   if (!u.totpEnabled || !u.totpSecretEnc) return { ok: false, error: "totpMissing" };
+  const codeClean = String(code || "").replace(/\s/g, "");
   const { verifyTotp, decryptTotpSecret } = await import("./totp");
-  if (!verifyTotp(decryptTotpSecret(u.totpSecretEnc), String(code || ""))) {
+  if (!verifyTotp(decryptTotpSecret(u.totpSecretEnc), codeClean)) {
+    // primo accesso 2FA mai completato (es. account demo o migrazioni):
+    // la password è già verificata, quindi si può mostrare UNA sola volta
+    // il QR per registrare l'app, senza contarlo come tentativo fallito
+    if (!u.firstTotpLoginAt) {
+      return { ok: false, error: codeClean ? "totp" : "totpEmpty", enrollment: await firstLoginEnrollment(u.email, u.totpSecretEnc, "amministrativa", isDemo) };
+    }
     await securityLog("admin_login_failed", "warn", `Accesso amministrativo negato (credenziali o 2FA non validi) per ${u.email}.`, isDemo);
-    return { ok: false, error: "totp" };
+    return { ok: false, error: codeClean ? "totp" : "totpEmpty" };
   }
-  await db.user.update({ where: { id: u.id }, data: { failedLogins: 0, lockedUntil: null } });
+  // primo accesso 2FA riuscito: da qui in poi il QR non viene più mostrato
+  await db.user.update({
+    where: { id: u.id },
+    data: { failedLogins: 0, lockedUntil: null, ...(u.firstTotpLoginAt ? {} : { firstTotpLoginAt: new Date() }) },
+  });
   await createSession(u.id, "admin");
   await securityLog("admin_login_ok", "info", `Accesso all'area amministrativa riuscito con 2FA (${u.email}).`, isDemo);
   return { ok: true };

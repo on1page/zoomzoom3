@@ -27,6 +27,9 @@ const SECTIONS: Array<[string, string, string | null, string | null]> = [
 ];
 
 /* ---------- Login admin ---------- */
+// QR di prima configurazione 2FA (forma della risposta del server)
+type Enroll = { otpauth: string; qr: string; secret: string };
+
 export function AdminLoginView() {
   const { toast } = useApp();
   const [email, setEmail] = useState("");
@@ -35,6 +38,7 @@ export function AdminLoginView() {
   const [hp, setHp] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [field, setField] = useState<string | null>(null);
+  const [enroll, setEnroll] = useState<Enroll | null>(null);
   const [busy, setBusy] = useState(false);
   return (
     <div className="container section" style={{ maxWidth: 560 }}>
@@ -45,7 +49,7 @@ export function AdminLoginView() {
           e.preventDefault();
           if (hp) return;
           setErr(null); setField(null); setBusy(true);
-          const res = await api<{ field?: string }>("/api/admin/login", { body: { email, password: pw, code, hp } });
+          const res = await api<{ field?: string; enrollment?: Enroll }>("/api/admin/login", { body: { email, password: pw, code, hp } });
           setBusy(false);
           if (res.ok) {
             toast("Accesso amministrativo riuscito.");
@@ -53,6 +57,9 @@ export function AdminLoginView() {
           } else {
             setErr(res.error);
             setField((res as { field?: string }).field || null);
+            // il QR arriva solo se la password era valida e il primo accesso
+            // 2FA non è mai stato completato; altrimenti viene nascosto
+            setEnroll((res as { enrollment?: Enroll }).enrollment || null);
           }
         }}>
           <div className="field">
@@ -66,12 +73,21 @@ export function AdminLoginView() {
           </div>
           <div className="field">
             <label htmlFor="a-totp">Codice 2FA (app autenticazione)</label>
-            <input id="a-totp" inputMode="numeric" maxLength={6} required value={code}
+            <input id="a-totp" inputMode="numeric" maxLength={6} value={code}
               onChange={e => setCode(e.target.value)} placeholder="000000"
               style={{ letterSpacing: "3px", textAlign: "center", fontSize: "1.1rem" }} />
+            <span className="hint">Primo accesso con questo account? Lascia vuoto il campo: dopo il controllo della password comparirà il QR da inquadrare con l&apos;app.</span>
             {err && field === "totp" ? <span className="error-msg" style={{ display: "block" }}>{err}</span> : null}
             {err && !field ? <span className="error-msg" style={{ display: "block" }}>{err}</span> : null}
           </div>
+          {enroll ? (
+            <div className="card card-pad-s mb2" style={{ textAlign: "center" }}>
+              <p className="small mb1"><b>Prima configurazione — mostrata solo adesso.</b></p>
+              <img src={enroll.qr} alt="QR code da inquadrare con l'app di autenticazione per aggiungere l'account" width={200} height={200} style={{ display: "block", margin: "0 auto 8px" }} />
+              <p className="small muted">Se non puoi inquadrare il QR, aggiungi la chiave a mano nell&apos;app (inserimento manuale, codice base32):</p>
+              <p className="mono small" style={{ wordBreak: "break-all", background: "var(--paper)", padding: 8, borderRadius: 6 }}>{enroll.secret}</p>
+            </div>
+          ) : null}
           <div className="hp-field"><label htmlFor="a-hp">Non compilare</label><input id="a-hp" tabIndex={-1} autoComplete="off" value={hp} onChange={e => setHp(e.target.value)} /></div>
           <button className="btn btn-primary btn-block" type="submit" disabled={busy}>Accedi all&apos;area riservata</button>
         </form>

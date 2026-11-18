@@ -22,7 +22,13 @@ export async function POST(req: Request) {
     await db.$transaction([
       db.user.update({
         where: { id: user.id },
-        data: { totpSecretEnc: u.pendingTotpSecretEnc, totpEnabled: true, pendingTotpSecretEnc: null },
+        data: {
+          totpSecretEnc: u.pendingTotpSecretEnc,
+          totpEnabled: true,
+          pendingTotpSecretEnc: null,
+          // il primo fattore è già attivo e provato: il QR non serve più al login
+          ...(u.firstTotpLoginAt ? {} : { firstTotpLoginAt: new Date() }),
+        },
       }),
       db.backupCode.deleteMany({ where: { userId: user.id } }),
       db.backupCode.createMany({ data: codes.map(c => ({ userId: user.id, codeHash: sha256(c) })) }),

@@ -1,0 +1,88 @@
+ZoomZoom — Aggiornamento: QR code 2FA al primo accesso
+========================================================
+
+Cosa fa questo aggiornamento
+----------------------------
+Al primo accesso con un account che ha la 2FA attiva ma non ha MAI completato
+un login con il codice (è il caso degli account demo creati dal seed), il
+form di login mostra il QR code da inquadrare con l'app di autenticazione
+(Google Authenticator, Aegis, 2FAS, 1Password…), insieme alla chiave base32
+per l'inserimento manuale.
+
+Sicurezza (importante):
+- il QR NON compare nella schermata pubblica: viene restituito SOLO dopo che
+  la password è stata verificata dal server;
+- compare UNA sola volta: dopo il primo login riuscito con il codice viene
+  memorizzata la data (campo firstTotpLoginAt) e non viene più mostrato;
+- ogni volta che il QR viene mostrato viene scritto un evento nel registro
+  di sicurezza ("totp_enroll_qr_shown"), senza mai loggare il segreto;
+- con password errata non viene rivelato nulla.
+
+Dove compare il QR:
+1. Area amministrativa (/#/admin): inserisci email e password, lascia VUOTO
+   il campo "Codice 2FA" e premi Accedi -> compare il QR; inquadrilo, attendi
+   un codice a 6 cifre, inseriscilo e ripremi Accedi.
+2. Login pubblico (/#/accedi), passo "Codice 2FA": stesso comportamento per
+   gli utenti che hanno la 2FA attiva ma non hanno mai completato l'accesso.
+3. Attivazione 2FA nel profilo: ora mostra anche il QR (prima c'era solo
+   l'URI testuale, che resta come alternativa).
+
+File modificati
+---------------
+prisma/schema.prisma                    (nuovo campo User.firstTotpLoginAt — versione PostgreSQL con directUrl, identica alla tua)
+src/lib/server/qr.ts                    (NUOVO — generazione QR server-side)
+src/lib/server/auth.ts                  (QR al primo accesso + flag al login riuscito)
+src/app/api/auth/login/route.ts         (risposta con enrollment al passo 2FA)
+src/app/api/admin/login/route.ts        (QR al primo accesso amministrativo)
+src/app/api/auth/2fa/start/route.ts     (QR anche nell'attivazione dal profilo)
+src/app/api/auth/2fa/enable/route.ts    (segna il primo accesso come completato)
+src/components/views/auth.tsx           (pannello QR nel passo 2FA)
+src/components/views/profile.tsx        (immagine QR nell'attivazione)
+src/components/admin/admin.tsx          (pannello QR + hint nel login admin)
+
+Installazione
+-------------
+1) Ferma il server di sviluppo (Ctrl+C).
+
+2) Copia i file di questo pacchetto dentro la cartella del progetto
+   (C:\Users\Carlo\sito\zoomzoom), mantenendo i percorsi. Da PowerShell,
+   dopo aver estratto lo zip in una cartella temporanea:
+
+       Copy-Item -Recurse -Force "C:\percorso\estratto\prisma" "C:\Users\Carlo\sito\zoomzoom\"
+       Copy-Item -Recurse -Force "C:\percorso\estratto\src" "C:\Users\Carlo\sito\zoomzoom\"
+
+   (Copy-Item sovrascrive i file esistenti con lo stesso nome.)
+
+3) Installa la nuova dipendenza (generazione QR lato server):
+
+       cd C:\Users\Carlo\sito\zoomzoom
+       bun add qrcode
+       bun add -d @types/qrcode
+
+4) Applica la modifica al database (aggiunge la colonna nullable
+   firstTotpLoginAt alla tabella User: operazione additiva, NON cancella
+   nessun dato):
+
+       bun run db:push
+
+5) Riavvia in locale e ripubblica il sito:
+
+       bun run dev
+
+6) Sul sito pubblicato: entra in /#/admin con superadmin@esempio.test,
+   lascia vuoto il codice 2FA e premi Accedi -> compare il QR.
+
+Note
+----
+- Il file prisma/schema.prisma di questo pacchetto è la versione PostgreSQL
+  (con url + directUrl come la tua): sostituisce integralmente il tuo.
+- Gli account demo moderatore/admin/superadmin non hanno mai completato il
+  login 2FA: al primo accesso vedrai il QR per ciascuno di essi. L'utente
+  normale (utente@esempio.test) non ha la 2FA attiva e non è coinvolto.
+- Se un account ha già l'app configurata (segreto in demo-credentials.json),
+  il QR contiene esattamente quel segreto: inquadrarlo su un telefono nuovo
+  è equivalente all'inserimento manuale della chiave.
+- Verificato: TypeScript senza errori sui file modificati; flusso completo
+  testato end-to-end (QR -> scansione -> codice -> accesso; QR non più
+  mostrato dal secondo accesso; nessuna rivelazione con password errata;
+  rate limit e lockout intatti).
