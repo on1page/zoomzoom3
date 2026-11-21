@@ -50,7 +50,7 @@ const CAT_SEED: Array<Omit<CategoryDef, "criteria" | "experienceKinds" | "priceU
   },
   {
     id: "zona", name: "Zone e aree geografiche", shortName: "Zone", hexColor: "#4E7D5B", icon: "zona",
-    description: "Quartieri e aree della città: servizi, trasporti, sicurezza percepita e qualità della vita quotidiana.",
+    description: "Città e zone del territorio italiano: servizi, trasporti, sicurezza percepita e qualità della vita quotidiana.",
     isPerson: false, isMapped: true,
     criteria: [
       { key: "servizi", label: "Servizi alla persona e vivibilità" },

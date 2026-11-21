@@ -1,6 +1,7 @@
-// ZoomZoom — seed dei dati dimostrativi (Valserrana, città fittizia).
-// TUTTI i contenuti sono fittizi e marcati isDemo=true. Il seed è idempotente:
-// ricrea da zero solo i dati demo, senza toccare dati "reali".
+// ZoomZoom — seed dei dati dimostrativi (città italiane reali, contenuti fittizi).
+// Le zone corrispondono a città reali con coordinate GPS reali, per una mappa
+// fedele al territorio italiano; TUTTI i contenuti restano fittizi e isDemo=true.
+// Il seed è idempotente: ricrea da zero solo i dati demo, senza toccare dati "reali".
 // Uso: bun scripts/seed.ts
 import { PrismaClient } from "@prisma/client";
 import { randomBytes, createHash } from "crypto";
@@ -32,13 +33,21 @@ function mulberry32(seed: number) {
 const rndPick = <T>(r: () => number, arr: T[]): T => arr[Math.floor(r() * arr.length)];
 const rndInt = (r: () => number, a: number, b: number) => a + Math.floor(r() * (b - a + 1));
 
+// Città reali distribuite su tutto il territorio italiano (coordinate WGS84
+// dei centri storici). Coprono Nord-Ovest, Nord-Est, Centro, Sud e Isole.
 const ZONES = [
-  { id: "centro", name: "Centro Storico", poly: "300,200 470,190 500,290 460,370 320,360", lx: 430, ly: 240, gpsLat: 45.318, gpsLng: 9.542 },
-  { id: "borgo", name: "Borgo Fiume", poly: "520,330 700,320 740,420 560,430", lx: 630, ly: 355, gpsLat: 45.310, gpsLng: 9.565 },
-  { id: "tigli", name: "Quartiere dei Tigli", poly: "560,120 800,100 840,230 600,240", lx: 770, ly: 150, gpsLat: 45.328, gpsLng: 9.572 },
-  { id: "stazione", name: "Zona Stazione", poly: "180,380 360,370 400,480 220,510", lx: 290, ly: 480, gpsLat: 45.308, gpsLng: 9.535 },
-  { id: "collina", name: "Collina dei Ciliegi", poly: "830,80 980,90 980,260 850,230", lx: 905, ly: 215, gpsLat: 45.335, gpsLng: 9.588 },
-  { id: "parco", name: "Parco Sud", poly: "430,500 660,480 700,590 470,610", lx: 565, ly: 545, gpsLat: 45.298, gpsLng: 9.552 },
+  { id: "torino", name: "Torino", lat: 45.0703, lng: 7.6869, radius: 4000 },
+  { id: "milano", name: "Milano", lat: 45.4642, lng: 9.1900, radius: 4000 },
+  { id: "genova", name: "Genova", lat: 44.4056, lng: 8.9463, radius: 3000 },
+  { id: "venezia", name: "Venezia", lat: 45.4408, lng: 12.3155, radius: 3000 },
+  { id: "bologna", name: "Bologna", lat: 44.4949, lng: 11.3426, radius: 3000 },
+  { id: "firenze", name: "Firenze", lat: 43.7696, lng: 11.2558, radius: 3000 },
+  { id: "roma", name: "Roma", lat: 41.9028, lng: 12.4964, radius: 5000 },
+  { id: "napoli", name: "Napoli", lat: 40.8518, lng: 14.2681, radius: 4000 },
+  { id: "bari", name: "Bari", lat: 41.1171, lng: 16.8719, radius: 3000 },
+  { id: "reggio-calabria", name: "Reggio Calabria", lat: 38.1113, lng: 15.6470, radius: 3000 },
+  { id: "palermo", name: "Palermo", lat: 38.1157, lng: 13.3615, radius: 4000 },
+  { id: "cagliari", name: "Cagliari", lat: 39.2238, lng: 9.1217, radius: 3000 },
 ];
 
 // Tipi di esperienza e unità prezzo (copia locale delle costanti applicative,
@@ -135,8 +144,10 @@ const PRICE_HINTS: Record<string, [number, number, string]> = {
 const TARGETS: Array<[string, number, number]> = [
   ["ent_i_rondini", 5, 7.8], ["ent_i_girasole", 3, 6.4], ["ent_i_tigli8", 4, 8.2],
   ["ent_i_dazio", 2, 5.5], ["ent_i_fiume", 3, 8.6], ["ent_i_ciliegio", 1, 9.0],
-  ["ent_z_centro", 12, 7.9], ["ent_z_borgo", 6, 8.1], ["ent_z_tigli", 8, 7.2],
-  ["ent_z_stazione", 7, 5.9], ["ent_z_collina", 4, 7.5], ["ent_z_parco", 5, 6.8],
+  ["ent_z_milano", 12, 7.9], ["ent_z_roma", 11, 7.1], ["ent_z_napoli", 9, 6.3],
+  ["ent_z_torino", 8, 7.5], ["ent_z_bologna", 7, 6.8], ["ent_z_palermo", 6, 5.9],
+  ["ent_z_firenze", 5, 8.1], ["ent_z_venezia", 4, 7.2], ["ent_z_bari", 4, 6.5],
+  ["ent_z_genova", 3, 5.6], ["ent_z_cagliari", 2, 7.0],
   ["ent_p_gm", 4, 8.3], ["ent_p_lb", 2, 4.5], ["ent_p_rt", 3, 6.0],
   ["ent_a_mc", 2, 8.5], ["ent_a_sd", 1, 5.0],
   ["ent_am_sereni", 9, 8.7], ["ent_am_ferretti", 4, 5.2], ["ent_am_gcv", 3, 6.8],
@@ -151,14 +162,14 @@ function daysAgoIso(days: number): string {
 }
 
 async function main() {
-  console.log("Seed dati demo ZoomZoom (Valserrana, tutti contenuti fittizi)…");
+  console.log("Seed dati demo ZoomZoom (città italiane reali, contenuti tutti fittizi)…");
   const t0 = Date.now();
 
   // 0) Categorie (se assenti) — replica ensureCategoriesSeeded senza dipendenze
   const CAT_SEED: Array<{ id: string; name: string; shortName: string; description: string; hexColor: string; icon: string; isPerson: boolean; isMapped: boolean; criteria: Array<{ key: string; label: string }> }> = [
     { id: "immobile", name: "Immobili e indirizzi", shortName: "Immobili", description: "Appartamenti, case e singoli indirizzi: stato reale, gestione e vivibilità, raccontati da chi ci ha vissuto.", hexColor: "#33658A", icon: "immobile", isPerson: false, isMapped: true, criteria: [
       { key: "stato", label: "Stato di manutenzione" }, { key: "descrizione", label: "Corrispondenza con la descrizione ricevuta" }, { key: "spazi", label: "Qualità degli spazi e luce naturale" }, { key: "rumori", label: "Rumori e rapporti di vicinato" }, { key: "impianti", label: "Impianti, riscaldamento ed efficienza" }, { key: "rapporto", label: "Rapporto qualità-prezzo" }] },
-    { id: "zona", name: "Zone e aree geografiche", shortName: "Zone", description: "Quartieri e aree della città: servizi, trasporti, sicurezza percepita e qualità della vita quotidiana.", hexColor: "#4E7D5B", icon: "zona", isPerson: false, isMapped: true, criteria: [
+    { id: "zona", name: "Zone e aree geografiche", shortName: "Zone", description: "Città e zone del territorio italiano: servizi, trasporti, sicurezza percepita e qualità della vita quotidiana.", hexColor: "#4E7D5B", icon: "zona", isPerson: false, isMapped: true, criteria: [
       { key: "servizi", label: "Servizi alla persona e vivibilità" }, { key: "trasporti", label: "Trasporti e mobilità" }, { key: "sicurezza", label: "Sicurezza percepita" }, { key: "verde", label: "Verde, aria e ambiente" }, { key: "costi", label: "Costi della vita nella zona" }] },
     { id: "proprietario", name: "Proprietari", shortName: "Proprietari", description: "Il rapporto con chi affitta o gestisce un immobile: contratto, trasparenza, manutenzione e rispetto.", hexColor: "#6E5E93", icon: "proprietario", isPerson: true, isMapped: false, criteria: [
       { key: "contratto", label: "Chiarezza del contratto e trasparenza" }, { key: "risposta", label: "Disponibilità e tempi di risposta" }, { key: "manutenzione", label: "Gestione di guasti e manutenzione" }, { key: "deposito", label: "Correttezza sul deposito cauzionale" }, { key: "privacy", label: "Rispetto della privacy e degli spazi" }, { key: "rapporto", label: "Rapporto qualità-prezzo" }] },
@@ -211,10 +222,12 @@ async function main() {
     await db.user.deleteMany({ where: { id: { in: demoUserIds } } });
   }
 
-  // 2) Zone fittizie
+  // 2) Zone: città reali (coordinate vere, contenuti dimostrativi)
   for (const z of ZONES) {
-    await db.zone.create({ data: { id: z.id, name: z.name, poly: z.poly, labelX: z.lx, labelY: z.ly, gpsLat: z.gpsLat, gpsLng: z.gpsLng, isDemo: true } });
+    await db.zone.create({ data: { id: z.id, name: z.name, gpsLat: z.lat, gpsLng: z.lng, radiusM: z.radius, isDemo: true } });
   }
+  // la descrizione della categoria "zona" viene allineata alla copertura nazionale
+  await db.category.update({ where: { id: "zona" }, data: { description: "Città e zone del territorio italiano: servizi, trasporti, sicurezza percepita e qualità della vita quotidiana." } });
 
   // 3) Utenti demo (staff con TOTP; credenziali salvate in demo-credentials.json, mai nel front-end)
   const credentials: Record<string, { password: string; totpSecret?: string }> = {};
@@ -245,7 +258,7 @@ async function main() {
   await mkUser("admin@esempio.test", "Amministrazione ZoomZoom", "admin", { totp: totpB });
   await mkUser("superadmin@esempio.test", "Super Amministrazione", "superadmin", { totp: totpC });
 
-  const NICKS = ["MarcoT_79","GiuliaF","Luca_e_Sara","CasaPerDue","GeometraCurioso","MartaB","FerroVie","NuovaCasa2026","AnnaPaola","DavideG88","SoleQuarto","TreFiglie","Camilla_R","VivoInZonaStazione","PaoloM1962","LeGiare","Roberta_C","DueBambini","AbitoAlBorgo","SergioETania","Primacasa_VS","MicolF"];
+  const NICKS = ["MarcoT_79","GiuliaF","Luca_e_Sara","CasaPerDue","GeometraCurioso","MartaB","FerroVie","NuovaCasa2026","AnnaPaola","DavideG88","SoleQuarto","TreFiglie","Camilla_R","VivoInQuartiere","PaoloM1962","LeGiare","Roberta_C","DueBambini","AbitoInCentro","SergioETania","PrimaCasa","MicolF"];
   const reviewers = [];
   for (let i = 0; i < NICKS.length; i++) {
     reviewers.push(await mkUser(`recensione${i + 1}@esempio.test`, NICKS[i], "user", {}));
@@ -265,12 +278,12 @@ async function main() {
   console.log("Zone e categorie pronte.", Date.now() - t0, "ms");
 
   // 5) Entità (id fissi per coerenza con i PRICE_HINTS)
-  async function mkEnt(id: string, catId: string, name: string, subtitle: string, zoneId: string, opts: { address?: string; geo?: [number, number]; initials?: boolean; business?: boolean; owner?: string } = {}) {
+  async function mkEnt(id: string, catId: string, name: string, subtitle: string, zoneId: string, opts: { address?: string; geo?: { lat: number; lng: number }; initials?: boolean; business?: boolean; owner?: string } = {}) {
     return db.entity.create({
       data: {
         id, categoryId: catId, name, subtitle, zoneId,
         address: opts.address || null,
-        geoX: opts.geo ? opts.geo[0] : null, geoY: opts.geo ? opts.geo[1] : null,
+        geoLat: opts.geo ? opts.geo.lat : null, geoLng: opts.geo ? opts.geo.lng : null,
         initialsOnly: !!opts.initials, verifiedBusiness: !!opts.business,
         ownerUserId: opts.owner || null,
         status: "published", proposedBy: "seed",
@@ -279,29 +292,29 @@ async function main() {
     });
   }
   for (const z of ZONES) {
-    await mkEnt("ent_z_" + z.id, "zona", z.name, "Zona di Valserrana (città fittizia)", z.id);
+    await mkEnt("ent_z_" + z.id, "zona", z.name, "Città reale — contenuti dimostrativi", z.id);
   }
-  await mkEnt("ent_i_rondini", "immobile", "Palazzo delle Rondini", "Edificio residenziale", "centro", { address: "Via del Filatoio 14, Valserrana", geo: [395, 300] });
-  await mkEnt("ent_i_girasole", "immobile", "Casa Girasole", "Appartamento", "centro", { address: "Vicolo dei Beccai 3, Valserrana", geo: [350, 255] });
-  await mkEnt("ent_i_tigli8", "immobile", "Residenza I Tigli 8", "Condominio residenziale", "tigli", { address: "Viale dei Tigli 8, Valserrana", geo: [680, 190] });
-  await mkEnt("ent_i_dazio", "immobile", "Casa del Dazio", "Appartamento", "stazione", { address: "Piazza del Dazio 2, Valserrana", geo: [300, 440] });
-  await mkEnt("ent_i_fiume", "immobile", "Casa sul Fiume", "Appartamento con vista", "borgo", { address: "Lungofiume Altino 21, Valserrana", geo: [640, 395] });
-  await mkEnt("ent_i_ciliegio", "immobile", "Villa Ciliegio", "Villa unifamiliare", "collina", { address: "Via dei Ciliegi 45, Valserrana", geo: [895, 170] });
-  await mkEnt("ent_p_gm", "proprietario", "G. M.", "Proprietario di immobili in affitto — Centro Storico", "centro", { initials: true });
-  await mkEnt("ent_p_lb", "proprietario", "L. B.", "Proprietario di immobili in affitto — Borgo Fiume", "borgo", { initials: true });
-  await mkEnt("ent_p_rt", "proprietario", "R. T.", "Proprietario di immobili in affitto — Quartiere dei Tigli", "tigli", { initials: true });
-  await mkEnt("ent_a_mc", "affittuario", "M. C.", "Affittuario — Centro Storico", "centro", { initials: true });
-  await mkEnt("ent_a_sd", "affittuario", "S. D.", "Affittuario — Zona Stazione", "stazione", { initials: true });
-  await mkEnt("ent_am_sereni", "amministratore", "Condomini Sereni", "Studio di amministrazione condominiale", "centro", { address: "Via del Filatoio 30, Valserrana" });
-  await mkEnt("ent_am_ferretti", "amministratore", "Studio Ferretti Condomini", "Amministrazione condominiale", "stazione", { address: "Piazza della Stazione 8, Valserrana" });
-  await mkEnt("ent_am_gcv", "amministratore", "Gestioni Condominiali Valserrana", "Amministrazione condominiale", "borgo", { address: "Via degli Orti 12, Valserrana" });
-  await mkEnt("ent_ag_portico", "agenzia", "Il Portico Immobiliare", "Agenzia di intermediazione (account verificato)", "centro", { address: "Piazza del Mercato 4, Valserrana", business: true, owner: uAgenzia.id });
-  await mkEnt("ent_ag_casanova", "agenzia", "Casa Nova Studio Immobiliare", "Agenzia di intermediazione", "tigli", { address: "Viale dei Tigli 22, Valserrana" });
-  await mkEnt("ent_ag_chiavi", "agenzia", "Le Chiavi Bianche", "Agenzia di intermediazione", "stazione", { address: "Via della Croce 7, Valserrana" });
-  await mkEnt("ent_d_valli", "ditta", "Impresa Edile Fratelli Valli", "Lavori edili e ristrutturazioni", "borgo", { address: "Via dei Mugnai 9, Valserrana" });
-  await mkEnt("ent_d_pezzoli", "ditta", "Geom. Pezzoli — Perizie e catasto", "Professionista tecnico", "centro", { address: "Via del Filatoio 2, Valserrana" });
-  await mkEnt("ent_d_fiamma", "ditta", "Fiamma Blu Impianti", "Impianti idraulici e termici", "tigli", { address: "Via dei Platani 18, Valserrana" });
-  await mkEnt("ent_d_grillo", "ditta", "Il Grillo — Traslochi e piccoli lavori", "Traslochi e manutenzione leggera", "stazione", { address: "Via Aldo Moro 3, Valserrana" });
+  await mkEnt("ent_i_rondini", "immobile", "Palazzo delle Rondini", "Edificio residenziale", "milano", { address: "Via del Filatoio 14, Milano", geo: { lat: 45.4658, lng: 9.1880 } });
+  await mkEnt("ent_i_girasole", "immobile", "Casa Girasole", "Appartamento", "roma", { address: "Vicolo dei Beccai 3, Roma", geo: { lat: 41.8953, lng: 12.4832 } });
+  await mkEnt("ent_i_tigli8", "immobile", "Residenza I Tigli 8", "Condominio residenziale", "torino", { address: "Viale dei Tigli 8, Torino", geo: { lat: 45.0677, lng: 7.6834 } });
+  await mkEnt("ent_i_dazio", "immobile", "Casa del Dazio", "Appartamento", "napoli", { address: "Piazza del Dazio 2, Napoli", geo: { lat: 40.8530, lng: 14.2652 } });
+  await mkEnt("ent_i_fiume", "immobile", "Casa sul Fiume", "Appartamento con vista", "bologna", { address: "Lungofiume Altino 21, Bologna", geo: { lat: 44.4931, lng: 11.3390 } });
+  await mkEnt("ent_i_ciliegio", "immobile", "Villa Ciliegio", "Villa unifamiliare", "firenze", { address: "Via dei Ciliegi 45, Firenze", geo: { lat: 43.7702, lng: 11.2570 } });
+  await mkEnt("ent_p_gm", "proprietario", "G. M.", "Proprietario di immobili in affitto — Milano", "milano", { initials: true });
+  await mkEnt("ent_p_lb", "proprietario", "L. B.", "Proprietario di immobili in affitto — Bologna", "bologna", { initials: true });
+  await mkEnt("ent_p_rt", "proprietario", "R. T.", "Proprietario di immobili in affitto — Torino", "torino", { initials: true });
+  await mkEnt("ent_a_mc", "affittuario", "M. C.", "Affittuario — Milano", "milano", { initials: true });
+  await mkEnt("ent_a_sd", "affittuario", "S. D.", "Affittuario — Napoli", "napoli", { initials: true });
+  await mkEnt("ent_am_sereni", "amministratore", "Condomini Sereni", "Studio di amministrazione condominiale", "milano", { address: "Via del Filatoio 30, Milano" });
+  await mkEnt("ent_am_ferretti", "amministratore", "Studio Ferretti Condomini", "Amministrazione condominiale", "napoli", { address: "Piazza della Stazione 8, Napoli" });
+  await mkEnt("ent_am_gcv", "amministratore", "Gestioni Condominiali Due Torri", "Amministrazione condominiale", "bologna", { address: "Via degli Orti 12, Bologna" });
+  await mkEnt("ent_ag_portico", "agenzia", "Il Portico Immobiliare", "Agenzia di intermediazione (account verificato)", "milano", { address: "Piazza del Mercato 4, Milano", business: true, owner: uAgenzia.id });
+  await mkEnt("ent_ag_casanova", "agenzia", "Casa Nova Studio Immobiliare", "Agenzia di intermediazione", "torino", { address: "Viale dei Tigli 22, Torino" });
+  await mkEnt("ent_ag_chiavi", "agenzia", "Le Chiavi Bianche", "Agenzia di intermediazione", "napoli", { address: "Via della Croce 7, Napoli" });
+  await mkEnt("ent_d_valli", "ditta", "Impresa Edile Fratelli Valli", "Lavori edili e ristrutturazioni", "bologna", { address: "Via dei Mugnai 9, Bologna" });
+  await mkEnt("ent_d_pezzoli", "ditta", "Geom. Pezzoli — Perizie e catasto", "Professionista tecnico", "milano", { address: "Via del Filatoio 2, Milano" });
+  await mkEnt("ent_d_fiamma", "ditta", "Fiamma Blu Impianti", "Impianti idraulici e termici", "torino", { address: "Via dei Platani 18, Torino" });
+  await mkEnt("ent_d_grillo", "ditta", "Il Grillo — Traslochi e piccoli lavori", "Traslochi e manutenzione leggera", "napoli", { address: "Via Aldo Moro 3, Napoli" });
 
   // 6) Recensioni generate (fittizie, marcate)
   const entCat = new Map((await db.entity.findMany({ select: { id: true, categoryId: true } })).map(e => [e.id, e.categoryId]));
@@ -321,7 +334,7 @@ async function main() {
     const texts = DEMO_TEXTS[catId];
     let pool = shuffle(reviewers);
     if (entId === "ent_ag_portico") pool = [uMarco, ...pool.filter(u => u.id !== uMarco.id)].slice(0, Math.max(count, 22));
-    if (entId === "ent_z_centro" || entId === "ent_d_valli") pool = [uArianna, ...pool.filter(u => u.id !== uArianna.id)].slice(0, Math.max(count, 22));
+    if (entId === "ent_z_milano" || entId === "ent_d_valli") pool = [uArianna, ...pool.filter(u => u.id !== uArianna.id)].slice(0, Math.max(count, 22));
     for (let i = 0; i < count; i++) {
       const author = pool[i % pool.length];
       const daysAgo = rndInt(r, 5, 560);

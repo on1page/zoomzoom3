@@ -59,7 +59,7 @@ export async function publicReviewsForEntity(entityId: string): Promise<PublicRe
 
 export type PublicEntity = {
   id: string; categoryId: string; name: string; subtitle: string | null;
-  address: string | null; zoneId: string | null; geo: { x: number; y: number } | null;
+  address: string | null; zoneId: string | null; geo: { lat: number; lng: number } | null;
   initialsOnly: boolean; verifiedBusiness: boolean; isDemo: boolean;
   stats: { n: number; mean: number | null; crit: Record<string, number | null>; sufficient: boolean };
   priceStats: { unit: string; min: number; max: number; median: number; n: number } | null;
@@ -73,7 +73,7 @@ export async function publicEntity(entityId: string, minReviews: number): Promis
   return {
     id: e.id, categoryId: e.categoryId, name: e.name, subtitle: e.subtitle,
     address: e.address, zoneId: e.zoneId,
-    geo: e.geoX != null && e.geoY != null ? { x: e.geoX, y: e.geoY } : null,
+    geo: e.geoLat != null && e.geoLng != null ? { lat: e.geoLat, lng: e.geoLng } : null,
     initialsOnly: e.initialsOnly, verifiedBusiness: e.verifiedBusiness, isDemo: e.isDemo,
     stats: { n: stats.n, mean: stats.mean, crit: stats.crit, sufficient: stats.sufficient },
     priceStats: ps,

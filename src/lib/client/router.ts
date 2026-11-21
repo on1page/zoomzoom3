@@ -19,9 +19,13 @@ export function parseHash(hRaw: string): Route {
 }
 
 export function useHashRoute(): Route {
-  const [route, setRoute] = useState<Route>(() => parseHash(typeof window === "undefined" ? "#/" : window.location.hash));
+  // Il primo render usa la route predefinita (come sul server): l'hash reale
+  // viene letto in un effetto, dopo l'idratazione, così gli attributi del
+  // primo albero client coincidono con quelli prerenderizzati.
+  const [route, setRoute] = useState<Route>(() => parseHash("#/"));
   useEffect(() => {
     const onChange = () => setRoute(parseHash(window.location.hash));
+    onChange();
     window.addEventListener("hashchange", onChange);
     return () => window.removeEventListener("hashchange", onChange);
   }, []);

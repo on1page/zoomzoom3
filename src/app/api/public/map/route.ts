@@ -1,4 +1,4 @@
-// GET /api/public/map — dati per la mappa pubblica.
+// GET /api/public/map — dati per la mappa pubblica (territorio italiano reale).
 // Regole privacy applicate qui, server-side:
 //  - solo immobili con posizione (indirizzi di per sé pubblici) come punti;
 //  - zone solo con aggregati (media, conteggio) e soglia minima;
@@ -16,7 +16,7 @@ export async function GET() {
     const zones = await db.zone.findMany({ orderBy: { name: "asc" } });
     const zoneEnts = await db.entity.findMany({ where: { categoryId: "zona", status: "published" } });
     const immob = await db.entity.findMany({
-      where: { categoryId: "immobile", status: "published", geoX: { not: null }, geoY: { not: null } },
+      where: { categoryId: "immobile", status: "published", geoLat: { not: null }, geoLng: { not: null } },
     });
 
     const zoneData = [];
@@ -26,8 +26,8 @@ export async function GET() {
       // Soppressione selettiva: sotto la soglia minima non si pubblicano aggregati
       const showAggregate = st != null && st.n >= settings.mapMinAggregate;
       zoneData.push({
-        id: z.id, name: z.name, poly: z.poly, lx: z.labelX, ly: z.labelY,
-        gps: { lat: z.gpsLat, lng: z.gpsLng },
+        id: z.id, name: z.name,
+        lat: z.gpsLat, lng: z.gpsLng, radiusM: z.radiusM,
         aggregate: showAggregate
           ? { mean: Math.round(st!.mean! * 10) / 10, n: st!.n, sufficient: st!.sufficient }
           : null,
@@ -40,7 +40,7 @@ export async function GET() {
     for (const e of immob) {
       const st = await statsForEntity(e.id, settings.minReviews);
       markers.push({
-        id: e.id, name: e.name, x: e.geoX!, y: e.geoY!,
+        id: e.id, name: e.name, lat: e.geoLat!, lng: e.geoLng!, zoneId: e.zoneId,
         mean: st.mean == null ? null : Math.round(st.mean * 10) / 10,
         n: st.n, isDemo: e.isDemo,
       });
@@ -49,7 +49,7 @@ export async function GET() {
     return NextResponse.json({
       ok: true,
       demoMode: process.env.DEMO_MODE === "true",
-      notice: "Mappa schematica con dati aggregati: dalla mappa non si risale a chi ha scritto una recensione né a quando.",
+      notice: "Mappa reale del territorio italiano (cartografia OpenStreetMap) con dati aggregati: dalla mappa non si risale a chi ha scritto una recensione né a quando.",
       zones: zoneData,
       markers,
       thresholds: { mapMinAggregate: settings.mapMinAggregate, minReviews: settings.minReviews },

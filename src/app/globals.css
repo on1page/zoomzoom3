@@ -290,38 +290,57 @@ table.table { width: 100%; border-collapse: collapse; font-size: .9rem; }
 /* ---------- Mappa ---------- */
 .map-wrap { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-1); overflow: hidden; }
 .map-toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--paper); }
-.map-svg { display: block; width: 100%; height: auto; background: #EFF2EC; }
-.map-svg .zone-shape { fill: #E4E8DE; stroke: #B9C2B0; stroke-dasharray: 5 4; stroke-width: 1.6; }
-.map-svg .zone-shape:hover, .map-svg .zone-shape.active { fill: #D9E2D2; stroke: #7E8C72; }
-.map-svg .river { fill: none; stroke: #A9CBDF; stroke-width: 16; stroke-linecap: round; opacity: .9; }
-.map-svg .park { fill: #D6E5CC; stroke: #A9C79A; }
-.map-svg .street { stroke: #FDFDFB; stroke-width: 3.5; opacity: .85; }
-.map-svg .street.minor { stroke-width: 2; opacity: .6; }
-.map-svg .zone-label { font: 700 15px var(--font-sans); fill: #4A5A48; paint-order: stroke; stroke: #fff; stroke-width: 3.5px; stroke-linejoin: round; pointer-events: none; }
-.map-svg .zone-score { font: 700 12px var(--font-sans); paint-order: stroke; stroke: #fff; stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
-.map-marker { cursor: pointer; }
-.map-marker circle.dot { stroke: #fff; stroke-width: 2; }
 .map-legend { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; padding: 10px 16px; border-top: 1px solid var(--line); font-size: .82rem; background: var(--paper); }
 .leg-dot { width: 13px; height: 13px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px var(--line); display: inline-block; }
-.map-popup { position: absolute; z-index: 30; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-s); box-shadow: var(--shadow-2); padding: 12px 14px; width: 250px; }
-.map-popup h4 { margin: 0 0 3px; font-size: .95rem; }
-.map-popup .muted { font-size: .8rem; }
 
-/* ---------- Mappa interattiva: pan, zoom, zona di riferimento ---------- */
-.map-viewport { position: relative; overflow: hidden; aspect-ratio: 1000 / 640; background: #EFF2EC; outline: none; cursor: grab; touch-action: none; }
+/* ---------- Mappa reale del territorio italiano (Leaflet + OpenStreetMap) ---------- */
+.map-viewport { position: relative; overflow: hidden; aspect-ratio: 1000 / 640; min-height: 340px; outline: none; border-radius: 0; background: #DCE6EA; }
 .map-viewport:focus-visible { box-shadow: inset 0 0 0 3px rgba(51,101,138,.35); }
-.map-viewport.dragging { cursor: grabbing; }
-.map-canvas-wrap { position: absolute; inset: 0; transform-origin: 0 0; will-change: transform; }
-.map-canvas-wrap.anim { transition: transform .35s ease; }
-.map-canvas-wrap .map-svg { width: 100%; height: 100%; }
-.map-loc { position: absolute; top: 10px; left: 10px; z-index: 20; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; background: rgba(255,255,255,.94); border: 1px solid var(--line); border-radius: 999px; padding: 4px 6px 4px 12px; box-shadow: var(--shadow-1); font-size: .78rem; }
+.map-viewport .map-holder { position: absolute; inset: 0; }
+.map-viewport .map-holder .leaflet-container { background: #DCE6EA; font-family: var(--font-sans); }
+.map-viewport .leaflet-tile { max-width: none; }
+.map-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; margin: 0; color: var(--ink-soft); font-size: .9rem; }
+.map-loc { position: absolute; top: 10px; left: 10px; z-index: 650; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; background: rgba(255,255,255,.94); border: 1px solid var(--line); border-radius: 999px; padding: 4px 6px 4px 12px; box-shadow: var(--shadow-1); font-size: .78rem; }
 .map-zone-select { border: 1px solid var(--line); border-radius: 999px; padding: 3px 6px; font-size: .78rem; background: var(--surface); max-width: 190px; }
-.map-zoomctl { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); z-index: 20; display: flex; flex-direction: column; gap: 4px; }
-.map-zoomctl button { width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line); background: rgba(255,255,255,.94); font: 700 1rem var(--font-sans); color: var(--ink); cursor: pointer; box-shadow: var(--shadow-1); line-height: 1; }
-.map-zoomctl button:hover { background: #fff; }
-.map-kbd-hint { position: absolute; bottom: 8px; right: 10px; z-index: 20; background: rgba(255,255,255,.88); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; }
-.map-svg .zone-shape.mine { stroke: #33658A; stroke-width: 2.6; stroke-dasharray: none; fill: #DCE6F0; }
-@media (max-width: 820px) { .map-kbd-hint { display: none; } .map-zone-select { max-width: 130px; } }
+.map-italy-btn { position: absolute; top: 10px; right: 60px; z-index: 650; }
+.map-italy-btn button { border: 1px solid var(--line); background: rgba(255,255,255,.94); border-radius: 8px; padding: 6px 11px; font: 700 .74rem var(--font-sans); color: var(--ink); cursor: pointer; box-shadow: var(--shadow-1); }
+.map-italy-btn button:hover { background: #fff; }
+@media (max-width: 820px) { .map-zone-select { max-width: 130px; } .map-italy-btn { right: 56px; } }
+
+/* pin delle città: chip leggibile + punto colorato */
+.zz-zone-pin-wrap { background: none; border: none; pointer-events: none; }
+.zz-zone-pin { width: 160px; display: flex; flex-direction: column; align-items: center; text-align: center; cursor: pointer; }
+.zz-zone-pin .zz-pin-chip, .zz-zone-pin .zz-pin-dot { pointer-events: auto; }
+.zz-zone-pin .zz-pin-chip { display: flex; flex-direction: column; align-items: center; background: rgba(255,255,255,.87); border: 1px solid rgba(122,132,126,.38); border-radius: 8px; padding: 2px 9px; box-shadow: 0 1px 3px rgba(20,40,60,.22); }
+.zz-zone-pin .zz-pin-name { font: 700 12.5px var(--font-sans); color: #26332B; line-height: 1.2; }
+.zz-zone-pin .zz-pin-score { font: 700 10.5px var(--font-sans); color: var(--pin, #666); line-height: 1.25; }
+.zz-zone-pin .zz-pin-score .zz-muted { color: #8B95A0; }
+.zz-zone-pin .zz-pin-dot { width: 13px; height: 13px; border-radius: 50%; background: var(--pin, #9AA4AE); border: 2.5px solid #fff; box-shadow: 0 1px 4px rgba(20,40,60,.4); margin-top: 2px; }
+.zz-zone-pin.active .zz-pin-chip { border-color: #33658A; box-shadow: 0 0 0 2px rgba(51,101,138,.35); }
+.zz-zone-pin.active .zz-pin-dot { box-shadow: 0 0 0 3px rgba(51,101,138,.55), 0 1px 4px rgba(20,40,60,.4); }
+.zz-zone-pin.mine .zz-pin-dot { box-shadow: 0 0 0 3px rgba(51,101,138,.35), 0 1px 4px rgba(20,40,60,.4); }
+/* a livello Italia i pin mostrano solo il nome: niente sovrapposizioni */
+.zz-zone-pin.compact { width: 96px; }
+.zz-zone-pin.compact .zz-pin-chip { padding: 1px 6px; border-radius: 7px; }
+.zz-zone-pin.compact .zz-pin-name { font-size: 11px; white-space: nowrap; }
+.zz-zone-pin.compact .zz-pin-score { display: none; }
+.zz-zone-pin.compact .zz-pin-dot { width: 10px; height: 10px; border-width: 2px; }
+/* città troppo vicina a una già etichettata: solo punto, nome nel tooltip */
+.zz-zone-pin.dotonly .zz-pin-chip { display: none; }
+.zz-zone-pin.dotonly { width: 18px; }
+
+/* popup immobile */
+.zz-popup .leaflet-popup-content-wrapper { border-radius: 10px; box-shadow: var(--shadow-2); font-family: var(--font-sans); color: var(--ink); }
+.zz-popup .leaflet-popup-content { margin: 12px 14px; line-height: 1.45; min-width: 170px; }
+.zz-pop strong { font-size: .95rem; }
+.zz-pop .badge-demo { font-size: .62rem; }
+.zz-pop .zz-pop-sub { color: var(--ink-soft); font-size: .8rem; }
+.zz-pop .zz-pop-score { font-weight: 700; margin: 3px 0 7px; font-size: .88rem; }
+.zz-pop .zz-pop-link { display: inline-block; background: var(--navy); color: #fff; border-radius: 8px; padding: 5px 10px; text-decoration: none; font-size: .8rem; }
+.zz-pop .zz-pop-link:hover { background: var(--navy-deep); }
+.map-viewport .leaflet-control-attribution { font-size: .68rem; }
+.map-viewport .leaflet-control-zoom a { border-radius: 8px; color: var(--ink); }
+.map-viewport .leaflet-control-scale-line { font-size: .66rem; }
 
 /* ---------- Footer ---------- */
 .site-footer { background: var(--navy-deep); color: #B9C8D6; margin-top: 60px; padding: 40px 0 26px; font-size: .9rem; }

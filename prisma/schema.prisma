@@ -134,14 +134,12 @@ model CategoryVersion {
 }
 
 model Zone {
-  id     String  @id // slug zona
-  name   String
-  poly   String  // poligono SVG "x,y x,y …"
-  labelX Float
-  labelY Float
-  gpsLat Float
-  gpsLng Float
-  isDemo Boolean @default(false)
+  id      String  @id // slug città (es. "milano")
+  name    String
+  gpsLat  Float   // centro città reale, WGS84
+  gpsLng  Float
+  radiusM Int     @default(3000) // raggio indicativo dell'area urbana, in metri
+  isDemo  Boolean @default(false)
   entities Entity[]
 }
 
@@ -154,8 +152,9 @@ model Entity {
   address         String?
   zoneId          String?
   zone            Zone?    @relation(fields: [zoneId], references: [id])
-  geoX            Float?
-  geoY            Float?
+  // posizione reale WGS84 (solo categorie mappabili: immobili)
+  geoLat          Float?
+  geoLng          Float?
   initialsOnly    Boolean  @default(false)
   verifiedBusiness Boolean @default(false)
   ownerUserId     String?  @unique

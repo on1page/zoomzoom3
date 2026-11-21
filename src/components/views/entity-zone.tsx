@@ -186,7 +186,7 @@ export function EntityView({ id }: { id: string }) {
             {cat.isMapped && ent.geo ? (
               <div className="card">
                 <h3 style={{ marginTop: 0 }}>Posizione approssimativa</h3>
-                <p className="small mb0">Punto indicativo sull&apos;indirizzo pubblico (città fittizia). Dalla posizione non si risale ad alcuna informazione sui recensori.</p>
+                <p className="small mb0">Punto indicativo sull&apos;indirizzo pubblico della scheda. Dalla posizione non si risale ad alcuna informazione sui recensori.</p>
               </div>
             ) : null}
           </aside>

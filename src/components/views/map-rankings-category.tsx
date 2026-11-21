@@ -26,22 +26,22 @@ export function MapView() {
       <div className="section-head" style={{ paddingTop: 26 }}>
         <div>
           <h1>Mappa delle reputazioni</h1>
-          <p className="sub">Città fittizia di esempio (Valserrana). Punteggi aggregati per zona e singoli immobili: la mappa non rivela mai chi ha scritto una recensione né quando.</p>
+          <p className="sub">L&apos;intero territorio italiano su cartografia reale (OpenStreetMap). Punteggi aggregati per città e singoli immobili: la mappa non rivela mai chi ha scritto una recensione né quando.</p>
         </div>
       </div>
       <div className="map-wrap" style={{ position: "relative" }}>
         <div className="map-toolbar">
           <span className="small"><b>Vista:</b></span>
           <button className={`chip chip-filter${mode !== "zone" ? " on" : ""}`} onClick={() => setMode("immobili")}>Immobili</button>
-          <button className={`chip chip-filter${mode === "zone" ? " on" : ""}`} onClick={() => setMode("zone")}>Solo aggregati di zona</button>
+          <button className={`chip chip-filter${mode === "zone" ? " on" : ""}`} onClick={() => setMode("zone")}>Solo aggregati di città</button>
           <span className="spacer"></span>
-          <span className="small muted">Clicca un punto o una zona per i dettagli · trascina, rotella o frecce per esplorare</span>
+          <span className="small muted">Clicca una città o un punto per i dettagli · trascina, rotella o frecce per esplorare · «Vista Italia» per tornare all&apos;insieme</span>
         </div>
         <MapViewport mode={mode} />
         <MapLegend />
       </div>
       <Alert kind="info">
-        <b>Privacy sulla mappa.</b> Sulla mappa pubblica compaiono solo immobili (il cui indirizzo è di per sé pubblico) e valutazioni <em>aggrega te</em> di zona. Persone fisiche (proprietari, affittuari) e altri soggetti privati non vengono geolocalizzati, e dai punti sulla mappa non è possibile risalire all&apos;autore o alla data di una recensione. Le schede zona mostrano solo medie e conteggi, mai recensioni individuali posizionate. Dove i dati sono troppo pochi per un aggregato sicuro, il valore viene soppresso.
+        <b>Privacy sulla mappa.</b> Sulla mappa pubblica compaiono solo immobili (il cui indirizzo è di per sé pubblico) e valutazioni <em>aggrega te</em> di città e zone. Persone fisiche (proprietari, affittuari) e altri soggetti privati non vengono geolocalizzati, e dai punti sulla mappa non è possibile risalire all&apos;autore o alla data di una recensione. Le schede zona mostrano solo medie e conteggi, mai recensioni individuali posizionate. Dove i dati sono troppo pochi per un aggregato sicuro, il valore viene soppresso.
       </Alert>
       <div className="grid grid-3 mt3">
         {(data?.zones || []).map(z => (
@@ -57,7 +57,7 @@ export function MapView() {
             ) : (
               <p className="small muted mb0">{z.suppressed ? "Aggregati non pubblicati: troppo pochi dati per non risalire a persone." : "Nessuna recensione."}</p>
             )}
-            <p className="small muted mb0">Sintesi della zona: migliori 3 per categoria, filtri e recensioni aggregate.</p>
+            <p className="small muted mb0">Sintesi della città: migliori 3 per categoria, filtri e recensioni aggregate.</p>
           </a>
         ))}
       </div>

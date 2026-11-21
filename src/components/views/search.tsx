@@ -85,7 +85,7 @@ export function SearchView() {
             ))}
           </fieldset>
           <div className="field">
-            <label htmlFor="sz">Zona (Valserrana)</label>
+            <label htmlFor="sz">Città</label>
             <select id="sz" value={form.zona} onChange={e => setForm(f => ({ ...f, zona: e.target.value }))}>
               <option value="">Tutte</option>
               {boot.zones.map(z => <option key={z.id} value={z.id}>{z.name}</option>)}

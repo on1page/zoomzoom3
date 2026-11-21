@@ -218,13 +218,13 @@ export async function POST(req: Request) {
         if (!prop || prop.status !== "received") return fail("Proposta non disponibile.", 409);
         const isPerson = prop.category.isPerson;
         const initials = initialsFrom(prop.name);
-        const geo = isPerson ? null : p.geo;
+        const geo = isPerson ? null : p.geo as { lat: number; lng: number } | undefined;
         const ent = await db.entity.create({
           data: {
             categoryId: prop.categoryId,
             name: isPerson ? initials : prop.name,
             subtitle: prop.subtitle, address: isPerson ? null : prop.address,
-            zoneId: prop.zoneId, geoX: geo?.x ?? null, geoY: geo?.y ?? null,
+            zoneId: prop.zoneId, geoLat: geo?.lat ?? null, geoLng: geo?.lng ?? null,
             initialsOnly: isPerson, verifiedBusiness: false,
             status: "published", proposedBy: prop.proposedById || "proposal", isDemo: prop.isDemo,
           },

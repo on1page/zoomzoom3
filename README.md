@@ -153,7 +153,7 @@ Impostazioni modificabili da back office (`/api/admin/action settings.update`):
 ```bash
 bun install
 bun run db:push        # crea/aggiorna lo schema SQLite
-bun scripts/seed.ts    # SOLO demo: dati fittizi Valserrana marcati isDemo
+bun scripts/seed.ts    # SOLO demo: dati fittizi su città italiane reali, marcati isDemo
 bun run dev            # sviluppo (qui il server è già attivo sulla porta 3000)
 ```
 
@@ -213,12 +213,14 @@ scaricabili senza permessi.
   ("email non configurata") e in demo i messaggi restano nella casella del back
   office. Nessuna simulazione occulta.
 - **Google OAuth non configurato** → bottone assente, endpoint esplicita 503.
-- **Mappa schematico-demo**: la mappa è quella fedele al PDF con Valserrana
-  (città fittizia) alimentata dai dati del DB, con regole privacy applicate
-  (solo immobili come punti, aggregati di zona con soglia e soppressione,
-  mai persone geolocalizzate). Per dati geografici reali occorre integrare un
-  tile provider con licenza/attribuzione/privacy verificati: l'astrazione è
-  pronta (l'endpoint `/api/public/map` è l'unica sorgente dei dati).
+- **Mappa reale del territorio italiano**: cartografia OpenStreetMap via Leaflet,
+  con vista di insieme sull'intera Italia (continente, Sicilia e Sardegna) e 12
+  città reali distribuite su tutto il territorio. Regole privacy applicate
+  (solo immobili come punti, aggregati di città con soglia e soppressione,
+  mai persone geolocalizzate); i pin hanno etichettatura anti-collisione e i
+  punti immobile compaiono a zoom ravvicinato. L'endpoint `/api/public/map`
+  resta l'unica sorgente dei dati; per un tile provider commerciale bastano
+  poche righe in `src/components/map.tsx`.
 - **Antivirus sui caricamenti non disponibile** qui: validazione di tipo, dimensione
   e magic byte sì; scansione virale = requisito pre-lancio.
 - **Rate limiting in-memory**: per istanza singola; in multi-istanza spostare
@@ -247,6 +249,6 @@ scaricabili senza permessi.
 
 | Livello | Stato |
 |---|---|
-| **Demo** (`DEMO_MODE=true`, quest'istanza) | Dati Valserrana interamente fittizi marcati `isDemo`, barra avviso, casella email demo staff-only, credenziali di test solo locali |
+| **Demo** (`DEMO_MODE=true`, quest'istanza) | Dati fittizi su città italiane reali (coordinate vere, contenuti inventati) marcati `isDemo`, barra avviso, casella email demo staff-only, credenziali di test solo locali |
 | **MVP** | Tutte le funzioni con SMTP reale, `DEMO_MODE=false`, HTTPS, backup verificati |
-| **Pre-lancio** | Revisione legale dei testi, provider mappe reali, pentest, procedure di incident response, monitoraggio, verifica marchio |
+| **Pre-lancio** | Revisione legale dei testi, verifica di licenze/limiti del tile provider per il traffico di produzione, pentest, procedure di incident response, monitoraggio, verifica marchio |
