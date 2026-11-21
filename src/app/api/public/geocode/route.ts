@@ -45,7 +45,11 @@ export type GeocodePlace = {
 };
 
 export function zoneNameOfAddress(a: NonNullable<NominatimRow["address"]>): string | null {
-  return a.municipality || a.city || a.town || a.village || a.hamlet || null;
+  // priorità: città insediativa/postale (city/town/village) PRIMA del confine
+  // amministrativo "municipality" — nei grandi comuni OSM a volte associa un
+  // confine di comune vicino e sbagliato (es. Duomo di Milano → "Rodano");
+  // il nome della città vera è più affidabile per riempire il modulo.
+  return a.city || a.town || a.village || a.municipality || a.hamlet || null;
 }
 
 // cache condivisa nel processo: query normalizzata → risultati + timestamp

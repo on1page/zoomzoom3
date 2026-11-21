@@ -77,7 +77,9 @@ export async function GET(req: NextRequest) {
       if ((a.country_code || "").toLowerCase() !== "it") {
         return NextResponse.json({ ok: true, found: false, reason: "not-italy" });
       }
-      const zoneName = a.municipality || a.city || a.town || a.village || a.hamlet || null;
+      // città vera prima del confine amministrativo "municipality" (che in OSM
+      // può riferirsi a un comune vicino: es. Duomo di Milano → "Rodano")
+      const zoneName = a.city || a.town || a.village || a.municipality || a.hamlet || null;
       const found = !!(zoneName || a.road);
       const result: ReverseResult | null = found ? {
         label: data.display_name || "",

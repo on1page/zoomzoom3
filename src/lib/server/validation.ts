@@ -28,7 +28,10 @@ export function validHalfStep(v: number): boolean {
 
 export type ReviewPayload = {
   score: number;
-  criteria: Record<string, number>;
+  // i punteggi per criterio: la chiave storica usata dai form è "crit",
+  // "criteria" è accettata come equivalente (entrambe valide)
+  criteria?: Record<string, number>;
+  crit?: Record<string, number>;
   pros: string;
   cons: string;
   text: string;
@@ -55,8 +58,11 @@ export function validateReviewPayload(p: ReviewPayload, cat: CategoryDef): Revie
     return { ok: false, error: "Punteggio complessivo non valido (0–10, step 0,5)." };
   }
   const criteria: Record<string, number> = {};
+  // i form inviano i punteggi per criterio con la chiave "crit"; per
+  // robustezza si accetta anche "criteria" (stesso significato)
+  const critIn: Record<string, number> | undefined = p.criteria ?? p.crit;
   for (const c of cat.criteria) {
-    const v = num(p.criteria?.[c.key]);
+    const v = num(critIn?.[c.key]);
     if (v == null || Number.isNaN(v) || !validHalfStep(v)) {
       return { ok: false, error: `Valutazione mancante o non valida per: ${c.label}.` };
     }
@@ -76,11 +82,17 @@ export function validateReviewPayload(p: ReviewPayload, cat: CategoryDef): Revie
     if (!Number.isFinite(amt) || amt <= 0 || amt > 100_000_000) {
       return { ok: false, error: "Importo del prezzo non valido (tra 1 € e 100.000.000 €)." };
     }
-    if (cat.priceUnits.length && !cat.priceUnits.includes(String(p.priceUnit || ""))) {
-      return { ok: false, error: "Periodo del prezzo non valido per questa categoria." };
+    if (cat.priceUnits.length === 0) {
+      return { ok: false, error: "Questa categoria non prevede campi prezzo." };
     }
+    // unità mancante o non valida → la prima della categoria, che è quella
+    // mostrata di default dal selettore (coerenza tra ciò che si vede e ciò
+    // che viene inviato, anche per client con versioni precedenti in cache)
+    const unit = cat.priceUnits.includes(String(p.priceUnit || ""))
+      ? String(p.priceUnit)
+      : cat.priceUnits[0];
     const kind = PRICE_KINDS.includes(p.priceKind as (typeof PRICE_KINDS)[number]) ? p.priceKind! : "Concluso/pagato";
-    price = { amount: Math.round(amt), unit: String(p.priceUnit), kind };
+    price = { amount: Math.round(amt), unit, kind };
   } else if (cat.priceUnits.length === 0 && p.priceUnit) {
     return { ok: false, error: "Questa categoria non prevede campi prezzo." };
   }

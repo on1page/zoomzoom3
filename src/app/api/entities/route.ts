@@ -20,7 +20,7 @@ import { publicEntity } from "@/lib/server/public-data";
 import { auditLog } from "@/lib/server/audit";
 import { guard, readJson, handleError, fail } from "@/lib/server/http";
 import { rateLimit } from "@/lib/server/rate-limit";
-import { ensureZone, inItalyBounds } from "@/lib/server/zones";
+import { ensureZone, ensureZoneEntity, inItalyBounds } from "@/lib/server/zones";
 
 // normalizza un indirizzo per il confronto: maiuscole, accenti e punteggiatura
 // non devono creare schede duplicate dello stesso luogo
@@ -54,6 +54,7 @@ export async function POST(req: Request) {
     // città: zona esistente (zoneId, retrocompatibile) OPPURE qualsiasi
     // località italiana da ricerca geocodificata o GPS (nome + coordinate)
     let zone: Awaited<ReturnType<typeof db.zone.findUnique>> | null = null;
+    let zoneEntityCreated = false;
     if (p.zoneId) {
       zone = await db.zone.findUnique({ where: { id: String(p.zoneId) } });
     } else if (p.zone && String(p.zone.name || "").trim().length >= 2) {
@@ -80,6 +81,12 @@ export async function POST(req: Request) {
       }
     }
     if (!zone) return fail("Seleziona la città in cui si trova l'immobile (qualsiasi comune o paese d'Italia).");
+
+    // ogni zona del catalogo ha la sua scheda recensibile: nasce insieme alla
+    // zona (o al primo immobile che la menziona), così il link #/zona/… non
+    // porta mai a una pagina inesistente
+    const zoneSheet = await ensureZoneEntity(zone, { userId: user.id, isDemo: user.isDemo });
+    zoneEntityCreated = zoneSheet.created;
 
     let geo: { lat: number; lng: number } | null = null;
     if (p.geo && Number.isFinite(Number(p.geo.lat)) && Number.isFinite(Number(p.geo.lng))) {
@@ -121,7 +128,7 @@ export async function POST(req: Request) {
       actorId: user.id, actorRole: user.role,
       action: "Scheda immobile aggiunta dall'utente (contributo aperto)",
       targetType: "entity", targetId: ent.id,
-      reason: `Indirizzo: ${address}, ${zone.name}${geo ? " con posizione indicata sulla mappa" : ""}.`,
+      reason: `Indirizzo: ${address}, ${zone.name}${geo ? " con posizione indicata sulla mappa" : ""}.${zoneEntityCreated ? " Scheda zona attivata automaticamente." : ""}`,
       isDemo: ent.isDemo,
     });
 
