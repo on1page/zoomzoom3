@@ -177,7 +177,7 @@ function FindStep({ target, onSelected, onBack }: {
   const [zone, setZone] = useState<ZonePick | null>(null);
   const [geo, setGeo] = useState<LatLng | null>(null);
   const [geoQ, setGeoQ] = useState("");
-  const [geoRes, setGeoRes] = useState<Array<{ label: string; lat: number; lng: number; zoneName: string | null; province: string | null; region: string | null }> | null>(null);
+  const [geoRes, setGeoRes] = useState<Array<{ label: string; lat: number; lng: number; zoneName: string | null; province: string | null; region: string | null; road?: string | null; houseNumber?: string | null }> | null>(null);
   const [geoBusy, setGeoBusy] = useState(false);
   const [gpsStage, setGpsStage] = useState<"idle" | "gps" | "addr">("idle");
   const [addErr, setAddErr] = useState<string | null>(null);
@@ -221,7 +221,7 @@ function FindStep({ target, onSelected, onBack }: {
   const doGeocode = async () => {
     if (geoQ.trim().length < 3) return;
     setGeoBusy(true); setGeoRes(null);
-    const res = await api<{ results: Array<{ label: string; lat: number; lng: number; zoneName: string | null; province: string | null; region: string | null }> }>(`/api/public/geocode?q=${encodeURIComponent(geoQ.trim())}`);
+    const res = await api<{ results: Array<{ label: string; lat: number; lng: number; zoneName: string | null; province: string | null; region: string | null; road?: string | null; houseNumber?: string | null }> }>(`/api/public/geocode?q=${encodeURIComponent(geoQ.trim())}`);
     setGeoRes(res.ok ? res.results : []);
     setGeoBusy(false);
   };
@@ -412,11 +412,13 @@ function FindStep({ target, onSelected, onBack }: {
                             <button type="button" onClick={() => {
                               setGeo({ lat: g.lat, lng: g.lng });
                               setGeoRes(null);
-                              // la ricerca porta con sé anche la città: se il
-                              // campo è ancora vuoto, lo riempio qui
+                              // il risultato porta con sé anche la città e via/civico:
+                              // se i campi sono ancora vuoti, li riempio qui
                               if (g.zoneName && !zone) {
                                 setZone({ name: g.zoneName, province: g.province, region: g.region, lat: g.lat, lng: g.lng });
                               }
+                              const street = [g.road, g.houseNumber].filter(Boolean).join(" ");
+                              if (street && !address.trim()) setAddress(street);
                             }}>{g.label}</button>
                           </li>
                         ))}

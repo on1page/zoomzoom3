@@ -1,0 +1,213 @@
+ZoomZoom — Aggiornamento: tutto il territorio nazionale + reverse geocoding dal GPS
+====================================================================================
+
+Cosa risolve questo aggiornamento
+---------------------------------
+Fino a ieri il selettore città del modulo "aggiungi immobile" (e il catalogo
+delle zone recensibili) conteneva solo le 12 città di partenza: chi viveva
+altrove si fermava lì. Ora la copertura è l'ITALIA INTERA, comuni minori,
+paesi e frazioni compresi (gli ~7.900 comuni ISTAT e tutto ciò che la
+cartografia OpenStreetMap riconosce come località abitata), con due strade:
+
+  A. RICERCA NAZIONALE — il campo "Città, comune o paese" ora è un motore di
+     ricerca su tutto il territorio: digiti "Corte de' Frati", "Marciaga",
+     "Morterone" (33 abitanti) o "Alassio" e trovi il posto, con provincia e
+     regione. I suggerimenti fondono due fonti:
+       1. le zone GIÀ presenti su ZoomZoom (istantanee, marcate
+          "già su ZoomZoom", zero rete);
+       2. i risultati NAZIONALI dal geocoder pubblico OpenStreetMap
+          (Nominatim), passati dal proxy del server.
+
+  B. GPS + REVERSE GEOCODING — chi è davanti all'immobile preme "Usa la mia
+     posizione e trova l'indirizzo": il telefono rileva le coordinate, il
+     server le traduce in INDIRIZZO REALE (via e civico, se mappati) insieme
+     a comune, provincia e regione, e il modulo si riempie da solo:
+     indirizzo, città e pin sulla mappa. Niente da digitare.
+
+La località scelta, se non è ancora nel catalogo, VIENE CREATA AL MOMENTO:
+zona con nome, provincia, regione e coordinate reali WGS84, con la sua scheda
+recensibile che nasce subito (stessa convenzione del seed: #/zona/ent_z_<slug>).
+"La mia città non c'è" smette di essere un vicolo cieco: il catalogo cresce
+insieme ai contenuti, un paese alla volta.
+
+Come funziona, in dettaglio
+---------------------------
+- DEDUP ROBUSTO DELLE ZONE (lib/server/zones.ts): il riconoscimento degli
+  omonimi non confronta solo stringhe — usa nome normalizzato (maiuscole,
+  accenti, punteggiatura) + provincia + DISTANZA REALE tra i centri (haversine,
+  soglia 30 km). "Corte de' Frati" (CR) e un ipotetico omonimo altrove restano
+  due posti distinti; lo stesso paese digitato in tre modi diversi diventa una
+  sola zona. Le chiamate ripetute sono idempotenti.
+- ZONE "ON DEMAND" (POST /api/zones): attiva la scheda recensibile di qualsiasi
+  località; se manca, la crea. È la porta usata dal passo "Quale città?" del
+  flusso recensione. Anti-abuso: utente verificato, contributo aperto attivo,
+  stesso budget giornaliero delle nuove schede immobile.
+- IMMOBILE IN QUALSIASI COMUNE (POST /api/entities): oltre al vecchio zoneId,
+  il modulo ora accetta la località come {nome, provincia, regione, lat, lng}:
+  la zona nasce al volo se serve, la scheda immobile le viene collegata e la
+  scheda recensibile della zona è garantita (nessun link morto).
+- GEOCODING CON DETTAGLI (GET /api/public/geocode?q=): ogni risultato porta
+     via, civico, CAP, comune, provincia, regione. Così la ricerca sulla
+  mappa per piazzare il pin RIEMPIE ANCHE il campo indirizzo e la città se
+  ancora vuoti (piccola novità di questa versione), e non solo il pin.
+- REVERSE GEOCODING (GET /api/public/geocode/reverse?lat=&lng=): coordinate →
+  indirizzo reale. Dettaglio massimo (zoom 18: strada e civico), solo Italia,
+  cache di 1 ora sulle coordinate arrotondate (~100 m).
+- FILTRO "CITÀ" DELLA RICERCA: l'elenco non è più fisso — arriva dal catalogo
+  e si allunga da solo ogni volta che una località nuova entra.
+- BOOTSTRAP: le zone espongono ora anche lat/lng/provincia/regione (i campi
+  sono opzionali nel client: i payload già in cache restano validi).
+
+Privacy (invariata, anzi rafforzata)
+------------------------------------
+- Le coordinate vanno al geocoder pubblico di OpenStreetMap SOLO su richiesta
+  esplicita dell'utente (preme "Cerca" o "Usa la mia posizione"): il clic sulla
+  mappa e il trascinamento del pin restano tra l'utente e la mappa.
+- Il GPS serve solo al momento: le coordinate non vengono salvate per conto
+  terzi, finiscono nel modulo e da lì, se l'utente conferma, nella scheda
+  immobile (il cui indirizzo è pubblico per natura).
+- Località fuori dai confini italiani: rifiutate (validazione server-side).
+
+File del pacchetto
+------------------
+prisma/schema.prisma                    Zone guadagna province, region e
+                                        source (seed | user) — colonne nuove,
+                                        nessuna colonna rimossa: db:push senza
+                                        perdita di dati (versione PostgreSQL
+                                        con url + directUrl, identica alla tua)
+src/lib/server/zones.ts                 NUOVO — normalizzazione toponimi,
+                                        slug, confini Italia, distanza haversine,
+                                        ensureZone (dedup) + ensureZoneEntity
+src/app/api/zones/route.ts              NUOVO — attivazione schede zona su
+                                        tutto il territorio nazionale
+src/app/api/public/geocode/route.ts     ricerca nazionale CON dettagli indirizzo
+                                        (via, civico, CAP, comune, provincia,
+                                        regione), proxy con User-Agent, cache
+                                        15 min, solo Italia
+src/app/api/public/geocode/reverse/route.ts  NUOVO — reverse geocoding GPS →
+                                        indirizzo reale (cache 1 h)
+src/app/api/entities/route.ts           immobile in qualsiasi comune: zona
+                                        creata al volo + scheda zona garantita
+src/app/api/public/bootstrap/route.ts   payload zone con lat/lng/provincia/
+                                        regione
+src/components/place-search.tsx         NUOVO — selettore località nazionale
+                                        (suggerimenti locali + geocoder, debounce
+                                        450 ms, cache per query)
+src/components/views/write-review-open.tsx  flusso "Scrivi una recensione":
+                                        ricerca città nazionale, GPS con
+                                        reverse geocoding, ricerca indirizzo
+                                        che precompila anche via/civico
+src/lib/client/store.tsx                ZoneInfo estesa (province/region/lat/
+                                        lng opzionali, retrocompatibili)
+src/app/globals.css                     stili del selettore località e del
+                                        selettore posizione sulla mappa
+scripts/test-territorio-nazionale.ts    NUOVO — 19 test end-to-end (vedi sotto)
+README.md                               aggiornato (copertura nazionale al
+                                        posto delle 12 città fisse)
+
+Nessuna nuova dipendenza. Nessuna nuova variabile d'ambiente. Nessuna API key:
+il servizio pubblico Nominatim è gratuito per traffico leggero.
+
+Installazione
+-------------
+1) Ferma il server di sviluppo (Ctrl+C).
+
+2) Copia i file di questo pacchetto dentro la cartella del progetto
+   (C:\Users\Carlo\sito\zoomzoom), mantenendo i percorsi. Da PowerShell,
+   dopo aver estratto lo zip in una cartella temporanea:
+
+       Copy-Item -Recurse -Force "C:\percorso\estratto\prisma" "C:\Users\Carlo\sito\zoomzoom\"
+       Copy-Item -Recurse -Force "C:\percorso\estratto\src" "C:\Users\Carlo\sito\zoomzoom\"
+       Copy-Item -Recurse -Force "C:\percorso\estratto\scripts" "C:\Users\Carlo\sito\zoomzoom\"
+       Copy-Item -Force "C:\percorso\estratto\README.md" "C:\Users\Carlo\sito\zoomzoom\"
+
+   (Copy-Item sovrascrive i file esistenti con lo stesso nome.)
+
+3) Applica le modifiche al database:
+
+       cd C:\Users\Carlo\sito\zoomzoom
+       bun run db:push
+
+   Cosa cambia: SOLO aggiunte alla tabella Zone (province, region, source).
+   Nessuna colonna eliminata, nessun dato perso: le zone esistenti restano
+   identiche, con i campi nuovi vuoti (si compilano da soli al primo
+   contatto utile).
+
+4) Riavvia e verifica in locale:
+
+       bun run dev
+
+   - #/recensione → "Un immobile" → "+ Aggiungi un immobile da recensire":
+     nel campo "Città, comune o paese" digita un piccolo comune (es.
+     "corte de frati") → deve comparire "Corte de' Frati · paese · Cremona
+     (Lombardia)"; selezionalo: il chip della città appare sotto il campo;
+   - stesso modulo, bottone "Usa la mia posizione e trova l'indirizzo" (serve
+     il consenso alla geolocalizzazione del browser): via, civico e città si
+     compilano da soli dove la mappa li conosce;
+   - completa e pubblica: la scheda dell'immobile nasce nella zona nuova;
+   - #/mappa: il paese appena attivato compare tra i pin (con gli aggregati
+     sospesi se ha meno recensioni della soglia: comportamento privacy
+     corretto);
+   - #/ricerca: il filtro "Città" ora contiene anche le località nuove;
+   - #/recensione → "Una città / zona" → "La tua città non è tra queste?":
+     cerca qualsiasi paese d'Italia e attiva la sua scheda.
+
+5) Pubblica su Vercel:
+
+       git add prisma/schema.prisma src scripts/test-territorio-nazionale.ts README.md
+       git commit -m "copertura nazionale: qualsiasi comune/paese/frazione + reverse geocoding GPS"
+       git push
+
+   Nessuna variabile d'ambiente nuova: DATABASE_URL, DIRECT_URL e APP_SECRET
+   restano quelle già configurate.
+
+   NOTA (come per i pacchetti precedenti): se dopo il deploy la pagina resta
+   in caricamento e il log Vercel mostra P2022 ("The column Zone.province
+   does not exist"), significa che prisma/schema.prisma non è finito nel
+   commit oppure che db:push non è stato eseguito sul database: rifai il
+   punto 3 e verifica con "git status --short" che non resti nulla da
+   committare.
+
+Test automatici (tutti verdi su questa versione)
+------------------------------------------------
+19 test end-to-end dedicati + l'intera suite di regressione precedente:
+
+       Promemoria: avvia il server, poi
+       PORT=3100 bun .next/standalone/server.js      (dopo bun run build)
+       TEST_BASE=http://localhost:3100 bun scripts/test-territorio-nazionale.ts
+
+Coprono: ricerca geocodificata con comune/provincia/regione; reverse geocoding
+(con rifiuto di coordinate fuori Italia o assurde); creazione immobile in
+località NUOVA (zona al volo con provincia/regione); dedup della stessa
+località scritta diversamente; attivazione scheda di un paese nuovo +
+idempotenza; riuso della zona nota ("Milano" → ent_z_milano); recensione
+pubblicabile sul paese nuovo; bootstrap e mappa che espongono le zone nuove;
+rifiuto di località fuori Italia / senza nome / da anonimo. Lo script si
+ripulisce i dati di prova da solo al termine.
+
+In più, la suite precedente (contributo aperto, foto, voti, Premium, admin
+con TOTP, via invito: 33 test) è stata rieseguita per intero su questa
+versione: TUTTI SUPERATI. Nessuna regressione.
+
+Note e limiti onesti
+--------------------
+- Il geocoder è il servizio pubblico Nominatim (OpenStreetMap): gratuito per
+  traffico leggero, policy max 1 richiesta/secondo. Il proxy del server lo
+  rispetta: limite 20 ricerche/minuto per IP (condiviso tra ricerca diretta e
+  reverse), cache server-side 15 minuti sulle ricerche e 1 ora sul reverse,
+  debounce 450 ms nel client. Se il sito cresce molto, si passa a un
+  geocoder commerciale o self-hosted cambiando SOLO le due URL nei file
+  src/app/api/public/geocode/route.ts e .../reverse/route.ts.
+- La copertura dei CIVICI dipende da OpenStreetMap: nelle grandi città è
+  buona, nei paesi piccoli spesso c'è la via ma non il numero. In quel caso
+  il reverse geocoding riempie la via e l'utente completa il civico a mano:
+  il modulo resta sempre modificabile, nulla viene imposto.
+- Il geocoder abbina parole intere, non i prefissi: digitando "corte de"
+  vedrai i posti che si chiamano "Corte"; completando "corte de frati" arriva
+  il paese giusto. È il comportamento del servizio (lo stesso del sito
+  nominatim.openstreetmap.org).
+- Le zone mantengono la provenienza nella colonna source (seed | user):
+  utile in futuro per statistiche di crescita del catalogo.
+- Recensioni, foto, voti, Premium, inviti, moderazione e back office NON
+  cambiano: questo aggiornamento tocca solo copertura territoriale, geocoding
+  e creazione delle zone.

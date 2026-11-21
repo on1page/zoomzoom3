@@ -114,14 +114,19 @@ di inattività e sono separate da quelle pubbliche.
 
 ### Flussi principali
 - **Contributo aperto (immobili e zone)**: l'utente registrato trova la
-  scheda (`#/recensione`) oppure la **aggiunge dall'indirizzo reale** (città +
-  posizione facoltativa via GPS, clic su mappa Leaflet o geocoding
-  OpenStreetMap/Nominatim, solo Italia) → dichiara il tipo di esperienza →
-  recensione marcata **“Dichiarata”** (badge ambra), senza pretesa di
-  verifica. Anti-abuso: limite giornaliero per utente (recensioni e nuove
-  schede), dedup dell'indirizzo normalizzato nella stessa città, una
-  recensione per utente per scheda. Le persone fisiche restano escluse
-  (via invito/verifica: tutela privacy e diffamazione).
+  scheda (`#/recensione`) oppure la **aggiunge dall'indirizzo reale**, in
+  **qualsiasi comune, paese o frazione d'Italia** (la città si cerca su tutto
+  il territorio nazionale con geocoding OpenStreetMap/Nominatim via proxy
+  server, oppure dal **reverse geocoding del GPS**: chi è davanti all'immobile
+  preme un bottone e via, civico, comune e pin si riempiono da soli;
+  posizione facoltativa anche con clic su mappa Leaflet, solo Italia) →
+  dichiara il tipo di esperienza → recensione marcata **“Dichiarata”** (badge
+  ambra), senza pretesa di verifica. La località nuova entra nel catalogo al
+  momento (zona con coordinate reali, dedup per nome+provincia+distanza) e
+  ottiene subito la sua scheda recensibile. Anti-abuso: limite giornaliero per
+  utente (recensioni e nuove schede), dedup dell'indirizzo normalizzato nella
+  stessa città, una recensione per utente per scheda. Le persone fisiche
+  restano escluse (via invito/verifica: tutela privacy e diffamazione).
 - **Invito**: soggetto verificato (account collegato alla propria scheda)
   registra esperienza → email con token monouso (hash nel DB, scadenza
   configurabile, legato a destinatario+esperienza) → riscatto atomico →
@@ -253,8 +258,11 @@ scaricabili senza permessi.
   office. Nessuna simulazione occulta.
 - **Google OAuth non configurato** → bottone assente, endpoint esplicita 503.
 - **Mappa reale del territorio italiano**: cartografia OpenStreetMap via Leaflet,
-  con vista di insieme sull'intera Italia (continente, Sicilia e Sardegna) e 12
-  città reali distribuite su tutto il territorio. Regole privacy applicate
+  con vista di insieme sull'intera Italia (continente, Sicilia e Sardegna).
+  La copertura non è limitata a un elenco fisso: **qualsiasi comune, paese o
+  frazione d'Italia entra nel catalogo** nel momento in cui qualcuno aggiunge
+  un immobile o attiva la scheda della località (zone con coordinate reali,
+  create dalla geocodifica). Regole privacy applicate
   (solo immobili come punti, aggregati di città con soglia e soppressione,
   mai persone geolocalizzate); i pin hanno etichettatura anti-collisione e i
   punti immobile compaiono a zoom ravvicinato. L'endpoint `/api/public/map`
