@@ -1,0 +1,102 @@
+ZoomZoom — Correzione definitiva: "Valutazione mancante o non valida per: Stato di manutenzione" (stavolta lato server)
+====================================================================================
+
+PERCHÉ LA CORREZIONE PRECEDENTE NON È BASTATA
+----------------------------------------------
+La diagnosi era giusta (i cursori delle valutazioni mostrano 5 ma, se non
+toccati, il valore non veniva inviato), e la correzione era nel punto
+giusto (il modulo). Ma era una correzione che dipendeva dal fatto che il
+BROWSER ricevesse e usasse il modulo nuovo. Tra deploy, cache del server,
+cache del browser e processi locali rimasti attivi, c'è ancora troppa
+incertezza: se una sola di quelle cache serve il modulo vecchio, l'errore
+si ripresenta identico. È quello che ti è successo.
+
+LA CORREZIONE DI OGGI NON PUÒ ESSERE AGGIRATA DA NESSUNA CACHE
+---------------------------------------------------------------
+Il rimedio è stato spostato NEL SERVER, nel punto unico dove tutte le
+recensioni vengono validate prima del salvataggio (sia la creazione sia
+la rettifica). La regola diventa:
+
+  - un criterio che NON arriva (slider mai toccato) viene registrato con
+    il punteggio 5 — esattamente quello che il cursore mostra a schermo;
+  - un criterio che arriva con un valore SBAGLIATO (7.3, 12, negativo…)
+    continua a essere RIFIUTATO con "Valutazione non valida per: …".
+
+Nessuna cache del browser può bypassarla: anche con la pagina vecchia in
+memoria, la recensione si pubblica. È lo stesso principio della diagnostica
+che ha risolto il problema del client del database: quando il rimedio sta
+nel server, funziona per tutti, sempre.
+
+Il modulo corretto (pacchetto precedente) resta utile e va tenuto: ora il
+valore mostrato a schermo viene anche inviato. Ma la garanzia è il server.
+
+LA PROVA MACCHINA (fatta con la stessa sequenza tua, tutte verdi)
+-----------------------------------------------------------------
+  1. creazione immobile: OK;
+  2. recensione SENZA punteggi per criterio (cursori mai toccati) →
+     PUBBLICATA; nel database i criteri risultano tutti a 5
+     ({"stato":5,"descrizione":5,"spazi":5,"rumori":5,"impianti":5,
+     "rapporto":5});
+  3. recensione con "Stato di manutenzione" = 7.3 → RIFIUTATA
+     ("Valutazione non valida per: Stato di manutenzione.");
+  4. recensione con "Stato di manutenzione" = 12 → RIFIUTATA;
+  5. recensione con tutti i criteri validi (incluso 7.5 e 8) →
+     PUBBLICATA con i valori inviati.
+
+La qualità dei dati NON è ridotta: i valori presenti vengono comunque
+validati con rigore (0–10, step 0,5). Cambia solo il destino dei criteri
+assenti, che prima facevano fallire tutto e ora valgono il 5 mostrato.
+
+FILE DEL PACCHETTO
+------------------
+src/lib/server/validation.ts        LA CORREZIONE DECISIVA (server): un
+                                    criterio assente vale 5; i valori
+                                    presenti restano validati rigorosamente.
+                                    Copre creazione E rettifica.
+src/components/review-fields.tsx    il modulo (già consegnato: lo si
+                                    ricalca per sicurezza): ora invia
+                                    davvero il 5 che mostra a schermo.
+
+Nessuna modifica a: database (nessun db:push), schema, dipendenze,
+variabili d'ambiente, criteri, categorie.
+
+INSTALLAZIONE (3 minuti)
+------------------------
+1) Estrai lo zip in una cartella temporanea.
+2) PowerShell (mantenendo i percorsi):
+       Copy-Item -Force "C:\percorso\estratto\src\lib\server\validation.ts" "C:\Users\Carlo\sito\zoomzoom\src\lib\server\validation.ts"
+       Copy-Item -Force "C:\percorso\estratto\src\components\review-fields.tsx" "C:\Users\Carlo\sito\zoomzoom\src\components\review-fields.tsx"
+3) Locale: riavvia "bun run dev" (o lascia che ricarichi da solo).
+4) SITO PUBBLICO (indispensabile: è lì che vedevi l'errore):
+       cd C:\Users\Carlo\sito\zoomzoom
+       git add src/lib/server/validation.ts src/components/review-fields.tsx
+       git commit -m "valutazioni: criteri non inviati = 5 (ciò che il cursore mostra); valori non validi rifiutati"
+       git push
+   Attendi il redeploy di Vercel (1-2 minuti, "Ready" nella dashboard).
+   Non serve pulire la cache di build: è una modifica al codice del sito,
+   non alla generazione del client del database.
+5) VERIFICA, stavolta SENZA Ctrl+F5 e persino con la pagina già aperta
+   dalla volta scorsa: ricompila la recensione e pubblicala. Se il modulo
+   è ancora quello vecchio in cache, pazienza: il server la accetta lo
+   stesso (i criteri assenti valgono 5). Con Ctrl+F5 in più, anche il
+   modulo invierà i 5 che mostra: coerente in ogni caso.
+
+VERIFICA RAPIDA
+---------------
+1) #/recensione → "Un immobile" → scegli/aggiungi l'immobile;
+2) NON toccare i cursori dei criteri, compila il resto (almeno un aspetto
+   positivo, descrizione ≥ 100 caratteri, dichiarazione spuntata);
+3) "Pubblica la recensione" → si pubblica, con i criteri a 5;
+4) riprova anche muovendo alcuni cursori: i voti scelti vengono rispettati;
+5) (solo per fiducia, se vuoi) prova dall'API o da un browser con la cache
+   vuota: il comportamento è identico, perché la regola sta nel server.
+
+SE (IMPROBABILE) L'ERRORE COMPARISSE ANCORA
+-------------------------------------------
+Significherebbe che il redeploy non è arrivato. Controlla:
+  1. su Vercel, Deployments: la deployment in cima deve essere "Ready" e
+     con orario DOPO il push;
+  2. apri https://TUO-SITO/api/diagnostica: la riga "quando" mostra data
+     e ora del server che risponde;
+  3. mandami la scritta esatta e l'orario della deployment: si vede
+     subito se il codice nuovo è attivo.

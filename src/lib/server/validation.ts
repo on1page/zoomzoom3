@@ -63,8 +63,19 @@ export function validateReviewPayload(p: ReviewPayload, cat: CategoryDef): Revie
   const critIn: Record<string, number> | undefined = p.criteria ?? p.crit;
   for (const c of cat.criteria) {
     const v = num(critIn?.[c.key]);
-    if (v == null || Number.isNaN(v) || !validHalfStep(v)) {
-      return { ok: false, error: `Valutazione mancante o non valida per: ${c.label}.` };
+    if (v == null) {
+      // TOLLERANZA SERVER (robustezza): i cursori del modulo mostrano 5
+      // quando un criterio non è stato toccato; moduli in versione cache
+      // (o client vecchi) possono non inviare quel valore. Il 5 è ciò che
+      // l'utente ha visto a schermo: lo si adotta come punteggio del
+      // criterio, invece di rifiutare la recensione con "Valutazione
+      // mancante o non valida per: …". I valori PRESENTI restano validati
+      // rigorosamente (sotto): un valore sbagliato non passa.
+      criteria[c.key] = 5;
+      continue;
+    }
+    if (Number.isNaN(v) || !validHalfStep(v)) {
+      return { ok: false, error: `Valutazione non valida per: ${c.label}.` };
     }
     criteria[c.key] = v;
   }

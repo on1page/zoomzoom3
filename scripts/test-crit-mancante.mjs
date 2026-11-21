@@ -1,10 +1,9 @@
-// ZoomZoom — prova del bug "Valutazione mancante o non valida per: Stato di
-// manutenzione": riproduce via API la sequenza reale (creazione immobile +
-// recensione) con e senza i punteggi per criterio, per dimostrare che:
-//   1. senza crit → il server risponde l'errore IDENTICO a quello visto
-//      dall'utente (primo criterio non inviato = "Stato di manutenzione");
-//   2. con tutti i criteri (come ora li invia il form corretto, slider mai
-//      toccati = 5) → la recensione si pubblica.
+// ZoomZoom — prova della tolleranza server per le valutazioni mancanti:
+//   1. recensione SENZA crit (slider mai toccati) → ora si PUBBLICA, con i
+//      criteri assenti salvati a 5 (ciò che il cursore mostra a schermo);
+//   2. recensione con un valore PROPRIO non valido (7.3, 12) → rifiutata
+//      ("Valutazione non valida per: …"): la qualità dei dati resta garantita;
+//   3. recensione con tutti i criteri → pubblicata con i valori inviati.
 // Uso: bun scripts/test-crit-mancante.mjs
 import { PrismaClient } from "@prisma/client";
 import { createHash, randomBytes, scryptSync } from "node:crypto";
@@ -17,7 +16,6 @@ const EMAIL = "crittest@zoomzoom.test";
 const j = async (r) => ({ status: r.status, body: await r.json().catch(() => null) });
 
 async function main() {
-  // utente verificato + sessione (come make-ui-test-user)
   const old = await db.user.findUnique({ where: { email: EMAIL } });
   if (old) await db.user.delete({ where: { id: old.id } });
   const salt = randomBytes(16).toString("hex");
@@ -31,10 +29,8 @@ async function main() {
   await db.session.create({
     data: { userId: u.id, kind: "public", tokenHash: sha256(token), expiresAt: new Date(Date.now() + 4 * 3600_000) },
   });
-  const cookie = `zz_session=${token}`;
-  const H = { "content-type": "application/json", cookie };
+  const H = { "content-type": "application/json", cookie: `zz_session=${token}` };
 
-  // 1. crea l'immobile (come il tasto "Aggiungi e Scrivi la Recensione")
   const rEnt = await j(await fetch(`${BASE}/api/entities`, {
     method: "POST", headers: H,
     body: JSON.stringify({
@@ -42,8 +38,26 @@ async function main() {
       zone: { name: "Milano", province: "Milano", region: "Lombardia", lat: 45.4642, lng: 9.19 },
     }),
   }));
-  console.log("1) creazione immobile:", rEnt.status, rEnt.body?.entity?.id ? "OK (id " + rEnt.body.entity.id + ")" : JSON.stringify(rEnt.body).slice(0, 200));
   const entityId = rEnt.body?.entity?.id;
+  console.log("1) creazione immobile:", rEnt.status, entityId ? "OK (id " + entityId + ")" : JSON.stringify(rEnt.body).slice(0, 200));
+
+  // una scheda DIVERSA per ogni prova: l'utente può scrivere una sola
+  // recensione per scheda (il 409 dei test precedenti era proprio quella
+  // regola di buon senso, non un errore)
+  const nuovaScheda = async (n) => {
+    const r = await j(await fetch(`${BASE}/api/entities`, {
+      method: "POST", headers: H,
+      body: JSON.stringify({
+        address: `Via di Prova Crit ${n}`,
+        zone: { name: "Milano", province: "Milano", region: "Lombardia", lat: 45.4642, lng: 9.19 },
+      }),
+    }));
+    return r.body?.entity?.id;
+  };
+  const creaRecensione = async (entityId, extra) => j(await fetch(`${BASE}/api/reviews`, {
+    method: "POST", headers: H,
+    body: JSON.stringify({ ...base, entityId, ...extra }),
+  }));
 
   const base = {
     entityId, experienceKind: "Abitazione in affitto", score: 7,
@@ -54,34 +68,46 @@ async function main() {
     honesty: true, hp: "",
   };
 
-  // 2. recensione SENZA crit (slider mai toccati, form PRIMA del fix)
-  const rNo = await j(await fetch(`${BASE}/api/reviews`, {
-    method: "POST", headers: H,
-    body: JSON.stringify({ ...base, crit: {} }),
-  }));
-  console.log("2) senza crit (form vecchio):", rNo.status, "→", JSON.stringify(rNo.body?.error || rNo.body).slice(0, 140));
+  // 2. SENZA crit → ora deve pubblicarsi (criteri a 5 di default)
+  const rNo = await creaRecensione(entityId, { crit: {} });
+  console.log("2) senza crit (slider mai toccati):", rNo.status, rNo.body?.reviewId ? "PUBBLICATA (review " + rNo.body.reviewId + ")" : JSON.stringify(rNo.body).slice(0, 160));
 
-  // 3. recensione CON tutti i criteri a 5 (form DOPO il fix: slider mai toccati = 5)
-  const crit5 = { stato: 5, descrizione: 5, spazi: 5, rumori: 5, impianti: 5, rapporto: 5 };
-  const rSi = await j(await fetch(`${BASE}/api/reviews`, {
-    method: "POST", headers: H,
-    body: JSON.stringify({ ...base, crit: crit5 }),
-  }));
-  console.log("3) con crit a 5 (form corretto):", rSi.status, rSi.body?.reviewId ? "PUBBLICATA (review " + rSi.body.reviewId + ")" : JSON.stringify(rSi.body).slice(0, 200));
+  // verifica che i criteri assenti siano stati salvati a 5
+  let salvati5 = false;
+  if (rNo.body?.reviewId) {
+    const rv = await db.review.findUnique({ where: { id: rNo.body.reviewId } });
+    const crit = rv?.criteriaJson ? JSON.parse(rv.criteriaJson) : null;
+    salvati5 = !!crit && crit.stato === 5 && crit.rapporto === 5;
+    console.log("   criteri salvati nella recensione:", JSON.stringify(crit));
+  }
 
-  // esito
-  const riprodotto = /Valutazione mancante o non valida per: Stato di manutenzione/.test(String(rNo.body?.error));
-  const pubblicata = rSi.status === 200 || rSi.status === 201 || !!rSi.body?.reviewId;
+  // 3. valore non valido → rifiutato
+  const e3 = await nuovaScheda(13);
+  const rBad = await creaRecensione(e3, { crit: { stato: 7.3, descrizione: 5, spazi: 5, rumori: 5, impianti: 5, rapporto: 5 } });
+  console.log("3) crit con 7.3 (non valido):", rBad.status, "→", JSON.stringify(rBad.body?.error || rBad.body).slice(0, 120));
+
+  const e4 = await nuovaScheda(14);
+  const rBad2 = await creaRecensione(e4, { crit: { stato: 12, descrizione: 5, spazi: 5, rumori: 5, impianti: 5, rapporto: 5 } });
+  console.log("4) crit con 12 (fuori scala):", rBad2.status, "→", JSON.stringify(rBad2.body?.error || rBad2.body).slice(0, 120));
+
+  // 5. tutti i criteri validi → pubblicata con i valori inviati
+  const e5 = await nuovaScheda(15);
+  const rSi = await creaRecensione(e5, { crit: { stato: 8, descrizione: 7, spazi: 6, rumori: 5, impianti: 7.5, rapporto: 8 } });
+  console.log("5) crit completi e validi:", rSi.status, rSi.body?.reviewId ? "PUBBLICATA (review " + rSi.body.reviewId + ")" : JSON.stringify(rSi.body).slice(0, 160));
+
+  const pubblicataNo = !!rNo.body?.reviewId && salvati5;
+  const rifiutati = rBad.status === 400 && rBad2.status === 400;
+  const pubblicataSi = !!rSi.body?.reviewId;
   console.log("\nVERDETTO:");
-  console.log("  bug riprodotto con crit assente:", riprodotto ? "SÌ (identico all'errore dell'utente)" : "no: " + JSON.stringify(rNo.body).slice(0, 120));
-  console.log("  recensione pubblicata con crit completi:", pubblicata ? "SÌ" : "no");
+  console.log("  recensione SENZA punteggi pubblicata (criteri a 5):", pubblicataNo ? "SÌ" : "NO");
+  console.log("  valori non validi ancora rifiutati:", rifiutati ? "SÌ" : "NO");
+  console.log("  recensione con punteggi completi pubblicata:", pubblicataSi ? "SÌ" : "NO");
 
-  // pulizia: rimuovo l'utente di test (cascade su sessioni/recensioni) e l'entità
-  await db.review.deleteMany({ where: { entityId } }).catch(() => {});
-  await db.entity.deleteMany({ where: { id: entityId } }).catch(() => {});
+  await db.review.deleteMany({ where: { entity: { proposedBy: `user:${u.id}` } } }).catch(() => {});
+  await db.entity.deleteMany({ where: { proposedBy: `user:${u.id}` } }).catch(() => {});
   await db.user.delete({ where: { id: u.id } }).catch(() => {});
   await db.$disconnect();
-  process.exit(riprodotto && pubblicata ? 0 : 1);
+  process.exit(pubblicataNo && rifiutati && pubblicataSi ? 0 : 1);
 }
 
 main().catch(e => { console.error(e); process.exit(1); });
