@@ -30,6 +30,21 @@ export function ReviewFields<T extends ReviewFormCore>({ cat, form, setForm }: {
       setForm(f => ({ ...f, priceUnit: cat.priceUnits[0] }));
     }
   }, [cat.priceUnits, form.priceUnit, setForm]);
+
+  // gli slider mostrano 5 quando un criterio non è mai stato toccato: quel 5
+  // deve esistere anche nello stato, altrimenti il criterio non viene inviato
+  // e il server rifiuta la recensione con "Valutazione mancante o non valida
+  // per: …" (basta NON muovere uno slider per farlo scattare). Questo effetto
+  // scrive nello stato, una sola volta, lo stesso 5 che è già a schermo.
+  useEffect(() => {
+    if (cat.criteria.some(c => form.crit[c.key] == null)) {
+      setForm(f => {
+        const crit = { ...f.crit };
+        for (const c of cat.criteria) if (crit[c.key] == null) crit[c.key] = 5;
+        return { ...f, crit };
+      });
+    }
+  }, [cat.criteria, form.crit, setForm]);
   return (
     <>
       <div className="field">

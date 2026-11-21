@@ -1,0 +1,87 @@
+ZoomZoom — Correzione: "Valutazione mancante o non valida per: Stato di manutenzione"
+====================================================================================
+
+DIAGNOSI (dimostrata con una prova macchina, non dedotta)
+--------------------------------------------------------
+Non è il database e non è un abbinamento di nomi sbagliato: i nomi dei
+criteri coincidono perfettamente, perché sia il modulo del sito sia la
+validazione del server li leggono DALLA STESSA TABELLA del database.
+
+Il bug è molto più sottile ed era nascosto nel modulo della recensione.
+Ogni criterio (per gli immobili: "Stato di manutenzione", "Corrispondenza
+con la descrizione ricevuta", ecc.) appare come un cursore scorrevole che,
+all'apertura della pagina, è POSIZIONATO su 5. Sembrerebbe tutto a posto:
+invece quel 5 è solo DIPINTO sullo schermo. Il valore viene davvero scritto
+nel modulo SOLO quando il cursore viene mosso con il mouse. Se lasci un
+cursore dov'è (il caso normale: "5 va bene, non lo tocco"), quel criterio
+non viene proprio inviato al server. E il server, giustamente, lo esige:
+risponde "Valutazione mancante o non valida per: …" citando il PRIMO
+criterio rimasto senza valore — per gli immobili è "Stato di manutenzione".
+Ecco perché l'errore compariva sempre con lo stesso nome.
+
+La prova (fatta sul server di sviluppo, con la stessa sequenza tua):
+  1. creazione immobile: OK;
+  2. recensione inviata senza i punteggi (cursori mai mossi) → il server
+     risponde ALLA LETTERA "Valutazione mancante o non valida per: Stato
+     di manutenzione." — l'errore che vedi tu;
+  3. stessa recensione con i punteggi dei cursori non toccati impostati a 5
+     (cioè quello che il modulo corretto invia) → PUBBLICATA.
+
+LA CORREZIONE (un solo file, chirurgica)
+----------------------------------------
+src/components/review-fields.tsx — il componente condiviso da TUTTI i
+flussi di recensione (contributo aperto e via invito): al caricamento
+della pagina, ogni cursore mai toccato riceve nello stato lo stesso 5 che
+già mostra sullo schermo. Da quel momento ciò che vedi è esattamente ciò
+che viene inviato. Chi vuole un voto diverso muove il cursore, come sempre.
+Nient'altro è stato toccato: validazioni, criteri, database, categoria,
+salvataggio: tutto identico. Il punteggio complessivo (0–10) era già
+incluso nello stato iniziale e non aveva il problema.
+
+INSTALLAZIONE (2 minuti)
+------------------------
+1) Estrai lo zip in una cartella temporanea.
+2) PowerShell (mantenendo i percorsi):
+       Copy-Item -Force "C:\percorso\estratto\src\components\review-fields.tsx" "C:\Users\Carlo\sito\zoomzoom\src\components\review-fields.tsx"
+3) Nessun db:push, nessuna variabile d'ambiente: il database è già a posto.
+4) Server locale: riavvia "bun run dev" (o lascialo ricaricare da solo).
+5) SITO PUBBLICO (indispensabile, è dove hai visto l'errore):
+       cd C:\Users\Carlo\sito\zoomzoom
+       git add src/components/review-fields.tsx
+       git commit -m "il valore mostrato dai cursori delle valutazioni viene ora inviato davvero"
+       git push
+   Attendi il redeploy di Vercel (1-2 minuti).
+6) NEL BROWSER premi Ctrl+F5 sulla pagina del sito (forza il caricamento
+   del modulo nuovo: senza questo rischio di usare la versione vecchia
+   ancora in cache del browser).
+
+VERIFICA RAPIDA
+---------------
+1) #/recensione → "Un immobile" → scegli/aggiungi l'immobile;
+2) nella pagina "Scrivi la recensione" NON toccare i cursori dei criteri
+   (lasciali tutti a 5), compila gli altri campi (almeno un aspetto
+   positivo, descrizione di almeno 100 caratteri, spunta la dichiarazione);
+3) "Pubblica la recensione" → si pubblica. L'errore è sparito;
+4) (opzionale) riprova muovendo QUALCHE cursore: i voti scelti vengono
+   rispettati, quelli lasciati a 5 valgono 5.
+
+TEST ESEGUITI SU QUESTA VERSIONE (tutti verdi)
+----------------------------------------------
+- RIPRODUZIONE ESATTA DELL'ERRORE via API: recensione senza punteggi per
+  criterio → risposta identica lettera per lettera ("Valutazione mancante
+  o non valida per: Stato di manutenzione.");
+- stessa recensione con i criteri completi (cursori non toccati = 5) →
+  pubblicata con successo (id recensione restituito);
+- creazione immobile preliminare riuscita (flusso territorio nazionale
+  intatto);
+- lint e controllo tipi sul file modificato: nessun errore;
+- il componente è condiviso: la correzione vale sia per il contributo
+  aperto sia per il flusso con invito/verifica, in un solo punto.
+
+SE QUALCOSA ANDASSE STORTO
+--------------------------
+Manda la scritta esatta che compare (basta la frase) e la riga del
+terminale del server, se presente. Nota bene: se dopo il deploy
+l'errore si ripresenta IDENTICO, il 99% delle volte è la cache del
+BROWSER che serve il modulo vecchio: Ctrl+F5 (o apri la pagina in
+modalità navigazione anonima) prima di qualunque altra ipotesi.
