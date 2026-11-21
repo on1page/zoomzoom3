@@ -43,22 +43,49 @@ sopra: apri il tuo package.json e aggiungi a mano solo quella riga dentro
 "scripts" (ricorda la virgola alla fine della riga precedente). Se invece
 non lo hai mai toccato, copia pure il file del pacchetto.
 
-MOSSA 2 — IL "FORZA" VERO: redeploy con cache pulita
-----------------------------------------------------
-La Mossa 1, da sola, al prossimo deploy rigenera il client (il postinstall
-viene eseguito sempre, anche con la cache riusata). Se vuoi essere certo
-al 100% fin da subito, o se dopo la Mossa 1 la diagnostica dicesse ancora
-VECCHIO, pulisci la cache di Vercel:
+MOSSA 2 — IL "FORZA" VERO: redeploy senza la vecchia cache
+----------------------------------------------------------
+La casella non si chiama "Clear Build Cache and Redeploy": il pannello
+è stato rinnovato e l'opzione è al CONTRARIO. Nella finestra di Redeploy
+c'è una casella
+
+    "Use existing Build Cache"
+
+che è GIA' SPUNTATA (riusa la cache vecchia): per la build pulita bisogna
+TOGLIERE la spunta.
 
   1. apri  https://vercel.com  ed entra nel progetto del sito;
   2. scheda "Deployments" (in alto);
   3. clicca la deployment più recente (la prima dell'elenco);
-  4. menu "..." in alto a destra → "Redeploy";
-  5. NELLA FINESTRA CHE SI APRE spunta l'opzione
-       "Clear Build Cache and Redeploy"
-     (È QUELLA la casella che butta via la cache con il client vecchio);
-  6. conferma e attendi 2-3 minuti la build (la vedi avanzare nella
-     stessa pagina).
+  4. menu "..." (i tre puntini, in alto a destra) → "Redeploy";
+  5. NELLA FINESTRA "Redeploy to Production" CHE SI APRE: TOGLI la spunta
+     alla casella "Use existing Build Cache"
+     (è questo che butta via la cache con il client vecchio: spunta =
+     riusa la cache, niente spunta = build pulita);
+  6. premi "Redeploy" e attendi 2-3 minuti la build (la vedi avanzare
+     nella stessa pagina).
+
+MOSSA 2-BIS — SE LA CASELLA NON SI TROVA (o l'errore resta): rimedio garantito, senza cache
+--------------------------------------------------------------------------------------------
+Se nella finestra non vedessi nessuna casella, o dopo il redeploy la
+diagnostica dicesse ancora VECCHIO, c'è una strada che NON dipende dalla
+cache: far rigenerare il client durante la BUILD, che viene eseguita
+fresca dalla repository a ogni deploy, cache o non cache.
+
+  1. su Vercel: entra nel progetto → scheda "Settings" → "General" →
+     sezione "Build & Output Settings";
+  2. alla voce "Build Command" attiva l'override e scrivi:
+         prisma generate && next build
+  3. premi "Save";
+  4. torna in "Deployments" → ultima deployment → "..." → "Redeploy"
+     (stavolta la casella della cache non conta: il comando di build si
+     esegue comunque);
+  5. verifica come sempre: https://TUO-SITO/api/diagnostica
+
+Da qui in poi OGNI deploy rigenera il client dal prisma/schema.prisma
+presente nella repository: il problema non può più ripetersi. (Esiste
+anche la variabile d'ambiente VERCEL_FORCE_NO_BUILD_CACHE=1 che disattiva
+la cache di build, ma il Build Command qui sopra è più mirato.)
 
 SEQUENZA CONSIGLIATA (5 minuti in tutto)
 ----------------------------------------
@@ -77,8 +104,10 @@ SEQUENZA CONSIGLIATA (5 minuti in tutto)
 4) VERIFICA (la prova che decide tutto): apri nel browser
        https://TUO-SITO/api/diagnostica
    "clientDatabase" deve dire "aggiornato (conosce province/region/source)".
-5) Se dice ancora VECCHIO: fai la Mossa 2 (Redeploy con "Clear Build Cache
-   and Redeploy") e ricontrolla /api/diagnostica.
+5) Se dice ancora VECCHIO: fai la Mossa 2 (Redeploy TOGLIENDO la spunta a
+   "Use existing Build Cache") e ricontrolla /api/diagnostica; se la
+casella non si trova o l'errore resta, la Mossa 2-BIS (Build Command
+"prisma generate && next build") risolve in ogni caso.
 6) Quando la diagnostica dice "aggiornato": riprova subito la recensione
    ("Aggiungi e Scrivi la Recensione") — questa volta la località viene
    salvata.
@@ -114,12 +143,15 @@ TEST ESEGUITI SU QUESTA VERSIONE
 
 SE DOPO LA MOSSA 2 DICESSE ANCORA VECCHIO
 -----------------------------------------
-Vorrebbe dire che la build di Vercel usa un comando o una cache
-particolare (per esempio un Build Command personalizzato che salta
-l'installazione). In quel caso:
+Prima di tutto: fai la Mossa 2-BIS (Build Command "prisma generate &&
+next build") — risolve sempre, perché il comando di build viene eseguito
+dalla repository a ogni deploy e nessuna cache può saltarlo.
+
+Solo se anche dopo la 2-BIS l'errore restasse (caso davvero remoto):
   1. apri su Vercel la deployment → "Building" / "Build Logs";
-  2. cerca la riga "Generated Prisma Client" (deve esserci, generata dal
-     postinstall; se manca, il postinstall non è partito);
+  2. cerca la riga "Generated Prisma Client" (deve esserci; se manca, il
+     comando di build non è quello impostato: controlla di aver salvato
+     l'override in Settings → General → Build & Output Settings);
   3. mandami quelle prime 20-30 righe dei Build Logs insieme alla risposta
      di /api/diagnostica: con quelle si vede al primo sguardo quale
      comando Vercel sta davvero eseguendo.
