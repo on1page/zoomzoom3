@@ -1,0 +1,161 @@
+ZoomZoom — Correzione: la città si conferma (e si vede nella casella) + diagnosi onesta dell'errore di salvataggio
+================================================================================
+
+Cosa risolve questo aggiornamento
+---------------------------------
+Due problemi segnalati nel modulo "Aggiungi un immobile da recensire",
+entrambi corretti senza toccare nulla di ciò che già funziona:
+
+  1. LA CITTÀ SCOMPARIVA DALLA CASELLA. Scegliendo un valore dalla lista del
+     campo "Città, comune o paese" la casella si svuotava: il nome restava
+     solo in una piccola riga sotto il campo e sembrava che la scelta "non
+     si memorizzasse" (mentre il campo "Indirizzo dell'immobile" si riempie
+     correttamente).
+     → ORA: la località scelta RESTA NELLA CASELLA, come l'indirizzo. Sotto
+     il campo compaiono due tasti, come chiesto: "Conferma" (accanto a
+     "Cambia") che marca la scelta con l'avviso verde "Città confermata",
+     e "Cambia" che la sostituisce. In più: basta digitare il nome e
+     premere INVIO per confermare il primo risultato della lista (stesso
+     comportamento del campo indirizzo) — niente più clic obbligatori.
+
+  2. "ERRORE INTERNO NEL SALVATAGGIO DELLA LOCALITÀ". Il clic sulla mappa
+     funziona (il pin si piazza); l'errore arriva al momento del salvataggio
+     ed è un errore DEL SERVER, non della mappa. La diagnosi fatta sul
+     codice è netta: quel messaggio esce SOLO quando la scrittura della
+     zona sul database fallisce per un problema interno. Sul database di
+     test tutto passa (19 test di regressione + doppio invio simultaneo);
+     la causa quasi certa nel TUO ambiente è una di queste due, entrambe
+     con lo stesso rimedio:
+       a) il client Prisma è ancora quello generato dallo schema VECCHIO
+          (prima delle colonne provincia/regione/provenienza): le letture
+          funzionano ma la CREAZIONE della zona esplode;
+       b) il database non ha le colonne nuove della tabella Zone.
+     Entrambe accadono se il punto 3 del pacchetto "territorio nazionale"
+     (bun run db:push) non è stato eseguito — o non è andato a buon fine —
+     su una delle due copie del sito (locale o Vercel).
+     → ORA: l'errore viene RICONOSCIUTO e il messaggio dice esattamente
+     che cosa fare (per esempio: "Il software del sito non è aggiornato…
+     l'amministratore deve eseguire bun run db:push e riavviare il
+     server"). Niente più "riprova tra poco" che non si risolve mai. In
+     più, il doppio clic su "Aggiungi e scrivi la recensione" non può più
+     generare l'errore: il tasto si disattiva durante il salvataggio e il
+     server, se riceve comunque due richieste gemelle, le riassume in una
+     sola zona invece di rispondere 500.
+
+COME METTERE A POSTO SUBITO L'AMBIENTE TUO (2 minuti)
+-----------------------------------------------------
+1) Ferma il server di sviluppo (Ctrl+C).
+2) Dal terminale, nella cartella del progetto:
+       bun run db:push
+   (aggiorna la tabella Zone con le colonne mancanti e RIGENERA il client
+   del database: nessun dato perso, solo aggiunte)
+3) Riavvia:
+       bun run dev
+4) Se il sito pubblico su Vercel ha lo stesso problema, dopo il deploy
+   esegui lo stesso comando puntando al database di produzione (come già
+   fatto per i pacchetti precedenti: bun run db:push con le variabili di
+   produzione, oppure dalla dashboard Supabase/Neon se usi quello).
+5) Prova di nuovo: se l'errore persiste, il NUOVO messaggio dirà la causa
+   precisa (con codice come DB_CLIENT_VECCHIO, DB_SCHEMA_VECCHIO o il
+   codice Prisma) — mandamelo e la correzione è immediata.
+
+Come funziona ora, in dettaglio
+--------------------------------
+- CITTÀ MEMORIZZATA NELLA CASELLA (place-search.tsx): dopo la scelta (clic
+  su un suggerimento oppure INVIO sul primo risultato) la casella mostra
+  il nome della località e l'aiuto "Memorizzata. Per cambiarla premi
+  'Cambia'". Il campo resta coerente con ciò che verrà salvato.
+- TASTO "CONFERMA" (write-review-open.tsx): accanto a "Cambia", come
+  richiesto. Premendolo la pill diventa "Città confermata" (verde). La
+  conferma è un'assicurazione visiva, non un obbligo: si può procedere
+  anche senza premerla.
+- INVIO = CONFERMA IL PRIMO RISULTATO (place-search.tsx): digitando il
+  nome del paese e premendo INVIO la ricerca parte subito e la prima
+  località trovata viene scelta (come nel campo indirizzo). Vale anche
+  per il passo "Quale città?" del flusso recensione zona.
+- NESSUN DOPPIO INVIO (write-review-open.tsx): durante il salvataggio il
+  tasto diventa "Aggiungo…" e si disattiva.
+- SALVATAGGIO ZONA A PROVA DI GARA (zones.ts): se due richieste uguali
+  arrivano insieme (doppio clic, rete lenta) la seconda non fallisce più:
+  riconosce la zona appena nata e la riusa.
+- ERRORI CON LA CAUSA VERA (zones.ts, entities/route.ts, zones/route.ts):
+  client generato vecchio → messaggio con istruzione db:push; colonne
+  mancanti → idem; database irraggiungibile → "riprova tra poco" (vero);
+  altro → codice Prisma nel log del server e nel messaggio. La risposta
+  porta anche un campo "zoneCode" utile per eventuali segnalazioni.
+
+Verifica rapida (2 minuti)
+--------------------------
+1) #/recensione → "Un immobile" → "+ Aggiungi un immobile da recensire";
+2) nel campo "Città, comune o paese" digita il tuo paese e premi INVIO:
+   il nome resta NELLA CASELLA e sotto compaiono "Conferma" e "Cambia";
+3) premi "Conferma": pill verde "Città confermata";
+4) clicca il punto sulla mappa (il pin si piazza come sempre), compila
+   l'indirizzo e premi "Aggiungi e scrivi la recensione" → si passa alla
+   recensione. Se invece compare un messaggio con l'istruzione db:push:
+   eseguila (punto precedente) e riprova;
+5) (opzionale) prova anche "Una città / zona" → "La tua città non è tra
+   queste?": INVIO attiva la scheda del paese cercato.
+
+File del pacchetto (tutti da sovrascrivere)
+-------------------------------------------
+src/components/place-search.tsx           città che resta nella casella +
+                                          INVIO che conferma il primo
+                                          risultato
+src/components/views/write-review-open.tsx  tasto "Conferma" accanto a
+                                          "Cambia", stato "Città confermata",
+                                          tasto che si disattiva durante il
+                                          salvataggio
+src/lib/server/zones.ts                   salvataggio zona a prova di doppio
+                                          invio + riconoscimento della causa
+                                          degli errori interni
+src/app/api/entities/route.ts             messaggi con la causa vera e il
+                                          rimedio (niente più "riprova tra
+                                          poco" senza spiegazioni)
+src/app/api/zones/route.ts                come sopra per l'attivazione delle
+                                          schede città (anche qui gli errori
+                                          interni non si travestono più da
+                                          "località non collocabile")
+
+Nessuna modifica a database, dipendenze o variabili d'ambiente OLTRE al
+db:push già richiesto dal pacchetto "territorio nazionale" (vedi sopra:
+se non lo hai ancora eseguito, fallo ADESSO: è la causa più probabile
+dell'errore di salvataggio).
+
+Installazione
+-------------
+1) Ferma il server di sviluppo (Ctrl+C).
+2) Estrai lo zip e copia la cartella "src" dentro il progetto
+   (C:\Users\Carlo\sito\zoomzoom), mantenendo i percorsi:
+       Copy-Item -Recurse -Force "C:\percorso\estratto\src" "C:\Users\Carlo\sito\zoomzoom\"
+3) Esegui l'aggiornamento del database (fondamentale, vedi sopra):
+       cd C:\Users\Carlo\sito\zoomzoom
+       bun run db:push
+4) Riavvia: bun run dev — e prova la verifica rapida.
+5) Deploy Vercel: commit + push dei soli file elencati sopra.
+
+Test automatici (tutti verdi su questa versione)
+------------------------------------------------
+- Suite "territorio nazionale" completa: 19/19 (ricerca geocodificata,
+  reverse geocoding, immobile in località nuova, dedup, attivazione zona
+  + idempotenza, riuso zona nota, recensione su paese nuovo, bootstrap/
+  mappa, rifiuti vari);
+- DOPPIO INVIO SIMULTANEO sulla stessa città nuova: entrambe le richieste
+  ora vanno a buon fine (prima una delle due poteva fallire con 500);
+  nel database resta UNA sola zona, niente doppioni;
+- Prova end-to-end nel browser: città digitata + INVIO → resta nella
+  casella → "Conferma" → pill verde → pin sulla mappa → pubblicazione
+  scheda OK; anche il flusso "Una città / zona" con INVIO attiva la
+  scheda del paese;
+- Casi limite confermati: località sconosciuta senza coordinate né pin →
+  messaggio utile; nome corto → idem; fuori Italia → rifiutato.
+
+Note e limiti onesti
+--------------------
+- La conferma con INVIO sceglie il primo risultato della ricerca: se il
+  paese ha omonimi, scegli quello giusto dalla lista con il clic (la
+  lista mostra provincia e regione per distinguerli).
+- Se l'errore di salvataggio persiste DOPO il db:push, il nuovo messaggio
+  conterrà la causa precisa (es. codice Prisma P…): quello, più la riga
+  "[entities] errore interno in ensureZone" dal terminale del server,
+  identifica il problema al primo sguardo.

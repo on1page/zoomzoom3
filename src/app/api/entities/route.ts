@@ -20,7 +20,7 @@ import { publicEntity } from "@/lib/server/public-data";
 import { auditLog } from "@/lib/server/audit";
 import { guard, readJson, handleError, fail } from "@/lib/server/http";
 import { rateLimit } from "@/lib/server/rate-limit";
-import { ensureZone, ensureZoneEntity, findZoneByName, inItalyBounds, ZoneNameError, ZonePositionError } from "@/lib/server/zones";
+import { ensureZone, ensureZoneEntity, findZoneByName, inItalyBounds, classifyZoneSaveError, ZoneNameError, ZonePositionError } from "@/lib/server/zones";
 
 // normalizza un indirizzo per il confronto: maiuscole, accenti e punteggiatura
 // non devono creare schede duplicate dello stesso luogo
@@ -89,9 +89,11 @@ export async function POST(req: Request) {
             console.warn("[entities] zona non geolocalizzabile:", e.message, JSON.stringify({ name: zoneName, lat: p.zone?.lat, lng: p.zone?.lng }));
           } else {
             // errore interno (database e simili): non mascherarlo da "fuori
-            // Italia" — log dettagliato lato server + messaggio onesto
+            // Italia" — log dettagliato lato server + diagnosi onesta con
+            // il rimedio (spesso è il database da aggiornare con db:push)
             console.error("[entities] errore interno in ensureZone:", e);
-            return fail("Errore interno nel salvataggio della località: riprova tra poco.", 500);
+            const issue = classifyZoneSaveError(e);
+            return fail(issue.message, 500, { zoneCode: issue.code });
           }
         }
       }
@@ -118,7 +120,8 @@ export async function POST(req: Request) {
               console.warn("[entities] zona non geolocalizzabile nemmeno col pin:", e.message, JSON.stringify({ name: zoneName, geo: p.geo }));
             } else {
               console.error("[entities] errore interno in ensureZone (da pin):", e);
-              return fail("Errore interno nel salvataggio della località: riprova tra poco.", 500);
+              const issue = classifyZoneSaveError(e);
+              return fail(issue.message, 500, { zoneCode: issue.code });
             }
           }
         }

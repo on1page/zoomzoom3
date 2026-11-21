@@ -176,6 +176,11 @@ function FindStep({ target, onSelected, onBack }: {
   const [adding, setAdding] = useState(false);
   const [address, setAddress] = useState("");
   const [zone, setZone] = useState<ZonePick | null>(null);
+  // conferma esplicita della città scelta (tasto “Conferma” accanto a
+  // “Cambia”): la città è già valida dopo la scelta, ma così chi compila
+  // vede CHIARAMENTE che il valore è memorizzato — come per l'indirizzo
+  const [zoneOk, setZoneOk] = useState(false);
+  const [addBusy, setAddBusy] = useState(false);
   const [geo, setGeo] = useState<LatLng | null>(null);
   const [geoQ, setGeoQ] = useState("");
   const [geoRes, setGeoRes] = useState<Array<{ label: string; lat: number; lng: number; zoneName: string | null; province: string | null; region: string | null; road?: string | null; houseNumber?: string | null }> | null>(null);
@@ -186,6 +191,13 @@ function FindStep({ target, onSelected, onBack }: {
   // zona: elenco delle città già sul catalogo (dalla mappa pubblica)
   const [pubZones, setPubZones] = useState<PubZone[] | null>(null);
   const [zoneBusy, setZoneBusy] = useState(false);
+
+  // ogni via che imposta la città passa da qui: la conferma precedente
+  // (eventuale) si azzera finché non si conferma la nuova
+  const applyZone = (z: ZonePick | null) => {
+    setZone(z);
+    setZoneOk(false);
+  };
 
   const search = useCallback(async (query: string) => {
     setBusy(true);
@@ -244,7 +256,7 @@ function FindStep({ target, onSelected, onBack }: {
           const a = res.address;
           const street = [a.road, a.houseNumber].filter(Boolean).join(" ");
           if (street) setAddress(street);
-          if (a.zoneName) setZone({ name: a.zoneName, province: a.province, region: a.region, lat: pt.lat, lng: pt.lng });
+          if (a.zoneName) applyZone({ name: a.zoneName, province: a.province, region: a.region, lat: pt.lat, lng: pt.lng });
           toast("Indirizzo riconosciuto: controlla e correggi se serve.");
         } else {
           toast("Posizione rilevata, ma l'indirizzo non risulta mappato: inseriscilo a mano (il pin è già a posto).", "err");
@@ -261,7 +273,7 @@ function FindStep({ target, onSelected, onBack }: {
   const pickAddress = (p: AddressPlace) => {
     setGeo({ lat: p.lat, lng: p.lng });
     if (p.zoneName) {
-      setZone({ name: p.zoneName, province: p.province, region: p.region, lat: p.lat, lng: p.lng });
+      applyZone({ name: p.zoneName, province: p.province, region: p.region, lat: p.lat, lng: p.lng });
     }
   };
 
@@ -278,19 +290,21 @@ function FindStep({ target, onSelected, onBack }: {
     if (street && !address.trim()) setAddress(street);
     if (zone) return; // città già scelta: il risultato serve solo per il pin
     if (g.zoneName) {
-      setZone({ name: g.zoneName, province: g.province, region: g.region, lat: g.lat, lng: g.lng });
+      applyZone({ name: g.zoneName, province: g.province, region: g.region, lat: g.lat, lng: g.lng });
       return;
     }
     const res = await api<{ found: boolean; address: { zoneName: string | null; province: string | null; region: string | null } | null }>(`/api/public/geocode/reverse?lat=${g.lat}&lng=${g.lng}`);
     if (res.ok && res.found && res.address?.zoneName) {
-      setZone({ name: res.address.zoneName, province: res.address.province, region: res.address.region, lat: g.lat, lng: g.lng });
+      applyZone({ name: res.address.zoneName, province: res.address.province, region: res.address.region, lat: g.lat, lng: g.lng });
     } else {
       toast("Posizione segnata sulla mappa: scegli anche la città nel campo “Città, comune o paese”.", "err");
     }
   };
 
   const addEntity = async () => {
+    if (addBusy) return;
     setAddErr(null);
+    setAddBusy(true);
     const res = await api<{ entity: { id: string; name: string } }>("/api/entities", {
       body: {
         address: address.trim(),
@@ -308,6 +322,7 @@ function FindStep({ target, onSelected, onBack }: {
         geo,
       },
     });
+    setAddBusy(false);
     if (res.ok) {
       if (res.entity) {
         toast("Immobile aggiunto: ora scrivi la recensione.");
@@ -406,7 +421,8 @@ function FindStep({ target, onSelected, onBack }: {
             ) : (
               <form onSubmit={async e => {
                 e.preventDefault();
-                if (address.trim().length < 5 || !zone) { setAddErr("Indica l'indirizzo (almeno 5 caratteri) e scegli la città dai suggerimenti del campo “Città, comune o paese”."); return; }
+                if (addBusy) return;
+                if (address.trim().length < 5 || !zone) { setAddErr("Indica l'indirizzo (almeno 5 caratteri) e scegli la città dai suggerimenti del campo “Città, comune o paese” (basta digitarne il nome e premere Invio, o sceglierlo dalla lista)."); return; }
                 await addEntity();
               }}>
                 <div className="field">
@@ -425,7 +441,8 @@ function FindStep({ target, onSelected, onBack }: {
                   label="Città, comune o paese"
                   placeholder="Es. Milano, Corte de' Frati, Marciaga…"
                   hint="Qualsiasi località d'Italia: se non è ancora sul catalogo, la aggiungo al momento (nome e coordinate dalla cartografia OpenStreetMap)."
-                  onPick={p => setZone({
+                  selected={zone ? zone.name : null}
+                  onPick={p => applyZone({
                     name: p.zoneName || p.name,
                     province: p.province, region: p.region,
                     lat: p.lat, lng: p.lng,
@@ -433,9 +450,15 @@ function FindStep({ target, onSelected, onBack }: {
                   })} />
                 {zone ? (
                   <p className="small" style={{ marginTop: -6, marginBottom: 14 }}>
-                    <span className="pill pill-green">Città</span> <b>{zone.name}</b>
+                    {zoneOk
+                      ? <span className="pill pill-green">Città confermata</span>
+                      : <span className="pill pill-gray">Città</span>} <b>{zone.name}</b>
                     {zone.province ? ` · ${zone.province}` : ""}{zone.region && zone.province !== zone.region ? ` (${zone.region})` : ""}
-                    <button type="button" className="btn btn-ghost btn-xs" style={{ marginLeft: 8 }} onClick={() => setZone(null)}>Cambia</button>
+                    {!zoneOk ? (
+                      <button type="button" className="btn btn-primary btn-xs" style={{ marginLeft: 8 }}
+                        onClick={() => setZoneOk(true)}>Conferma</button>
+                    ) : null}
+                    <button type="button" className="btn btn-ghost btn-xs" style={{ marginLeft: 6 }} onClick={() => applyZone(null)}>Cambia</button>
                   </p>
                 ) : null}
                 <div className="field">
@@ -464,7 +487,7 @@ function FindStep({ target, onSelected, onBack }: {
                 {addErr ? <p className="error-msg" style={{ display: "block" }}>{addErr}</p> : null}
                 <div className="row" style={{ justifyContent: "flex-end" }}>
                   <button type="button" className="btn btn-ghost" onClick={() => setAdding(false)}>Annulla</button>
-                  <button className="btn btn-primary" type="submit">Aggiungi e scrivi la recensione</button>
+                  <button className="btn btn-primary" type="submit" disabled={addBusy}>{addBusy ? "Aggiungo…" : "Aggiungi e scrivi la recensione"}</button>
                 </div>
               </form>
             )}

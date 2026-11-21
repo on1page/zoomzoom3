@@ -14,7 +14,7 @@ import { getSettings } from "@/lib/server/settings";
 import { auditLog } from "@/lib/server/audit";
 import { guard, readJson, handleError, fail } from "@/lib/server/http";
 import { rateLimit } from "@/lib/server/rate-limit";
-import { ensureZone, ensureZoneEntity } from "@/lib/server/zones";
+import { ensureZone, ensureZoneEntity, classifyZoneSaveError, ZoneNameError, ZonePositionError } from "@/lib/server/zones";
 
 export async function POST(req: Request) {
   try {
@@ -48,8 +48,15 @@ export async function POST(req: Request) {
         lat: Number(p.lat),
         lng: Number(p.lng),
       }, "user");
-    } catch {
-      return fail("Non riesco a collocare questa località in Italia: cercala sulla mappa o prova con il nome del comune.");
+    } catch (e) {
+      // input non collocabile vs errore interno: due messaggi diversi, il
+      // secondo con la causa vera (spesso il database da aggiornare)
+      if (e instanceof ZoneNameError || e instanceof ZonePositionError) {
+        return fail("Non riesco a collocare questa località in Italia: cercala sulla mappa o prova con il nome del comune.");
+      }
+      console.error("[zones] errore interno in ensureZone:", e);
+      const issue = classifyZoneSaveError(e);
+      return fail(issue.message, 500, { zoneCode: issue.code });
     }
 
     const zone = zoneRes.zone;

@@ -7,6 +7,7 @@
 // non confronto di stringhe), così "Sesto San Giovanni" (MI) e un eventuale
 // omonimo altrove restano due posti distinti.
 import { db } from "@/lib/db";
+import { Prisma } from "@prisma/client";
 import type { Entity, Zone } from "@prisma/client";
 
 // errori tipizzati di ensureZone: la route li distingue dagli errori
@@ -52,6 +53,39 @@ export type ZoneSpec = {
 
 export type EnsureZoneResult = { zone: Zone; created: boolean };
 
+/* ---------- diagnosi onesta degli errori di salvataggio ---------- */
+
+// Un errore interno in ensureZone NON è colpa dell'utente e quasi sempre ha
+// una causa precisa: client Prisma generato da uno schema vecchio, database
+// senza le colonne delle località nazionali, connessione caduta. Qui viene
+// riconosciuta e tradotta in un messaggio che dice CHE COSA FARE, con un
+// codice utile al log. (Il caso più frequente in locale: il pacchetto
+// "territorio nazionale" copiato senza eseguire db:push — così findMany
+// funziona, ma il create/update con province/region/source esplode.)
+export type ZoneSaveIssue = { code: string; message: string };
+
+export function classifyZoneSaveError(e: unknown): ZoneSaveIssue {
+  if (e instanceof Prisma.PrismaClientValidationError) {
+    return {
+      code: "DB_CLIENT_VECCHIO",
+      message: "Il software del sito non è aggiornato all'ultima versione (client del database generato da uno schema precedente): l'amministratore deve eseguire “bun run db:push” e riavviare il server, poi riprovare.",
+    };
+  }
+  if (e instanceof Prisma.PrismaClientKnownRequestError) {
+    if (e.code === "P2022") {
+      return {
+        code: "DB_SCHEMA_VECCHIO",
+        message: "Il database del sito non ha ancora le colonne delle nuove località nazionali (provincia, regione, provenienza): l'amministratore deve eseguire “bun run db:push”, poi riprovare.",
+      };
+    }
+    if (e.code && e.code.startsWith("P1")) {
+      return { code: e.code, message: "Il database non risponde: riprova tra poco." };
+    }
+    return { code: e.code, message: "Errore interno nel salvataggio della località: riprova tra poco." };
+  }
+  return { code: "INTERNO", message: "Errore interno nel salvataggio della località: riprova tra poco." };
+}
+
 /**
  * Cerca una zona già nota dal solo NOME (fallback quando le coordinate non
  * sono arrivate o non sono valide: il nome normalizzato + l'eventuale
@@ -82,6 +116,9 @@ export async function findZoneByName(name: string, province?: string | null): Pr
  *  2. stesso nome E stessa provincia normalizzata → stessa zona (omònimi
  *     diversi restano distinti);
  *  3. altrimenti → nuova zona (id slug, con suffisso se l'id è occupato).
+ * Se il create scontra il vincolo UNIQUE dell'id (doppio invio o richiesta
+ * gemella), il riconoscimento si ripete una volta: la zona ormai esiste e
+ * viene restituita — il doppio clic non diventa più un errore 500.
  */
 export async function ensureZone(spec: ZoneSpec, source = "user"): Promise<EnsureZoneResult> {
   const name = String(spec.name || "").trim().replace(/\s+/g, " ").slice(0, 80);
@@ -93,63 +130,76 @@ export async function ensureZone(spec: ZoneSpec, source = "user"): Promise<Ensur
   const norm = normPlace(name);
   const provNorm = province ? normPlace(province) : null;
 
-  const all = await db.zone.findMany();
-  const sameName = all.filter(z => normPlace(z.name) === norm);
+  const resolve = async (attempt: number): Promise<EnsureZoneResult> => {
+    const all = await db.zone.findMany();
+    const sameName = all.filter(z => normPlace(z.name) === norm);
 
-  // 1) omonimo vicino: stesso posto
-  let best: { z: Zone; km: number } | null = null;
-  for (const z of sameName) {
-    const km = distanceKm({ lat: z.gpsLat, lng: z.gpsLng }, { lat, lng });
-    if (km <= 30 && (!best || km < best.km)) best = { z, km };
-  }
-  if (best) {
-    const zone = await db.zone.update({
-      where: { id: best.z.id },
-      data: {
-        province: best.z.province || province,
-        region: best.z.region || region,
-      },
-    });
-    return { zone, created: false };
-  }
+    // 1) omonimo vicino: stesso posto
+    let best: { z: Zone; km: number } | null = null;
+    for (const z of sameName) {
+      const km = distanceKm({ lat: z.gpsLat, lng: z.gpsLng }, { lat, lng });
+      if (km <= 30 && (!best || km < best.km)) best = { z, km };
+    }
+    if (best) {
+      const zone = await db.zone.update({
+        where: { id: best.z.id },
+        data: {
+          province: best.z.province || province,
+          region: best.z.region || region,
+        },
+      });
+      return { zone, created: false };
+    }
 
-  // 2) omonimo lontano ma stessa provincia: comunque stesso posto
-  const byProv = provNorm
-    ? sameName.find(z => z.province && normPlace(z.province) === provNorm)
-    : undefined;
-  if (byProv) {
-    const zone = await db.zone.update({
-      where: { id: byProv.id },
-      data: { province: byProv.province || province, region: byProv.region || region },
-    });
-    return { zone, created: false };
-  }
+    // 2) omonimo lontano ma stessa provincia: comunque stesso posto
+    const byProv = provNorm
+      ? sameName.find(z => z.province && normPlace(z.province) === provNorm)
+      : undefined;
+    if (byProv) {
+      const zone = await db.zone.update({
+        where: { id: byProv.id },
+        data: { province: byProv.province || province, region: byProv.region || region },
+      });
+      return { zone, created: false };
+    }
 
-  // 3) posto nuovo: id slug, con dedup per omonimi lontani
-  const base = slugifyPlace(name);
-  let id = base;
-  if (all.some(z => z.id === id)) {
-    const provSlug = provNorm ? provNorm.replace(/ /g, "-").slice(0, 12) : null;
-    id = provSlug && !all.some(z => z.id === `${base}-${provSlug}`)
-      ? `${base}-${provSlug}`
-      : `${base}-2`;
-    let n = 2;
-    while (all.some(z => z.id === id)) { n += 1; id = `${base}-${n}`; }
-  }
+    // 3) posto nuovo: id slug, con dedup per omonimi lontani
+    const base = slugifyPlace(name);
+    let id = base;
+    if (all.some(z => z.id === id)) {
+      const provSlug = provNorm ? provNorm.replace(/ /g, "-").slice(0, 12) : null;
+      id = provSlug && !all.some(z => z.id === `${base}-${provSlug}`)
+        ? `${base}-${provSlug}`
+        : `${base}-2`;
+      let n = 2;
+      while (all.some(z => z.id === id)) { n += 1; id = `${base}-${n}`; }
+    }
 
-  const zone = await db.zone.create({
-    data: {
-      id,
-      name,
-      province,
-      region,
-      source,
-      gpsLat: Math.round(lat * 1e6) / 1e6,
-      gpsLng: Math.round(lng * 1e6) / 1e6,
-      radiusM: Math.min(Math.max(Number(spec.radiusM) || 3000, 1000), 20000),
-    },
-  });
-  return { zone, created: true };
+    try {
+      const zone = await db.zone.create({
+        data: {
+          id,
+          name,
+          province,
+          region,
+          source,
+          gpsLat: Math.round(lat * 1e6) / 1e6,
+          gpsLng: Math.round(lng * 1e6) / 1e6,
+          radiusM: Math.min(Math.max(Number(spec.radiusM) || 3000, 1000), 20000),
+        },
+      });
+      return { zone, created: true };
+    } catch (e) {
+      // doppio invio / richiesta gemella: la zona è nata nel frattempo —
+      // un secondo giro di riconoscimento la trova e la restituisce
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002" && attempt < 1) {
+        return resolve(attempt + 1);
+      }
+      throw e;
+    }
+  };
+
+  return resolve(0);
 }
 
 export type EnsureZoneEntityResult = { entity: Entity; created: boolean };
