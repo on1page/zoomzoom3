@@ -174,6 +174,66 @@ committati con) la dipendenza leaflet. Rimedi:
 - nel log di Vercel, dopo il push corretto, la riga "Installing dependencies"
   NON deve più dire "(no changes)": bun installerà il pacchetto nuovo.
 
+Se il sito resta in caricamento e il log Vercel mostra P2022
+("The column `Zone.poly` does not exist" oppure "Entity.geoX")
+-----------------------------------------------------------------
+Cosa significa: il database è GIÀ passato al nuovo schema (il db:push
+del punto 4 ha funzionato: le colonne poly/labelX/labelY e geoX/geoY
+non esistono più), ma il codice deployato su Vercel contiene ANCORA il
+vecchio schema Prisma: le sue query chiedono le colonne vecchie e il
+database risponde che non esistono (errore P2022). Ogni chiamata a
+/api/public/bootstrap (e rankings, mappa…) fallisce con errore 500 e
+per questo la pagina resta in caricamento perpetuo.
+
+Causa quasi certa: prisma/schema.prisma — e/o altri file del pacchetto —
+non è finito nel commit/push su GitHub, nonostante fosse presente in
+locale. Nota: il build su Vercel può riuscire comunque, perché il
+progetto ha typescript.ignoreBuildErrors=true (gli errori di tipo non
+fermano la build; solo i moduli mancanti, come leaflet prima, la
+bloccano). Per questo il mismatch passa silenzioso e si vede solo a
+runtime.
+
+Rimedio (PowerShell, nella cartella del progetto):
+
+1) Verifica che lo schema in locale sia quello nuovo:
+
+      Select-String -Path prisma\schema.prisma -Pattern "radiusM"
+
+   deve trovare la riga: radiusM Int @default(3000)
+
+      Select-String -Path prisma\schema.prisma -Pattern "labelX|geoX"
+
+   NON deve trovare nulla. Se la prima ricerca non trova nulla, lo
+   schema locale è ancora il vecchio: ricopia la cartella prisma dal
+   pacchetto estratto e riesegui "bun run db:push" (stavolta migrerà
+   il database).
+
+2) Vedi cosa non è ancora committato:
+
+      git status --short
+
+3) Committa e pusha TUTTI i file del pacchetto che mancano:
+
+      git add prisma/schema.prisma scripts/seed.ts src
+      git commit -m "schema: zone come città reali (radiusM, geoLat/geoLng)"
+      git push
+
+   NON serve rifare db:push: il database è già a posto. NON serve
+   rieseguire il seed, salvo il caso 5 qui sotto.
+
+4) Al deploy completato la pagina deve caricarsi subito.
+
+5) Apri #/mappa: se vedi le 12 città reali (Torino, Milano, …, Palermo,
+   Cagliari) hai finito. Se invece compaiono i nomi della vecchia città
+   fittizia (Centro Storico, Borgo Fiume, …) significa che il seed non
+   è ancora stato eseguito sulla base dati: lancialo una volta da
+   locale (scrive direttamente sul database di produzione tramite
+   DIRECT_URL):
+
+      bun scripts\seed.ts
+
+   e poi ricarica la pagina.
+
 Verificato nel mirror
 ---------------------
 - endpoint /api/public/map: 12 città con coordinate reali, aggregati e
