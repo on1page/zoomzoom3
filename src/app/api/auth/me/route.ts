@@ -12,6 +12,10 @@ export async function GET() {
         id: user.id, email: user.email, nickname: user.nickname, role: user.role,
         emailVerified: user.emailVerified, subjectEntityId: user.subjectEntityId,
         totpEnabled: user.totpEnabled, isDemo: user.isDemo, createdAt: user.createdAt.toISOString(),
+        premium: {
+          active: !!(user.premiumUntil && user.premiumUntil.getTime() > Date.now()),
+          until: user.premiumUntil && user.premiumUntil.getTime() > Date.now() ? user.premiumUntil.toISOString() : null,
+        },
       } : null,
     });
   } catch (e) {

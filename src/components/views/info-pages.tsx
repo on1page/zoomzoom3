@@ -2,7 +2,7 @@
 // ZoomZoom — pagine informative: come funziona, privacy, cookie, termini,
 // regole recensioni, moderazione, contatti. Bozze con segnaposto espliciti
 // da verificare con professionisti prima del lancio.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useApp } from "@/lib/client/store";
 import { api } from "@/lib/client/api";
 import { Alert, Crumbs, LegalNote } from "../ui-kit";
@@ -64,7 +64,7 @@ export function HowItWorksView() {
         <ul>
           <li>Nessun annuncio di immobili in vendita o affitto;</li>
           <li>Nessun appuntamento, prenotazione o messaggistica tra utenti;</li>
-          <li>Nessun pagamento o servizio premium in questa versione;</li>
+          <li>Nessun servizio a pagamento: la <a href="#/premium">Membership Premium</a> non si compra, si guadagna contribuendo con recensioni verificate;</li>
           <li>Nessuna vendita di posizioni: la pubblicità, quando attiva, non influenza punteggi, medie né ordine dei risultati.</li>
         </ul>
         <h2>Modera, segnala, contesta</h2>
@@ -326,6 +326,53 @@ export function MailboxView() {
           </div>
         )) : <Alert kind="info">Nessun messaggio{filter ? " per questo destinatario" : ""} (la casella richiede l&apos;accesso staff: vedi la documentazione demo).</Alert>}
       </div>
+    </>
+  );
+}
+
+export function PremiumView() {
+  const { boot, user } = useApp();
+  const s = boot?.settings;
+  const days = s?.premiumDaysPerReview ?? 30;
+  return (
+    <>
+      <Crumbs items={[{ label: "Home", href: "#/" }, { label: "Membership Premium" }]} />
+      <div className="container"><div className="legal-body">
+        <div className="section-head" style={{ paddingTop: 22 }}>
+          <div>
+            <h1>Membership Premium</h1>
+            <p className="sub">Le recensioni integrali si leggono contribuendo: il Premium non si compra, si guadagna.</p>
+          </div>
+        </div>
+        <Alert kind="ok">
+          <b>In sintesi.</b> Le medie, i punteggi per criterio, i conteggi e le classifiche restano <b>pubblici per tutti</b>. Con il Premium leggi il testo integrale delle recensioni (punti di forza, criticità, descrizioni, prezzi dichiarati) di tutte le schede. Il Premium si attiva pubblicando una recensione verificata: <b>+{days} giorni per contributo</b>, accumulabili.
+        </Alert>
+        <h2>Come si ottiene</h2>
+        <ol>
+          <li>Registra e verifica la tua esperienza su una scheda (<a href="#/verifica-esperienza">verifica diretta</a> oppure invito email ricevuto dal soggetto);</li>
+          <li>Pubblica la recensione: dalla pubblicazione hai {days} giorni di Premium;</li>
+          <li>Ogni altro contributo verificato somma giorni, entro un tetto massimo di accumulo.</li>
+        </ol>
+        <p>Lo staff può anche concedere o revocare il Premium con motivazione registrata (per esempio per collaborazione, o come provvedimento). Lo stato e lo storico delle concessioni sono visibili nel <a href="#/profilo">tuo profilo</a> e inclusi nell&apos;<a href="#/profilo-impostazioni">esportazione dei tuoi dati</a>.</p>
+        {user?.premium?.active ? (
+          <Alert kind="ok"><b>Il tuo Premium è attivo</b>{user.premium.until ? ` fino al ${new Date(user.premium.until).toLocaleDateString("it-IT")}` : ""}. Grazie per il tuo contributo.</Alert>
+        ) : null}
+        <h2>Perché un incentivo (e i suoi rischi, detti chiari)</h2>
+        <p>Legare un vantaggio alla scrittura di una recensione spinge a contribuire, ma crea anche un rischio evidente: qualcuno potrebbe scrivere recensioni superficiali o inventate solo per ottenere il vantaggio. Non fingiamo che il problema non esista: dichiariamo le contromisure e i loro limiti.</p>
+        <h2>Cosa rende la frode difficile qui</h2>
+        <ul>
+          <li><b>Nessuna recensione anonima improvvisata.</b> A differenza di chi accetta recensioni da chiunque e le esamina solo dopo, su ZoomZoom la recensione richiede un&apos;<b>esperienza verificata a monte</b>: un invito email a uso singolo dal soggetto (con limiti giornalieri) o una verifica documentale valutata dalla moderazione. Scrivere una recensione falsa richiede prima un invito o un documento falsificato: reato, oltre che violazione dei <a href="#/termini">termini</a>;</li>
+          <li><b>Una recensione per esperienza.</b> Il vincolo è atomico sul database: richieste ripetute o concorrenti non aggirano il limite;</li>
+          <li><b>Revoca immediata del vantaggio.</b> Se la moderazione nasconde una recensione per frode o contenuti illeciti, i giorni di Premium ottenuti con quel contributo vengono <b>revocati automaticamente</b> e la scadenza ricalcolata; nei casi gravi l&apos;account viene sospeso, con l&apos;impossibilità di continuare a interagire;</li>
+          <li><b>Nessun premio per il voto.</b> I giorni si ottengono per il contributo, non per il punteggio assegnato: scrivere 10 o 2 non cambia il vantaggio;</li>
+          <li><b>Tetto di accumulo.</b> La scadenza non supera mai il massimo configurato: anche una lunga serie di contributi sospetti non costruisce un vantaggio illimitato;</li>
+          <li><b>Tracciatura.</b> Ogni concessione e revoca è registrata nel log di moderazione con motivazione.</li>
+        </ul>
+        <h2>Limiti dichiarati</h2>
+        <p>Un account duplicato (email diverse, stessa persona) potrebbe teoricamente accumulare più concessioni: come per ogni piattaforma, non possiamo escluderlo in assoluto. Gli inviti sono legati all&apos;email del cliente reale e i documenti sono esaminati da un moderatore, quindi ogni recensione fraudolenta ha un costo e lascia tracce; chiunque ne individui una può <a href="#/moderazione">segnalarla</a>. La verifica documentale è un controllo umano, non una prova giudiziaria: dichiariamo riduzione del rischio, non certezza assoluta.</p>
+        <h2>Privacy</h2>
+        <p>Il Premium è uno stato del tuo account, non un pagamento: non raccogliamo dati di fatturazione né numeri di telefono. Le tue concessioni compaiono nella tua area personale, sono incluse nell&apos;esportazione dei dati e vengono eliminate con l&apos;account (diritto all&apos;oblio). Il gating è applicato dal server: al browser non arrivano i testi riservati, quindi non esistono scorciatoie lato client per leggerli.</p>
+      </div></div>
     </>
   );
 }

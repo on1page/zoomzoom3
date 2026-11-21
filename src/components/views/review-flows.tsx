@@ -131,7 +131,7 @@ export function WriteReviewView({ expId }: { expId: string }) {
 }
 
 function WriteReviewForm({ expId, entityId, entityName, kind, period }: { expId: string; entityId: string; entityName: string; kind: string; period: string | null }) {
-  const { boot, toast } = useApp();
+  const { boot, toast, refreshBoot } = useApp();
   const [cat, setCat] = useState<{ id: string; name: string; criteria: { key: string; label: string }[]; priceUnits: string[] } | null>(null);
   const [form, setForm] = useState({ score: 5, crit: {} as Record<string, number>, priceAmount: "", priceUnit: "", priceKind: "Concluso/pagato", pros: "", cons: "", text: "", honesty: false, hp: "" });
   const [err, setErr] = useState<string | null>(null);
@@ -155,16 +155,25 @@ function WriteReviewForm({ expId, entityId, entityName, kind, period }: { expId:
         </div>
       </div>
       <Alert kind="info">Stelle e punteggio: il voto complessivo (0–10, step 0,5) verrà mostrato con la scala a cinque stelle e il valore numerico su 10. I criteri valutano aspetti specifici della categoria.</Alert>
+      {boot.site.premiumEnabled ? (
+        <Alert kind="ok"><b>Membership Premium.</b> Pubblicando questa recensione verificata ottieni <b>{boot.settings.premiumDaysPerReview} giorni di Premium</b>: ti permettono di leggere le recensioni integrali di tutte le schede. Il Premio è legato al contributo, non al voto; viene revocato se la moderazione accerta la frode.</Alert>
+      ) : null}
       <div className="card">
         <form onSubmit={async e => {
           e.preventDefault();
           setErr(null); setBusy(true);
-          const res = await api<{ reviewId: string }>("/api/reviews", {
+          const res = await api<{ reviewId: string; entityId: string; premium: { grantedDays: number; until: string } | null }>("/api/reviews", {
             body: { experienceId: expId, ...form },
           });
           setBusy(false);
           if (res.ok) {
-            toast("Recensione pubblicata: grazie.");
+            if (res.premium && res.premium.grantedDays > 0) {
+              const fino = res.premium.until ? new Date(res.premium.until).toLocaleDateString("it-IT", { day: "numeric", month: "long", year: "numeric" }) : "";
+              toast(`Recensione pubblicata: grazie! Membership Premium attivata per ${res.premium.grantedDays} giorni${fino ? ` (fino al ${fino})` : ""}.`);
+            } else {
+              toast("Recensione pubblicata: grazie.");
+            }
+            void refreshBoot(); // aggiorna subito lo stato Premium dell'utente
             navigate(`#/scheda/${entityId}`);
           } else setErr(res.error);
         }}>

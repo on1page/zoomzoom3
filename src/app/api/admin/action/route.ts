@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireStaff } from "@/lib/server/auth";
 import { updateSettings, invalidateSettingsCache } from "@/lib/server/settings";
+import { revokePremiumForReview, restorePremiumForReview, grantPremiumManually, revokeAllPremium } from "@/lib/server/premium";
 import { sendMail } from "@/lib/server/mailer";
 import { auditLog, securityLog } from "@/lib/server/audit";
 import { assertSameOrigin, readJson, handleError, fail } from "@/lib/server/http";
@@ -19,6 +20,7 @@ type ActionBody = {
   settings?: Record<string, unknown>;
   role?: string;
   categoryId?: string;
+  days?: number;
   geo?: { x?: number; y?: number };
 };
 
@@ -48,6 +50,10 @@ export async function POST(req: Request) {
         if (decision === "hide" && rep.review) {
           if (rep.review.status !== "published") return fail("La recensione non è pubblicata.", 409);
           await db.review.update({ where: { id: rep.review.id }, data: { status: "hidden", hiddenReason: reason } });
+          // frode accertata o contenuto illecito: il Premium ottenuto con quel
+          // contributo viene revocato e ricalcolato (adattamento del modello
+          // "rimuovi recensione e vantaggio" alla filosofia ZoomZoom)
+          await revokePremiumForReview(rep.review.id, `Recensione nascosta dalla moderazione: ${reason}`);
         }
         await db.report.update({ where: { id: rep.id }, data: { status: "decided", decision } });
         await db.reportDecision.create({
@@ -76,6 +82,7 @@ export async function POST(req: Request) {
         const rev = await db.review.findUnique({ where: { id: p.id } });
         if (!rev || rev.status !== "published") return fail("Recensione non pubblicata.", 409);
         await db.review.update({ where: { id: rev.id }, data: { status: "hidden", hiddenReason: reason } });
+        await revokePremiumForReview(rev.id, `Recensione nascosta dalla moderazione: ${reason}`);
         await auditLog({ actorId: actor.id, actorRole: actor.role, action: "Recensione nascosta", targetType: "review", targetId: rev.id, reason, isDemo: rev.isDemo });
         const author = await db.user.findUnique({ where: { id: rev.userId } });
         if (author) {
@@ -89,6 +96,8 @@ export async function POST(req: Request) {
         const rev = await db.review.findUnique({ where: { id: p.id } });
         if (!rev || rev.status !== "hidden") return fail("Recensione non nascosta.", 409);
         await db.review.update({ where: { id: rev.id }, data: { status: "published", hiddenReason: null } });
+        // appello accolto: il contributo torna valido e il Premium viene ripristinato
+        await restorePremiumForReview(rev.id);
         await auditLog({ actorId: actor.id, actorRole: actor.role, action: "Recensione ripristinata", targetType: "review", targetId: rev.id, reason: reason || "Ripristino a seguito di riesame.", isDemo: rev.isDemo });
         return NextResponse.json({ ok: true });
       }
@@ -201,6 +210,30 @@ export async function POST(req: Request) {
         await auditLog({ actorId: actor.id, actorRole: actor.role, action: "Uscita forzata sessione", targetType: "user", targetId: u.id, reason: reason || "Chiusura sessione per sicurezza.", isDemo: u.isDemo });
         return NextResponse.json({ ok: true });
       }
+      /* ---- Membership Premium ---- */
+      case "premium.grant": {
+        const actor = await requireStaff("admin.users");
+        const days = Math.min(365, Math.max(1, Math.round(Number(p.days) || 0)));
+        if (!days) return fail("Giorni non validi (1-365).");
+        if (reason.length < 10) return fail("Motivazione obbligatoria (almeno 10 caratteri).");
+        const u = await db.user.findUnique({ where: { id: p.id } });
+        if (!u) return fail("Utente non trovato.", 404);
+        const res = await grantPremiumManually({ userId: u.id, days, reason });
+        await auditLog({ actorId: actor.id, actorRole: actor.role, action: `Premium concesso manualmente: ${res.grantedDays} giorni`, targetType: "user", targetId: u.id, reason, isDemo: u.isDemo });
+        await sendMail(u.email, "Membership Premium attiva",
+          `Hai ricevuto ${res.grantedDays} giorni di Membership Premium. Motivazione: ${reason}`);
+        return NextResponse.json({ ok: true, premium: { until: res.until ? res.until.toISOString() : null } });
+      }
+      case "premium.revoke": {
+        const actor = await requireStaff("admin.users");
+        if (reason.length < 15) return fail("Motivazione obbligatoria (almeno 15 caratteri).");
+        const u = await db.user.findUnique({ where: { id: p.id } });
+        if (!u) return fail("Utente non trovato.", 404);
+        const n = await revokeAllPremium(u.id, reason);
+        await auditLog({ actorId: actor.id, actorRole: actor.role, action: `Premium revocato (${n} concessioni)`, targetType: "user", targetId: u.id, reason, isDemo: u.isDemo });
+        return NextResponse.json({ ok: true, revoked: n });
+      }
+
       case "privacy.done": {
         const actor = await requireStaff("admin.users");
         const pr = await db.privacyRequest.findUnique({ where: { id: p.id } });
@@ -288,6 +321,9 @@ export async function POST(req: Request) {
         const ied = num(s.inviteExpiryDays, 1, 90); if (ied != null) patch.inviteExpiryDays = ied;
         const prd = num(s.proofRetentionDays, 1, 365); if (prd != null) patch.proofRetentionDays = prd;
         const mma = num(s.mapMinAggregate, 1, 50); if (mma != null) patch.mapMinAggregate = mma;
+        const pdpr = num(s.premiumDaysPerReview, 0, 365); if (pdpr != null) patch.premiumDaysPerReview = pdpr;
+        const pmd = num(s.premiumMaxDays, 1, 3650); if (pmd != null) patch.premiumMaxDays = pmd;
+        if (typeof s.premiumEnabled === "boolean") patch.premiumEnabled = s.premiumEnabled;
         if (typeof s.adsEnabled === "boolean") patch.adsEnabled = s.adsEnabled;
         if (typeof s.adsClient === "string") patch.adsClient = s.adsClient.trim().slice(0, 40);
         const settings = await updateSettings(patch);

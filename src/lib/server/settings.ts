@@ -15,6 +15,9 @@ export type AppSettings = {
   globalNotice: string;          // mostrata solo in demo (vedi demoMode)
   proofRetentionDays: number;    // retention documenti di verifica
   mapMinAggregate: number;       // soglia minima aggregati zona sulla mappa
+  premiumEnabled: boolean;       // Membership Premium: gating recensioni integrali
+  premiumDaysPerReview: number;  // giorni Premium per recensione verificata pubblicata
+  premiumMaxDays: number;        // cap di accumulo: premiumUntil mai oltre now+questo
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -31,6 +34,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   globalNotice: "Istanza dimostrativa: tutti i contenuti di questa istanza sono dati fittizi, eliminabili dal super amministratore.",
   proofRetentionDays: 30,
   mapMinAggregate: 3,
+  premiumEnabled: true,
+  premiumDaysPerReview: 30,
+  premiumMaxDays: 365,
 };
 
 const SETTINGS_KEY = "app";

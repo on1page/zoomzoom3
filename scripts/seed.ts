@@ -217,6 +217,8 @@ async function main() {
   await db.dispute.deleteMany({ where: { isDemo: true } });
   await db.emailLog.deleteMany({ where: { isDemo: true } });
   await db.zone.deleteMany({ where: { isDemo: true } });
+  // concessioni Premium dei demo (verrebbero comunque rimosse a cascata con l'utente)
+  await db.premiumGrant.deleteMany({ where: { user: { isDemo: true } } });
   // 3) infine gli utenti demo
   if (demoUserIds.length) {
     await db.user.deleteMany({ where: { id: { in: demoUserIds } } });
@@ -477,6 +479,31 @@ async function main() {
       status: "received", createdAt: new Date(daysAgoIso(1)), isDemo: true,
     },
   });
+
+  // 10bis) Membership Premium dei recensori demo: ogni recensione pubblicata
+  // genera il grant come nel meccanismo reale. Nell'istanza demo le scadenze
+  // partono da adesso (il seed gira ora): così i login demo mostrano lo stato
+  // Premium attivo e il gating si prova con l'utente normale.
+  const PREMIUM_DAYS = 30;
+  const demoReviews = await db.review.findMany({
+    where: { isDemo: true, status: "published" },
+    select: { id: true, userId: true, createdAt: true },
+  });
+  const nowSeed = Date.now();
+  const premiumByUser = new Map<string, Date>();
+  if (demoReviews.length) {
+    await db.premiumGrant.createMany({
+      data: demoReviews.map(r => {
+        const expiresAt = new Date(Math.max(nowSeed, r.createdAt.getTime() + PREMIUM_DAYS * 86400000) + PREMIUM_DAYS * 86400000);
+        const cur = premiumByUser.get(r.userId);
+        if (!cur || expiresAt > cur) premiumByUser.set(r.userId, expiresAt);
+        return { userId: r.userId, reviewId: r.id, days: PREMIUM_DAYS, origin: "seed", grantedAt: r.createdAt, expiresAt };
+      }),
+    });
+    for (const [uid, until] of premiumByUser) {
+      await db.user.update({ where: { id: uid }, data: { premiumUntil: until } });
+    }
+  }
 
   // 11) Log demo
   await db.auditLog.createMany({

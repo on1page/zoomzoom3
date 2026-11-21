@@ -166,6 +166,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ section: strin
             id: u.id, nickname: u.nickname, email: u.email, role: u.role, roleLabel: ROLE_LABELS[u.role as keyof typeof ROLE_LABELS] || u.role,
             totpEnabled: u.totpEnabled, createdAt: u.createdAt.toISOString(),
             reviewsCount: u._count.reviews, disabled: u.disabled, isDemo: u.isDemo,
+            premiumUntil: u.premiumUntil && u.premiumUntil.getTime() > Date.now() ? u.premiumUntil.toISOString() : null,
           })),
           privacy: privacy.map(p => ({
             id: p.id, email: p.email, kind: p.kind, message: p.message,

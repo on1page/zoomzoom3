@@ -153,6 +153,7 @@ export function AdminView({ section }: { section: string }) {
   const [actionModal, setActionModal] = useState<{ kind: string; id?: string; extra?: Record<string, unknown> } | null>(null);
   const [reason, setReason] = useState("");
   const [decision, setDecision] = useState("keep");
+  const [days, setDays] = useState(30);
 
   const load = useCallback(async () => {
     const res = await api<Record<string, unknown>>(`/api/admin/data/${section}`);
@@ -228,6 +229,12 @@ export function AdminView({ section }: { section: string }) {
               </select>
             </div>
           ) : null}
+          {actionModal.kind === "premium.grant" ? (
+            <div className="field">
+              <label htmlFor="ad-days">Giorni di Membership Premium (1–365)</label>
+              <input id="ad-days" type="number" min={1} max={365} value={days} onChange={e => setDays(Math.min(365, Math.max(1, Number(e.target.value) || 1)))} />
+            </div>
+          ) : null}
           <div className="field">
             <label htmlFor="ad-reason">Motivazione (registrata nel log e comunicata)</label>
             <textarea id="ad-reason" value={reason} onChange={e => setReason(e.target.value)} placeholder="Perché si adotta questo esito."></textarea>
@@ -238,6 +245,8 @@ export function AdminView({ section }: { section: string }) {
               const kind = actionModal.kind;
               if (kind === "proposal.approve") {
                 void doAction(decision === "approve" ? "proposal.approve" : "proposal.reject", { id: actionModal.id, reason });
+              } else if (kind === "premium.grant") {
+                void doAction("premium.grant", { id: actionModal.id, days, reason });
               } else {
                 void doAction(kind, { id: actionModal.id, reason, decision });
               }
@@ -259,6 +268,8 @@ const actionModalTitles: Record<string, string> = {
   "experience.reject": "Rigetta la verifica",
   "invite.revoke": "Revoca l'invito",
   "user.toggle": "Sospendi/riattiva account",
+  "premium.grant": "Concedi Membership Premium",
+  "premium.revoke": "Revoca il Premium (tutte le concessioni)",
   "proposal.approve": "Decisione sulla proposta",
   "entity.toggle": "Pubblica/nascondi scheda",
   "review.restore": "Ripristina la recensione",
@@ -496,27 +507,29 @@ function AdminSection({ section, data, onAction, reload }: {
     }
 
     case "utenti": {
-      const users = (d?.users || []) as Array<{ id: string; nickname: string; email: string; roleLabel: string; totpEnabled: boolean; createdAt: string; reviewsCount: number; disabled: boolean; isDemo: boolean }>;
+      const users = (d?.users || []) as Array<{ id: string; nickname: string; email: string; roleLabel: string; totpEnabled: boolean; createdAt: string; reviewsCount: number; disabled: boolean; isDemo: boolean; premiumUntil: string | null }>;
       const privacy = (d?.privacy || []) as Array<{ id: string; email: string; kind: string; message: string; status: string; createdAt: string }>;
       return (
         <>
           <div className="admin-head"><h1>Utenti e privacy</h1><span className="pill pill-gray">{users.length} account</span></div>
-          <Alert kind="info">Accesso ai dati minimi necessari: qui non compaiono password (nemmeno hash) né segreti 2FA. La sospensione richiede motivo ed è registrata.</Alert>
+          <Alert kind="info">Accesso ai dati minimi necessari: qui non compaiono password (nemmeno hash) né segreti 2FA. La sospensione richiede motivo ed è registrata. Il Premium si guadagna con le recensioni verificate; qui si può concedere o revocare con motivazione.</Alert>
           <div className="table-wrap mb2">
             <table className="table">
-              <thead><tr><th scope="col">Utente</th><th scope="col">Ruolo</th><th scope="col">2FA</th><th scope="col">Dal</th><th scope="col" className="num">Rec.</th><th scope="col">Stato</th><th scope="col">Azioni</th></tr></thead>
+              <thead><tr><th scope="col">Utente</th><th scope="col">Ruolo</th><th scope="col">2FA</th><th scope="col">Premium</th><th scope="col" className="num">Rec.</th><th scope="col">Stato</th><th scope="col">Azioni</th></tr></thead>
               <tbody>
                 {users.map(u => (
                   <tr key={u.id}>
                     <td><b>{u.nickname}</b>{u.isDemo ? <span className="badge-demo">demo</span> : null}<br /><span className="small muted">{u.email}</span></td>
                     <td>{u.roleLabel}</td>
                     <td>{u.totpEnabled ? <span className="pill pill-green">2FA</span> : <span className="pill pill-gray">—</span>}</td>
-                    <td>{new Date(u.createdAt).toLocaleDateString("it-IT")}</td>
+                    <td>{u.premiumUntil ? <span className="pill pill-amber" title={`Attivo fino al ${new Date(u.premiumUntil).toLocaleDateString("it-IT")}`}>fino al {new Date(u.premiumUntil).toLocaleDateString("it-IT")}</span> : <span className="pill pill-gray">—</span>}</td>
                     <td className="num">{u.reviewsCount}</td>
                     <td>{u.disabled ? <span className="pill pill-red">Sospeso</span> : <span className="pill pill-green">Attivo</span>}</td>
                     <td>
                       <button className="btn btn-ghost btn-xs" onClick={() => onAction("user.toggle", u.id)}>{u.disabled ? "Riattiva" : "Sospendi"}</button>{" "}
-                      <button className="btn btn-ghost btn-xs" onClick={() => onAction("user.forceLogout", u.id)}>Forza uscita</button>
+                      <button className="btn btn-ghost btn-xs" onClick={() => onAction("user.forceLogout", u.id)}>Forza uscita</button>{" "}
+                      <button className="btn btn-ghost btn-xs" onClick={() => onAction("premium.grant", u.id)}>Premium +</button>
+                      {u.premiumUntil ? <> <button className="btn btn-ghost btn-xs" onClick={() => onAction("premium.revoke", u.id)}>Revoca Premium</button></> : null}
                     </td>
                   </tr>
                 ))}
@@ -790,7 +803,7 @@ function ContentsSection({ initial }: { initial: Record<string, unknown> | null 
 /* ---------- Impostazioni ---------- */
 function SettingsSection({ initial }: { initial: Record<string, unknown> | null }) {
   const { toast } = useApp();
-  const s = (initial?.settings || {}) as Record<string, number>;
+  const s = (initial?.settings || {}) as Record<string, number | boolean>;
   const [form, setForm] = useState({
     minReviews: Number(s.minReviews ?? 3),
     rettificaDays: Number(s.rettificaDays ?? 30),
@@ -799,8 +812,11 @@ function SettingsSection({ initial }: { initial: Record<string, unknown> | null 
     inviteExpiryDays: Number(s.inviteExpiryDays ?? 7),
     proofRetentionDays: Number(s.proofRetentionDays ?? 30),
     mapMinAggregate: Number(s.mapMinAggregate ?? 3),
+    premiumDaysPerReview: Number(s.premiumDaysPerReview ?? 30),
+    premiumMaxDays: Number(s.premiumMaxDays ?? 365),
+    premiumEnabled: s.premiumEnabled !== false,
   });
-  const fields: Array<[keyof typeof form, string, string]> = [
+  const fields: Array<[Exclude<keyof typeof form, "premiumEnabled">, string, string]> = [
     ["minReviews", "Soglia recensioni sufficienti (m della formula)", "Peso della media di categoria nella media ponderata; le schede sotto questa soglia sono segnala te come non sufficienti."],
     ["rettificaDays", "Finestra di rettifica (giorni)", "Giorni per aggiornare autonomamente una recensione con rettifica motivata."],
     ["inviteDailyCap", "Inviti al giorno per scheda", "Limite anti-abuso per soggetto verificato."],
@@ -808,6 +824,8 @@ function SettingsSection({ initial }: { initial: Record<string, unknown> | null 
     ["inviteExpiryDays", "Scadenza invito (giorni)", "Durata del token di invito."],
     ["proofRetentionDays", "Retention documenti (giorni)", "Dopo la decisione i documenti di verifica vengono cancellati (impostazione da validare con il professionista)."],
     ["mapMinAggregate", "Soglia aggregati mappa", "Numero minimo di recensioni per pubblicare un aggregato di zona sulla mappa (soppressione selettiva)."],
+    ["premiumDaysPerReview", "Premium: giorni per recensione", "Giorni di Membership Premium assegnati per ogni recensione verificata pubblicata. 0 disattiva l'assegnazione automatica."],
+    ["premiumMaxDays", "Premium: accumulo massimo (giorni)", "La scadenza del Premium non supera mai adesso + questo valore, per limitare i benefici della frode."],
   ];
   return (
     <>
@@ -827,6 +845,14 @@ function SettingsSection({ initial }: { initial: Record<string, unknown> | null 
               <span className="hint">{hint}</span>
             </div>
           ))}
+          <div className="field">
+            <label htmlFor="s-premiumEnabled">
+              <input id="s-premiumEnabled" type="checkbox" checked={form.premiumEnabled}
+                onChange={e => setForm(f => ({ ...f, premiumEnabled: e.target.checked }))} />{" "}
+              Membership Premium attiva (le recensioni integrali sono riservate a chi contribuisce)
+            </label>
+            <span className="hint">Se disattivata, tutte le recensioni tornano pubbliche come prima dell'introduzione del Premium: usalo per emergenze o manutenzione.</span>
+          </div>
           <button className="btn btn-primary" type="submit">Salva impostazioni</button>
         </form>
       </div>

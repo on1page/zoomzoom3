@@ -23,6 +23,10 @@ function ProfileTabs({ active }: { active: string }) {
 }
 
 type Overview = {
+  premium: {
+    enabled: boolean; active: boolean; until: string | null; daysPerReview: number;
+    grants: Array<{ id: string; days: number; origin: string; grantedAt: string; expiresAt: string; revokedAt: string | null; revokedReason: string | null; reviewEntityName: string | null }>;
+  };
   experiences: Array<{
     id: string; entity: { id: string; name: string; categoryId: string }; kind: string; period: string | null;
     origin: string; status: string; note: string | null; createdAt: string;
@@ -63,6 +67,37 @@ export function ProfileView() {
         </div>
       </div>
       <ProfileTabs active="#/profilo" />
+      {data.premium.enabled ? (
+        <div className={`card mb2 premium-card${data.premium.active ? " on" : ""}`}>
+          <div className="premium-card-head">
+            <h2 style={{ fontSize: "1.05rem", margin: 0 }}>Membership Premium</h2>
+            {data.premium.active ? (
+              <span className="pill pill-amber" title={data.premium.until ? `Attivo fino al ${new Date(data.premium.until).toLocaleDateString("it-IT")}` : ""}>
+                Attivo{data.premium.until ? ` fino al ${new Date(data.premium.until).toLocaleDateString("it-IT")}` : ""}
+              </span>
+            ) : <span className="pill pill-gray">Non attivo</span>}
+          </div>
+          <p className="small mb1">Il Premium si guadagna contribuendo: ogni recensione verificata pubblicata attiva <b>{data.premium.daysPerReview} giorni</b> (accumulabili), con cui leggere le recensioni integrali di tutte le schede. Le medie e i conteggi restano pubblici per tutti.</p>
+          {!data.premium.active ? (
+            <p className="small mb1">Per iniziare: <a href="#/verifica-esperienza">verifica un&apos;esperienza</a> e pubblica la tua prima recensione.</p>
+          ) : null}
+          {data.premium.grants.length ? (
+            <details>
+              <summary className="small">Storico concessioni ({data.premium.grants.length})</summary>
+              <ul className="small premium-grants">
+                {data.premium.grants.map(g => (
+                  <li key={g.id}>
+                    {g.origin === "admin" ? "Concessione dello staff" : g.origin === "seed" ? "Dato dimostrativo" : "Recensione"}
+                    {g.reviewEntityName ? ` · ${g.reviewEntityName}` : ""}: <b>+{g.days} giorni</b>
+                    {g.revokedAt ? <> · <span className="pill pill-red">revocata</span>{g.revokedReason ? ` (${g.revokedReason})` : ""}</> : ` · valida fino al ${new Date(g.expiresAt).toLocaleDateString("it-IT")}`}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
+          <p className="small muted mb0"><a href="#/premium">Come funziona il Premium</a> · incluso nella <a href="#/profilo-impostazioni">esportazione dati</a></p>
+        </div>
+      ) : null}
       <div className="card mb2">
         <h2 style={{ fontSize: "1.05rem", marginTop: 0 }}>Le tue esperienze verificate</h2>
         {data.experiences.length ? (

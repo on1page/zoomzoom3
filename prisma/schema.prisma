@@ -28,6 +28,10 @@ model User {
   // verifica della password) il login può mostrare una sola volta il QR
   // di registrazione dell'app di autenticazione
   firstTotpLoginAt DateTime?
+  // Membership Premium: attiva finché premiumUntil > adesso. Deriva dai
+  // PremiumGrant (una tantum per recensione pubblicata) o da concessioni
+  // amministrative; ricalcolata a ogni variazione dei grant.
+  premiumUntil     DateTime?
   disabled        Boolean   @default(false)
   failedLogins    Int       @default(0)
   lockedUntil     DateTime?
@@ -50,6 +54,7 @@ model User {
   auditLogs         AuditLog[]     @relation("auditActor")
   consents          Consent[]
   privacyRequests   PrivacyRequest[]
+  premiumGrants     PremiumGrant[]
 
   @@index([role])
 }
@@ -283,8 +288,32 @@ model Review {
   isDemo             Boolean  @default(false)
 
   reports Report[]
+  // contributo che ha generato il Premium (se la recensione viene nascosta
+  // per frode, il grant si revoca e il Premium si ricalcola)
+  premiumGrant PremiumGrant?
 
   @@index([entityId, status])
+  @@index([userId])
+}
+
+// Membership Premium: ogni grant è un periodo di giorni assegnato a un utente.
+// Origin: "review" (recensione verificata pubblicata) | "admin" (concessione
+// manuale) | "seed" (dati dimostrativi). premiumUntil = max(expiresAt) dei
+// grant non revocati: nessuno stato separato da mantenere sincronizzato.
+model PremiumGrant {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // un contributo può generare un solo grant (revoca mirata in moderazione)
+  reviewId      String?   @unique
+  review        Review?   @relation(fields: [reviewId], references: [id])
+  days          Int
+  origin        String    @default("review")
+  grantedAt     DateTime  @default(now())
+  expiresAt     DateTime
+  revokedAt     DateTime?
+  revokedReason String?
+
   @@index([userId])
 }
 

@@ -89,15 +89,17 @@ Next.js 16 (App Router, TypeScript) — unica pagina pubblica `/` (SPA con hash 
 └── Prisma + SQLite (prisma/schema.prisma, db/custom.db)
 ```
 
-### Schema dati (19 tabelle)
-`User` (scrypt, TOTP cifrato, ruoli) · `Session` (public/admin, hash) ·
-`BackupCode` · `EmailVerifyToken` · `Category` + `Criterion` + `CategoryVersion`
-(snapshot dei criteri al momento della recensione: le modifiche amministrative
-non alterano i punteggi storici) · `Zone` · `Entity` · `EntityProposal` ·
-`Experience` · `Invite` (solo hash) · `VerificationDoc` (area privata, retention) ·
-`Review` (criteri JSON + versione) · `Report` + `ReportDecision` · `Dispute` +
-`DisputeDecision` · `AuditLog` · `SecurityLog` · `Setting` · `Consent` ·
-`EmailLog` · `PrivacyRequest` · `ContactRequest`.
+### Schema dati (20 tabelle)
+`User` (scrypt, TOTP cifrato, ruoli, premiumUntil) · `Session` (public/admin,
+hash) · `BackupCode` · `EmailVerifyToken` · `Category` + `Criterion` +
+`CategoryVersion` (snapshot dei criteri al momento della recensione: le
+modifiche amministrative non alterano i punteggi storici) · `Zone` · `Entity` ·
+`EntityProposal` · `Experience` · `Invite` (solo hash) · `VerificationDoc`
+(area privata, retention) · `Review` (criteri JSON + versione) ·
+`PremiumGrant` (concessioni Premium: origine, giorni, revoca motivata) ·
+`Report` + `ReportDecision` · `Dispute` + `DisputeDecision` · `AuditLog` ·
+`SecurityLog` · `Setting` · `Consent` · `EmailLog` · `PrivacyRequest` ·
+`ContactRequest`.
 
 ### Ruoli e permessi
 - **user**: consultazione pubblica; recensioni solo con esperienza registrata.
@@ -126,6 +128,20 @@ di inattività e sono separate da quelle pubbliche.
 - **Classifiche**: `PC = (n·M + m·C)/(n+m)` con `m` = soglia recensioni e `C` =
   media della categoria, parametri esposti nell'API e nella pagina; sotto
   soglia le schede restano consultabili ma segnate "dati insufficienti".
+- **Membership Premium (guadagnata, non venduta)**: aggregati (medie,
+  criteri, conteggi, prezzi mediani) sempre pubblici; il testo integrale
+  delle recensioni è riservato a chi contribuisce. Ogni recensione verificata
+  pubblicata assegna N giorni di Premium (impostabile, default 30, tetto di
+  accumulo), il gating è applicato server-side in `/api/public/entity`
+  (al browser non arrivano mai i testi riservati); le proprie recensioni
+  restano sempre visibili all'autore e lo staff accede per moderare. Se la
+  moderazione nasconde una recensione (frode/illecito), il Premium ottenuto
+  con quel contributo viene revocato automaticamente e ricalcolato;
+  l'appello accolto lo ripristina. Concessioni e revoche sono tracciate
+  (`PremiumGrant`), i giorni non dipendono dal voto assegnato, l'amministrazione
+  può concedere/revocare con motivazione. Il Premium è incluso in
+  esportazione/eliminazione dati (GDPR). Interruttore di sicurezza nel back
+  office (`premiumEnabled=false` ripristina la piena visibilità pubblica).
 
 ---
 

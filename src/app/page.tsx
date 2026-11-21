@@ -9,7 +9,7 @@ import { HomeView } from "@/components/views/home";
 import { SearchView } from "@/components/views/search";
 import { CategoryView, MapView, RankingsView } from "@/components/views/map-rankings-category";
 import { EntityView, ZoneView } from "@/components/views/entity-zone";
-import { ContactsView, CookieView, HowItWorksView, MailboxView, ModerationView, NotFoundView, PrivacyView, ReviewRulesView, TermsView } from "@/components/views/info-pages";
+import { ContactsView, CookieView, HowItWorksView, MailboxView, ModerationView, NotFoundView, PremiumView, PrivacyView, ReviewRulesView, TermsView } from "@/components/views/info-pages";
 import { LoginView, RegisterView, VerifyEmailView } from "@/components/views/auth";
 import { ProfileInvitesView, ProfileSettingsView, ProfileView } from "@/components/views/profile";
 import { InviteView, ProposeView, SubjectAreaView, UpdateReviewView, VerifyExperienceView, WriteReviewView } from "@/components/views/review-flows";
@@ -38,6 +38,7 @@ function Router() {
       case "cookie": return <CookieView />;
       case "termini": return <TermsView />;
       case "regole-recensioni": return <ReviewRulesView />;
+      case "premium": return <PremiumView />;
       case "moderazione": return <ModerationView />;
       case "contatti": return <ContactsView />;
       case "casella-demo": return <MailboxView />;

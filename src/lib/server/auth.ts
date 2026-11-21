@@ -39,16 +39,19 @@ export type SessionUser = {
   id: string; email: string; nickname: string; role: Role;
   emailVerified: boolean; subjectEntityId: string | null;
   totpEnabled: boolean; disabled: boolean; isDemo: boolean; createdAt: Date;
+  premiumUntil: Date | null;
 };
 
 function toSessionUser(u: {
   id: string; email: string; nickname: string; role: string; emailVerified: boolean;
   subjectEntityId: string | null; totpEnabled: boolean; disabled: boolean; isDemo: boolean; createdAt: Date;
+  premiumUntil: Date | null;
 }): SessionUser {
   return {
     id: u.id, email: u.email, nickname: u.nickname, role: u.role as Role,
     emailVerified: u.emailVerified, subjectEntityId: u.subjectEntityId,
     totpEnabled: u.totpEnabled, disabled: u.disabled, isDemo: u.isDemo, createdAt: u.createdAt,
+    premiumUntil: u.premiumUntil,
   };
 }
 

@@ -1,10 +1,16 @@
 // POST /api/reviews — pubblicazione recensione su un'esperienza attiva
 // collegata all'utente. Transazione atomica: il vincolo UNIQUE su
 // experienceId nel DB impedisce duplicati anche sotto richieste concorrenti.
+// Ogni recensione verificata pubblicata assegna anche la Membership Premium
+// (N giorni, vedi impostazioni): l'incentivo è legato al contributo, non al
+// voto espresso, e viene revocato se la moderazione accerta la frode.
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/server/auth";
 import { getCategory, snapshotCategoryVersion } from "@/lib/server/categories";
+import { getSettings } from "@/lib/server/settings";
+import { awardPremiumForReview } from "@/lib/server/premium";
+import { auditLog } from "@/lib/server/audit";
 import { validateReviewPayload, type ReviewPayload } from "@/lib/server/validation";
 import { guard, readJson, handleError, fail } from "@/lib/server/http";
 
@@ -37,7 +43,26 @@ export async function POST(req: Request) {
         text: val.text, status: "published", verified: true, isDemo: exp.isDemo,
       },
     });
-    return NextResponse.json({ ok: true, reviewId: review.id, entityId: exp.entityId });
+
+    // Membership Premium: giorni per il contributo (idempotente: un grant per
+    // recensione; qui la recensione è appena stata creata, quindi è la prima)
+    const settings = await getSettings();
+    const premium = await awardPremiumForReview({
+      userId: user.id, reviewId: review.id, settings, grantedAt: review.createdAt,
+    });
+    if (premium.grantedDays > 0) {
+      await auditLog({
+        actorId: user.id, actorRole: user.role, action: `Premium assegnato: ${premium.grantedDays} giorni per recensione pubblicata`,
+        targetType: "review", targetId: review.id, reason: "Contributo verificato: esperienza attiva collegata.", isDemo: review.isDemo,
+      });
+    }
+
+    return NextResponse.json({
+      ok: true, reviewId: review.id, entityId: exp.entityId,
+      premium: premium.grantedDays > 0
+        ? { grantedDays: premium.grantedDays, until: premium.until ? premium.until.toISOString() : null }
+        : null,
+    });
   } catch (e) {
     // violazione dell'unique su experienceId: richiesta concorrente già servita
     if (e instanceof Error && e.message.includes("Unique constraint")) {

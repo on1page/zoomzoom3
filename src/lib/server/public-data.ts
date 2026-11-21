@@ -6,6 +6,7 @@ import { statsForEntity, priceStatsForEntity } from "./score";
 
 export type PublicReview = {
   id: string;
+  userId: string; // per il filtro "le proprie recensioni restano sempre visibili" (mai serializzato al client)
   author: string; // solo pseudonimo
   score: number;
   criteria: Record<string, number>;
@@ -38,6 +39,7 @@ export async function publicReviewsForEntity(entityId: string): Promise<PublicRe
     }
     return {
       id: r.id,
+      userId: r.userId,
       author: r.user.nickname,
       score: r.score,
       criteria: JSON.parse(r.criteriaJson) as Record<string, number>,

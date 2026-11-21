@@ -25,8 +25,40 @@ type EntityPayload = {
     createdAt: string; updatedAt: string | null; updateReason: string | null; isDemo: boolean;
   }>;
   hiddenCount: number;
+  publishedCount: number;
+  premium: {
+    enabled: boolean; daysPerReview: number; locked: boolean;
+    activeUntil: string | null; lockedCount: number;
+  };
   settings: { minReviews: number; rettificaDays: number };
 };
+
+// Scheda riservata agli utenti Premium: aggregati pubblici, testi integrali
+// sbloccati contribuendo. È il cartello mostrato al posto delle recensioni
+// quando l'utente non ha l'accesso (il server non invia i testi in alcun caso).
+function PremiumLockedBox({ lockedCount, daysPerReview, logged }: { lockedCount: number; daysPerReview: number; logged: boolean }) {
+  return (
+    <div className="premium-locked" role="note" aria-label="Recensioni riservate agli utenti Premium">
+      <div className="premium-locked-head">
+        <span className="premium-lock" aria-hidden="true">🔒</span>
+        <div>
+          <h3 style={{ margin: 0 }}>{lockedCount > 0 ? `${lockedCount} ${lockedCount === 1 ? "recensione riservata" : "recensioni riservate"}` : "Recensioni riservate"}</h3>
+          <p className="small mb0">Le medie, i criteri e i conteggi restano pubblici: è il testo integrale che si sblocca con la Membership Premium.</p>
+        </div>
+      </div>
+      <p className="small mb1">Il Premium non si compra: si guadagna contribuendo. Ogni recensione verificata che pubblichi attiva <b>{daysPerReview} giorni di Premium</b> (accumulabili), che ti lascia leggere tutte le recensioni del sito.</p>
+      <div className="row">
+        {logged ? (
+          <a className="btn btn-primary btn-sm" href="#/verifica-esperienza">Verifica la tua esperienza</a>
+        ) : (
+          <a className="btn btn-primary btn-sm" href="#/accedi">Accedi per iniziare</a>
+        )}{" "}
+        <a className="btn btn-ghost btn-sm" href="#/premium">Come funziona il Premium</a>
+      </div>
+      <p className="small muted mb0">Le tue recensioni restano sempre visibili a te. La moderazione può revocare il Premium ottenuto con contributi fraudolenti.</p>
+    </div>
+  );
+}
 
 export function EntityView({ id }: { id: string }) {
   const { boot, user, toast } = useApp();
@@ -113,10 +145,16 @@ export function EntityView({ id }: { id: string }) {
             <div className="section-head mt3">
               <h2>Recensioni</h2>
               <span className="pill pill-gray">
-                {data.reviews.length} pubblicate{data.hiddenCount ? ` · ${data.hiddenCount} nascoste dalla moderazione` : ""}
+                {data.premium.locked ? data.publishedCount : data.reviews.length} pubblicate{data.hiddenCount ? ` · ${data.hiddenCount} nascoste dalla moderazione` : ""}
               </span>
             </div>
+            {data.premium.locked ? (
+              <PremiumLockedBox lockedCount={data.premium.lockedCount} daysPerReview={data.premium.daysPerReview} logged={!!user} />
+            ) : null}
             <div className="grid">
+              {data.premium.locked && data.reviews.length ? (
+                <p className="small muted" style={{ marginTop: 10 }}>Queste sono le tue recensioni su questa scheda (sempre visibili a te):</p>
+              ) : null}
               {data.reviews.map(r => (
                 <article className="review" key={r.id} id={`rev-${r.id}`}>
                   <div className="review-head">
@@ -293,7 +331,7 @@ export function DisputeModal({ entityId, onClose }: { entityId: string; onClose:
 
 /* ---------- Scheda zona ---------- */
 export function ZoneView({ entityId }: { entityId: string }) {
-  const { boot } = useApp();
+  const { boot, user } = useApp();
   const [data, setData] = useState<EntityPayload | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [filterCat, setFilterCat] = useState("");
@@ -386,22 +424,28 @@ export function ZoneView({ entityId }: { entityId: string }) {
             {!sum.length ? <Alert kind="info">Nessun soggetto con recensioni in questa zona{filterCat ? " per la categoria selezionata" : ""}.</Alert> : null}
             <MethodNoteBox />
             <div className="section-head mt3"><h2>Recensioni della zona</h2></div>
-            <div className="grid">
-              {data.reviews.slice(0, 3).map(r => (
-                <article className="review" key={r.id}>
-                  <div className="review-head">
-                    <div className="review-author">
-                      <span className="avatar" aria-hidden="true">{r.author.slice(0, 2).toUpperCase()}</span>
-                      <div>
-                        <b>{r.author}</b> {r.verified ? <VerifBadge /> : null}
-                        <div className="review-meta">Pubblicata: {fmtMonthYear(r.createdAt)}</div>
+            {data.premium.locked ? (
+              <PremiumLockedBox lockedCount={data.premium.lockedCount} daysPerReview={data.premium.daysPerReview} logged={!!user} />
+            ) : (
+              <div className="grid">
+                {data.reviews.slice(0, 3).map(r => (
+                  <article className="review" key={r.id}>
+                    <div className="review-head">
+                      <div className="review-author">
+                        <span className="avatar" aria-hidden="true">{r.author.slice(0, 2).toUpperCase()}</span>
+                        <div>
+                          <b>{r.author}</b> {r.verified ? <VerifBadge /> : null}
+                          <div className="review-meta">Pubblicata: {fmtMonthYear(r.createdAt)}</div>
+                        </div>
                       </div>
+                      <div className="score-line"><Stars score={r.score} /><span className="score-num">{fmt1(r.score)} <small>/10</small></span></div>
                     </div>
-                    <div className="score-line"><Stars score={r.score} /><span className="score-num">{fmt1(r.score)} <small>/10</small></span></div>
-                  </div>
-                  <p className="review-body mb0">{r.text}</p>
-                </article>
-              ))}
+                    <p className="review-body mb0">{r.text}</p>
+                  </article>
+                ))}
+              </div>
+            )}
+            <div className="mt2">
               <a className="btn btn-ghost" href={`#/scheda/${entityId}`}>Tutte le recensioni e i criteri della zona</a>
             </div>
           </div>

@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { publicCategoriesPayload, publicZones } from "@/lib/server/public-data";
 import { getSettings } from "@/lib/server/settings";
 import { getCurrentUser } from "@/lib/server/auth";
+import { premiumStateOf } from "@/lib/server/premium";
 import { smtpConfigured } from "@/lib/server/mailer";
 import { db } from "@/lib/db";
 
@@ -29,6 +30,7 @@ export async function GET() {
       googleOAuthEnabled,
       adsEnabled: settings.adsEnabled && !!settings.adsClient,
       adsClient,
+      premiumEnabled: settings.premiumEnabled,
     },
     categories: cats,
     zones: zones.map(z => ({ id: z.id, name: z.name })),
@@ -39,6 +41,7 @@ export async function GET() {
       heroTitle: settings.heroTitle,
       heroSub: settings.heroSub,
       globalNotice: demoMode ? settings.globalNotice : "",
+      premiumDaysPerReview: settings.premiumDaysPerReview,
     },
     stats: { reviews: totalReviews, entities: totalEntities },
     user: user ? {
@@ -46,6 +49,10 @@ export async function GET() {
       emailVerified: user.emailVerified, subjectEntityId: user.subjectEntityId,
       totpEnabled: user.totpEnabled, isDemo: user.isDemo,
       createdAt: user.createdAt.toISOString(),
+      premium: {
+        active: premiumStateOf(user).active,
+        until: premiumStateOf(user).until ? premiumStateOf(user).until!.toISOString() : null,
+      },
     } : null,
   });
 }

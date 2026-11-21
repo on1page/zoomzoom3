@@ -17,18 +17,21 @@ export type SessionUser = {
   id: string; email: string; nickname: string; role: string;
   emailVerified: boolean; subjectEntityId: string | null;
   totpEnabled: boolean; isDemo: boolean; createdAt: string;
+  premium: { active: boolean; until: string | null };
 };
 export type Bootstrap = {
   site: {
     name: string; tagline: string; demoMode: boolean;
     emailDelivery: "smtp" | "demo" | "disabled";
     googleOAuthEnabled: boolean; adsEnabled: boolean; adsClient: string;
+    premiumEnabled: boolean;
   };
   categories: CategoryInfo[];
   zones: ZoneInfo[];
   settings: {
     minReviews: number; rettificaDays: number; inviteExpiryDays: number;
     heroTitle: string; heroSub: string; globalNotice: string;
+    premiumDaysPerReview: number;
   };
   stats: { reviews: number; entities: number };
   user: SessionUser | null;
