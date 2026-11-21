@@ -97,6 +97,11 @@ Installazione
        bun add leaflet@1.9.4
        bun add -d @types/leaflet@1.9.12
 
+   IMPORTANTE: questo comando modifica DUE file del progetto, package.json
+   e bun.lock. Senza di loro Vercel non installa il pacchetto e il build
+   fallisce con "Can't resolve 'leaflet'": vanno committati insieme a tutto
+   il resto (vedi il punto 7).
+
 4) Applica le modifiche al database:
 
        bun run db:push
@@ -135,12 +140,39 @@ Installazione
 
 7) Pubblica su Vercel:
 
-       git add prisma/schema.prisma scripts/seed.ts src
+       git add package.json bun.lock prisma/schema.prisma scripts/seed.ts src
        git commit -m "mappa reale: OpenStreetMap/Leaflet su tutto il territorio italiano"
        git push
 
+   NOTA: package.json e bun.lock sono INDISPENSABILI nel commit: contengono
+   la dipendenza leaflet installata al punto 3. Se li dimentichi, il deploy
+   su Vercel fallisce con l'errore "Module not found: Can't resolve
+   'leaflet'".
+
    Nessuna variabile d'ambiente nuova: DATABASE_URL, DIRECT_URL e APP_SECRET
    restano quelle già configurate.
+
+Se il deploy fallisce con "Can't resolve 'leaflet'"
+---------------------------------------------------
+Significa che package.json e bun.lock non contengono (o non sono stati
+committati con) la dipendenza leaflet. Rimedi:
+
+- verifica in locale che la dipendenza ci sia (PowerShell):
+
+      Select-String leaflet package.json
+
+  devono comparire due righe: "leaflet": "1.9.4" e "@types/leaflet": "1.9.12";
+
+- se mancano, riesegui il punto 3 (bun add …);
+
+- in ogni caso accertati di committare i due file:
+
+      git add package.json bun.lock
+      git commit -m "build: dipendenza leaflet per la mappa"
+      git push
+
+- nel log di Vercel, dopo il push corretto, la riga "Installing dependencies"
+  NON deve più dire "(no changes)": bun installerà il pacchetto nuovo.
 
 Verificato nel mirror
 ---------------------
