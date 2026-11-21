@@ -14,6 +14,7 @@ const SECTIONS: Array<[string, string, string | null, string | null]> = [
   ["segnalazioni", "Segnalazioni", "mod.reports", "reports"],
   ["contestazioni", "Contestazioni", "mod.disputes", "disputes"],
   ["recensioni", "Recensioni", "mod.reviews", null],
+  ["foto", "Foto recensioni", "mod.reviews", null],
   ["esperienze", "Esperienze e verifiche", "mod.experiences", "experiences"],
   ["inviti", "Inviti", "admin.invites", null],
   ["utenti", "Utenti e privacy", "admin.users", "privacy"],
@@ -273,6 +274,7 @@ const actionModalTitles: Record<string, string> = {
   "proposal.approve": "Decisione sulla proposta",
   "entity.toggle": "Pubblica/nascondi scheda",
   "review.restore": "Ripristina la recensione",
+  "photo.remove": "Rimuovi la foto",
 };
 
 /* ---------- Sezioni ---------- */
@@ -401,19 +403,20 @@ function AdminSection({ section, data, onAction, reload }: {
     }
 
     case "recensioni": {
-      const reviews = (d?.reviews || []) as Array<{ id: string; entityName: string; author: string; score: number; text: string; status: string; hiddenReason: string | null; createdAt: string; isDemo: boolean }>;
+      const reviews = (d?.reviews || []) as Array<{ id: string; entityName: string; author: string; score: number; text: string; status: string; hiddenReason: string | null; verified: boolean; photosCount: number; votesUp: number; votesDown: number; createdAt: string; isDemo: boolean }>;
       return (
         <>
           <div className="admin-head"><h1>Recensioni</h1><span className="pill pill-gray">{reviews.length} totali (prime 60)</span></div>
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th scope="col">Scheda e autore</th><th scope="col">Voto</th><th scope="col">Testo</th><th scope="col">Stato</th><th scope="col">Azioni</th></tr></thead>
+              <thead><tr><th scope="col">Scheda e autore</th><th scope="col">Voto</th><th scope="col">Testo</th><th scope="col">Comunità</th><th scope="col">Stato</th><th scope="col">Azioni</th></tr></thead>
               <tbody>
                 {reviews.map(r => (
                   <tr key={r.id}>
                     <td><b>{r.entityName}</b><br /><span className="small muted">{r.author} · {new Date(r.createdAt).toLocaleDateString("it-IT")}</span></td>
-                    <td>{fmt1(r.score)}/10 <Stars score={r.score} size={13} /></td>
+                    <td>{fmt1(r.score)}/10 <Stars score={r.score} size={13} /><br />{r.verified ? <span className="pill pill-green">Verificata</span> : <span className="pill pill-amber">Dichiarata</span>}</td>
                     <td className="small">{r.text.slice(0, 100)}…</td>
+                    <td className="small">👍 {r.votesUp} · 👎 {r.votesDown}{r.photosCount ? <><br />{r.photosCount} 📷</> : null}</td>
                     <td>{r.status === "published" ? <span className="pill pill-green">Pubblicata</span> : <><span className="pill pill-red">Nascosta</span><br /><span className="small muted">{r.hiddenReason}</span></>}</td>
                     <td>
                       {r.status === "published"
@@ -425,6 +428,35 @@ function AdminSection({ section, data, onAction, reload }: {
               </tbody>
             </table>
           </div>
+        </>
+      );
+    }
+
+    case "foto": {
+      const photos = (d?.photos || []) as Array<{ id: string; reviewId: string; entityName: string; author: string; reviewStatus: string; width: number; height: number; bytes: number; createdAt: string; isDemo: boolean }>;
+      return (
+        <>
+          <div className="admin-head"><h1>Foto recensioni</h1><span className="pill pill-gray">{photos.length} (prime 120)</span></div>
+          <Alert kind="info">Le foto sono già state ripulite dei metadati (posizione EXIF inclusa) al caricamento. Qui si moderano: una foto illecita o con persone riconoscibili si rimuove con motivazione, la recensione resta.</Alert>
+          {!photos.length ? (
+            <p className="muted">Nessuna foto caricata finora.</p>
+          ) : (
+            <div className="photo-admin-grid">
+              {photos.map(p => (
+                <div className="card card-pad-s" key={p.id}>
+                  <a href={`/api/public/photo/${p.id}`} target="_blank" rel="noopener noreferrer" title="Apri la foto in originale">
+                    <img src={`/api/public/photo/${p.id}`} alt={`Foto di ${p.entityName} allegata da ${p.author}`} loading="lazy" />
+                  </a>
+                  <p className="small mb0" style={{ marginTop: 8 }}><b>{p.entityName}</b></p>
+                  <p className="small muted mb0">di {p.author} · {new Date(p.createdAt).toLocaleDateString("it-IT")} · {Math.round(p.bytes / 1024)} KB{p.reviewStatus !== "published" ? " · recensione nascosta" : ""}{p.isDemo ? " · demo" : ""}</p>
+                  <div className="row mt1">
+                    <a className="btn btn-ghost btn-xs" href={`#/admin/recensioni`}>Recensioni</a>
+                    <button className="btn btn-danger btn-xs" onClick={() => onAction("photo.remove", p.id)}>Rimuovi foto</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </>
       );
     }
@@ -814,9 +846,13 @@ function SettingsSection({ initial }: { initial: Record<string, unknown> | null 
     mapMinAggregate: Number(s.mapMinAggregate ?? 3),
     premiumDaysPerReview: Number(s.premiumDaysPerReview ?? 30),
     premiumMaxDays: Number(s.premiumMaxDays ?? 365),
+    openReviewsPerDay: Number(s.openReviewsPerDay ?? 5),
     premiumEnabled: s.premiumEnabled !== false,
+    openReviewsEnabled: s.openReviewsEnabled !== false,
+    photosEnabled: s.photosEnabled !== false,
+    votesEnabled: s.votesEnabled !== false,
   });
-  const fields: Array<[Exclude<keyof typeof form, "premiumEnabled">, string, string]> = [
+  const fields: Array<[Exclude<keyof typeof form, "premiumEnabled" | "openReviewsEnabled" | "photosEnabled" | "votesEnabled">, string, string]> = [
     ["minReviews", "Soglia recensioni sufficienti (m della formula)", "Peso della media di categoria nella media ponderata; le schede sotto questa soglia sono segnala te come non sufficienti."],
     ["rettificaDays", "Finestra di rettifica (giorni)", "Giorni per aggiornare autonomamente una recensione con rettifica motivata."],
     ["inviteDailyCap", "Inviti al giorno per scheda", "Limite anti-abuso per soggetto verificato."],
@@ -824,8 +860,9 @@ function SettingsSection({ initial }: { initial: Record<string, unknown> | null 
     ["inviteExpiryDays", "Scadenza invito (giorni)", "Durata del token di invito."],
     ["proofRetentionDays", "Retention documenti (giorni)", "Dopo la decisione i documenti di verifica vengono cancellati (impostazione da validare con il professionista)."],
     ["mapMinAggregate", "Soglia aggregati mappa", "Numero minimo di recensioni per pubblicare un aggregato di zona sulla mappa (soppressione selettiva)."],
-    ["premiumDaysPerReview", "Premium: giorni per recensione", "Giorni di Membership Premium assegnati per ogni recensione verificata pubblicata. 0 disattiva l'assegnazione automatica."],
+    ["premiumDaysPerReview", "Premium: giorni per recensione", "Giorni di Membership Premium assegnati per ogni recensione pubblicata (verificata o dichiarata). 0 disattiva l'assegnazione automatica."],
     ["premiumMaxDays", "Premium: accumulo massimo (giorni)", "La scadenza del Premium non supera mai adesso + questo valore, per limitare i benefici della frode."],
+    ["openReviewsPerDay", "Contributo aperto: limite giornaliero per utente", "Numero massimo di recensioni aperte E di nuove schede immobile che un utente può pubblicare in un giorno."],
   ];
   return (
     <>
@@ -852,6 +889,30 @@ function SettingsSection({ initial }: { initial: Record<string, unknown> | null 
               Membership Premium attiva (le recensioni integrali sono riservate a chi contribuisce)
             </label>
             <span className="hint">Se disattivata, tutte le recensioni tornano pubbliche come prima dell'introduzione del Premium: usalo per emergenze o manutenzione.</span>
+          </div>
+          <div className="field">
+            <label htmlFor="s-openReviewsEnabled">
+              <input id="s-openReviewsEnabled" type="checkbox" checked={form.openReviewsEnabled}
+                onChange={e => setForm(f => ({ ...f, openReviewsEnabled: e.target.checked }))} />{" "}
+              Contributo aperto attivo (recensioni su immobili e zone senza invito)
+            </label>
+            <span className="hint">Se disattivato, si torna al modello a invito/verifica per tutte le categorie: usalo in caso di ondata di abusi.</span>
+          </div>
+          <div className="field">
+            <label htmlFor="s-photosEnabled">
+              <input id="s-photosEnabled" type="checkbox" checked={form.photosEnabled}
+                onChange={e => setForm(f => ({ ...f, photosEnabled: e.target.checked }))} />{" "}
+              Foto nelle recensioni attive (caricamento e visualizzazione)
+            </label>
+            <span className="hint">Disattivandolo, le foto esistenti non vengono più mostrate né accettate (restano nel database e tornano visibili riattivando).</span>
+          </div>
+          <div className="field">
+            <label htmlFor="s-votesEnabled">
+              <input id="s-votesEnabled" type="checkbox" checked={form.votesEnabled}
+                onChange={e => setForm(f => ({ ...f, votesEnabled: e.target.checked }))} />{" "}
+              Voti di utilità attivi (pollice su/giù degli utenti Premium)
+            </label>
+            <span className="hint">I conteggi esistenti restano nel database; disattivando, i pulsanti scompaiono dalle schede.</span>
           </div>
           <button className="btn btn-primary" type="submit">Salva impostazioni</button>
         </form>

@@ -1,0 +1,233 @@
+ZoomZoom — Aggiornamento: RECENSIONI APERTE + COMMUNITY (modello ispirato a escort-advisor)
+======================================================================================
+
+COSA CAMBIA (la strategia in breve)
+-----------------------------------
+Il sito passa da "recensioni solo su invito" a un modello a due livelli che
+risolve il problema del catalogo vuoto e trasforma i lettori in contributori:
+
+1) CONTRIBUTO APERTO (la novità principale)
+   - Nuovo pulsante "Scrivi una recensione" (header, home, ricerca, schede):
+     apre #/recensione, un percorso in tre passi.
+   - Per IMMOBILI e ZONE non serve più nessun invito: trovi la scheda tra
+     quelle esistenti oppure la AGGIUNGI TU dall'indirizzo reale (con citta,
+     posizione facoltativa via GPS o clic sulla mappa, ricerca indirizzo su
+     cartografia OpenStreetMap). Il primo utente porta il primo mattone:
+     niente catalogo vuoto.
+   - Queste recensioni sono marcate "Dichiarata" (badge ambra): nessuna
+     pretesa di verifica, dichiarazione di responsabilità, moderazione e
+     segnalazioni come per tutto il resto.
+   - Le PERSONE (proprietari, affittuari, professionisti) RESTANO sulla via
+     invito/verifica documentale: una scheda con un nominativo si presta a
+     diffamazione e vendette; il badge "Verificata" mantiene valore. Nella
+     pagina #/recensione questo è spiegato chiaramente agli utenti.
+
+2) UTILITÀ IMMEDIATA (catalogo consultabile gratis)
+   - Medie, criteri, prezzi, conteggi: pubblici come prima.
+   - NOVITÀ: chi NON ha il Premium vede le ULTIME 3 RECENSIONI di ogni
+     scheda in ANTEPRIMA OFFUSCATA (estratto breve leggibile + maschera di
+     punti sfocata). L'offuscamento è calcolato dal server: il testo
+     integrale non lascia mai il database.
+   - Premium (30 giorni per recensione pubblicata, come già configurato):
+     testi integrali di tutte le schede.
+
+3) INCENTIVO A CONTRIBUTRE (con le foto)
+   - Ogni recensione pubblicata (dichiarata o verificata) assegna i giorni
+     Premium, come già faceva quella verificata.
+   - NOVITÀ: fino a 3 FOTO per recensione. Le foto sono ricompresse DUE
+     volte (nel browser e sul server con sharp): i metadati EXIF, posizione
+     GPS inclusa, vengono rimossi. Nessuna foto con persone riconoscibili.
+   - Chi allega almeno una foto in una propria recensione SBLOCCA le foto
+     di TUTTE le recensioni, anche dopo la scadenza del Premium
+     (lo sblocco fotografico è durevole, il Premium no).
+
+4) EFFETTO COMMUNITY (i voti)
+   - Gli utenti Premium possono VALIDARE (pollice su) o DISCONFERMARE
+     (pollice giù) ogni recensione: un voto per utente, mai sulla propria.
+   - I conteggi sono pubblici su ogni recensione: chi legge vede subito
+     quali recensioni la community ritiene attendibili. È la risposta
+     collettiva alle recensioni scritte a tavolino.
+
+ANTI-ABUSO (adattamento onesto delle pratiche del sito di riferimento)
+----------------------------------------------------------------------
+- Limite per utente: N recensioni aperte E N nuove schede al giorno
+  (impostabile dal back office, default 5; Nominatim limitato per IP).
+- Una scheda per indirizzo nella stessa città (dedup con normalizzazione:
+  maiuscole, accenti e punteggiatura non creano doppioni); se esiste già,
+  si viene indirizzati alla scheda esistente.
+- Una recensione per utente per scheda (via dichiarativa), atomica sul DB.
+- Revoca automatica del Premium se la moderazione nasconde la recensione
+  (già esistente), rimozione foto con motivazione (nuova azione back office).
+- Foto: max 3, ricompilazione server-side obbligatoria, gating per utente
+  su OGNI singola richiesta (al browser non arrivano mai i byte riservati).
+- A differenza del sito di riferimento NON raccogliamo numeri di telefono
+  (privacy by design) e NON fingiamo verifiche impossibili: i due badge
+  "Verificata" e "Dichiarata" dicono esattamente cosa c'è sotto.
+
+NOVITÀ NEL BACK OFFICE
+----------------------
+- Sezione "Foto recensioni": griglia con anteprime, autore, scheda, e
+  azione "Rimuovi foto" con motivazione registrata nel log.
+- Sezione "Recensioni": badge Verificata/Dichiarata, conteggi voti e foto.
+- Impostazioni nuove: contributo aperto on/off, foto on/off, voti on/off,
+  limite giornaliero per utente. (Interruttori di emergenza anti-abuso.)
+
+FILE MODIFICATI O NUOVI
+-----------------------
+prisma/schema.prisma                    (NUOVI modelli ReviewPhoto e
+                                        ReviewVote + relazioni — versione
+                                        PostgreSQL con directUrl, identica
+                                        alla tua)
+scripts/seed.ts                         (demo: 8 foto, 23 voti, 1 recensione
+                                        aperta "Dichiarata" su Villa Ciliegio)
+src/lib/server/review-access.ts         (NUOVO: offuscamento teaser, accesso
+                                        foto, ricompilazione immagini, voti)
+src/lib/server/settings.ts              (nuove impostazioni)
+src/lib/server/public-data.ts           (metadati foto per entità)
+src/app/api/entities/route.ts           (NUOVO: aggiunta immobile self-service)
+src/app/api/reviews/route.ts            (via aperta + foto su entrambe le vie)
+src/app/api/reviews/[id]/vote/route.ts  (NUOVO: voti pollice su/giù)
+src/app/api/public/entity/[id]/route.ts (teaser, foto, voti nella scheda)
+src/app/api/public/photo/[id]/route.ts  (NUOVO: serving foto con gating)
+src/app/api/public/geocode/route.ts     (NUOVO: ricerca indirizzo, proxy
+                                        Nominatim/OpenStreetMap, solo Italia)
+src/app/api/public/bootstrap/route.ts   (flag foto utente + feature flag)
+src/app/api/admin/action/route.ts       (azione photo.remove, impostazioni)
+src/app/api/admin/data/[section]/route.ts (sezione "foto", recensioni arricchite)
+src/components/review-fields.tsx        (NUOVO: campi form condivisi)
+src/components/photo-input.tsx          (NUOVO: caricamento foto con resize)
+src/components/location-picker.tsx      (NUOVO: pin su mappa Leaflet)
+src/components/views/write-review-open.tsx (NUOVO: vista #/recensione)
+src/components/views/entity-zone.tsx    (teaser, foto, voti, badge, CTA)
+src/components/views/review-flows.tsx   (foto anche nella via invito)
+src/components/views/home.tsx           (badge, CTA, come funziona)
+src/components/views/search.tsx         (CTA "Non c'è? Aggiungilo tu")
+src/components/views/info-pages.tsx     (come funziona + Premium aggiornati)
+src/components/chrome.tsx               (pulsante header "Scrivi una recensione")
+src/components/admin/admin.tsx          (sezione foto, impostazioni, badge)
+src/app/page.tsx                        (route #/recensione)
+src/lib/client/store.tsx                (tipi bootstrap estesi)
+src/app/globals.css                     (stili teaser/foto/voti/picker)
+
+NESSUNA nuova dipendenza (sharp e leaflet erano già nel progetto).
+NESSUNA nuova variabile d'ambiente: DATABASE_URL, DIRECT_URL, APP_SECRET,
+DEMO_MODE restano quelle già configurate su Vercel.
+
+INSTALLAZIONE (PowerShell)
+--------------------------
+1) Ferma il server di sviluppo (Ctrl+C).
+
+2) Estrai lo zip in una cartella temporanea, es. C:\temp\zz-aperte, poi
+   copia i file nel progetto mantenendo i percorsi:
+
+       Copy-Item -Recurse -Force C:\temp\zz-aperte\prisma  C:\Users\Carlo\sito\zoomzoom\
+       Copy-Item -Recurse -Force C:\temp\zz-aperte\scripts C:\Users\Carlo\sito\zoomzoom\
+       Copy-Item -Recurse -Force C:\temp\zz-aperte\src     C:\Users\Carlo\sito\zoomzoom\
+
+3) Applica le modifiche al database (QUESTA VOLTA È OBBLIGATORIO):
+
+       cd C:\Users\Carlo\sito\zoomzoom
+       bun run db:push
+
+   Cosa fa: aggiunge le tabelle ReviewPhoto e ReviewVote (e le relazioni).
+   È un'aggiunta NON distruttiva: nessun dato esistente viene toccato o
+   cancellato. Prisma non dovrebbe chiedere conferme di perdita dati; se
+   le chiedesse, FERMATI e scrivimi prima di confermare.
+
+4) Rigenera i dati demo (consigliato, per vedere foto e voti in azione):
+
+       bun scripts\seed.ts
+
+   Il seed è idempotente: cancella SOLO i dati demo e li ricrea (ora con
+   8 foto, 23 voti e una recensione aperta con badge "Dichiarata" su
+   Villa Ciliegio). Password e 2FA demo non cambiano.
+
+5) Verifica in locale:
+
+       bun run dev
+
+   - Header: pulsante "Scrivi una recensione" sempre visibile;
+   - #/recensione: scegli Immobile → cerca "Rondini" → Recensisci; oppure
+     "Non c'è ancora? Aggiungilo tu" → indirizzo + città + pin sulla mappa
+     (prova "Cerca l'indirizzo sulla mappa" con un indirizzo vero);
+   - pubblica con una foto qualsiasi: toast "+30 giorni Premium";
+   - apri la scheda in una finestra anonima: vedi l'anteprima offuscata
+     (estratto + punti sfocati), le foto come riquadri chiusi, i pulsanti
+     👍/👎 disabilitati con la scritta "votano gli utenti Premium";
+   - accedi come utente@esempio.test (Premium demo): testi integrali,
+     foto visibili, voti cliccabili;
+   - back office (#/admin) → "Foto recensioni": anteprime e "Rimuovi foto"
+     con motivazione; → "Impostazioni": i quattro interruttori nuovi.
+
+6) Pubblica su Vercel:
+
+       git add prisma/schema.prisma scripts/seed.ts src
+       git commit -m "recensioni aperte: immobili/zone senza invito, teaser offuscato, foto e voti community"
+       git push
+
+VERIFICA DOPO IL DEPLOY
+-----------------------
+1) https://zoomzoom-1.vercel.app → header con "Scrivi una recensione".
+2) #/recensione → aggiungi un immobile reale (es. "Via dei Mille 15",
+   Milano) → pubblicane la recensione con una foto.
+3) Scheda in navigazione anonima: anteprima offuscata + foto chiuse.
+4) Come utente Premium: testi chiari, foto visibili, voti attivi.
+5) Nel log di Vercel NON devono comparire errori P2022 (le tabelle nuove
+   ci sono dopo il db:push del punto 3).
+
+SE QUALCOSA NON FUNZIONA
+------------------------
+- Errore P2022 su "ReviewPhoto" o "ReviewVote" a runtime: il db:push del
+  punto 3 non è stato eseguito (o è stato eseguito sul database sbagliato:
+  deve usare DIRECT_URL, quello già configurato nel .env). Eseguilo e la
+  scheda ricomincia a rispondere: il codice non va toccato.
+- "Can't resolve 'sharp'": impossibile — sharp è già tra le dipendenze
+  (lo usa Next.js); se compare, riesegui "bun install" e committa bun.lock.
+- La ricerca indirizzo sulla mappa non dà risultati: dipende dal servizio
+  pubblico Nominatim (OpenStreetMap). È un servizio gratuito con limiti:
+  il sito lo usa solo quando premi "Cerca" (max 10/min per IP, solo
+  Italia). Se non risponde, il pin si piazza comunque a mano (clic o GPS):
+  nessuna funzione si blocca. Se un giorno il traffico cresce, si può
+  passare a un provider con API key cambiando solo la URL in
+  src/app/api/public/geocode/route.ts.
+- Le foto non si vedono dopo il caricamento: verifica di essere Premium
+  oppure di aver allegato una foto a una TUA recensione pubblicata: è il
+  gating previsto (per tutti gli altri i riquadri restano chiusi con lucchetto).
+- "Limite di 5 recensioni aperte al giorno raggiunto": è l'anti-abuso,
+  impostabile in back office → Impostazioni → "Contributo aperto: limite
+  giornaliero per utente".
+- Vuoi tornare al modello solo-invito per un'emergenza: back office →
+  Impostazioni → togli la spunta "Contributo aperto attivo". Nessun dato
+  viene perso.
+
+NOTE TECNICHE E PRIVACY
+-----------------------
+- Foto nel database: ogni immagine conservata come JPEG ricompilato
+  (max 1280 px, ~100-400 KB tipici). Per i volumi attuali è la scelta più
+  semplice (niente storage esterno da configurare); su scala grande si può
+  migrare a un object storage senza toccare la logica di accesso.
+- Metadati: rimossi sia nel browser (canvas) che sul server (sharp): la
+  posizione EXIF delle foto scattate dal telefono non viene mai salvata.
+- GPS: usato solo su esplicito clic ("Usa la mia posizione") e solo per
+  piazzare il pin della scheda immobile; come sempre, mai per le persone.
+- Nominatim: la stringa digitata nel "Cerca l'indirizzo sulla mappa" passa
+  al geocoder pubblico di OpenStreetMap SOLO al momento della ricerca;
+  il pin manuale e il GPS restano tra l'utente e la mappa. Lo User-Agent
+  identificato e i limiti rispettano la policy del servizio.
+- Rate limiting: in-memory per istanza (come il resto del sito); su più
+  istanze serverless i limiti vanno intesi come indicativi. Se serve
+  precisione assoluta, si migra su un negozio condiviso (es. Redis).
+
+VERIFICATO NEL MIRROR
+---------------------
+- 33 test automatici end-to-end superati: creazione immobile con dedup
+  (anche con indirizzi in stile diverso), recensione aperta con foto e
+  assegnazione Premium, teaser offuscato per anonimi e non-Premium,
+  gating foto (403/200 per categoria di utente, sblocco durevole da
+  contributo), voti (solo Premium, toggle, mai sulla propria), blocco
+  persone fisiche, recensione di zona, geocoding reale verso Nominatim,
+  login admin con TOTP, sezione foto del back office con rimozione,
+  regressione completa della via invito (recensione verificata con foto);
+- test di regressione dei flussi di login esistenti: tutti verdi
+  (corretto anche un piccolo bug pre-esistente nello script di test);
+- build di produzione senza errori, tipi puliti sui file nuovi.

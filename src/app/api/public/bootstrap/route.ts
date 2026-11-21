@@ -5,6 +5,7 @@ import { publicCategoriesPayload, publicZones } from "@/lib/server/public-data";
 import { getSettings } from "@/lib/server/settings";
 import { getCurrentUser } from "@/lib/server/auth";
 import { premiumStateOf } from "@/lib/server/premium";
+import { photoAccessOf } from "@/lib/server/review-access";
 import { smtpConfigured } from "@/lib/server/mailer";
 import { db } from "@/lib/db";
 
@@ -20,6 +21,7 @@ export async function GET() {
   const adsClient = settings.adsEnabled ? settings.adsClient : "";
   const totalReviews = await db.review.count({ where: { status: "published" } });
   const totalEntities = await db.entity.count({ where: { status: "published" } });
+  const photoAccess = user ? await photoAccessOf(user, settings) : { canView: false, viaContribution: false };
   return NextResponse.json({
     ok: true,
     site: {
@@ -31,6 +33,9 @@ export async function GET() {
       adsEnabled: settings.adsEnabled && !!settings.adsClient,
       adsClient,
       premiumEnabled: settings.premiumEnabled,
+      openReviewsEnabled: settings.openReviewsEnabled,
+      photosEnabled: settings.photosEnabled,
+      votesEnabled: settings.votesEnabled,
     },
     categories: cats,
     zones: zones.map(z => ({ id: z.id, name: z.name })),
@@ -53,6 +58,8 @@ export async function GET() {
         active: premiumStateOf(user).active,
         until: premiumStateOf(user).until ? premiumStateOf(user).until!.toISOString() : null,
       },
+      photoAccess: photoAccess.canView,
+      photoViaContribution: photoAccess.viaContribution,
     } : null,
   });
 }

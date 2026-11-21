@@ -113,12 +113,22 @@ bloccata per i ruoli di back office. Le sessioni admin scadono dopo 30 minuti
 di inattività e sono separate da quelle pubbliche.
 
 ### Flussi principali
+- **Contributo aperto (immobili e zone)**: l'utente registrato trova la
+  scheda (`#/recensione`) oppure la **aggiunge dall'indirizzo reale** (città +
+  posizione facoltativa via GPS, clic su mappa Leaflet o geocoding
+  OpenStreetMap/Nominatim, solo Italia) → dichiara il tipo di esperienza →
+  recensione marcata **“Dichiarata”** (badge ambra), senza pretesa di
+  verifica. Anti-abuso: limite giornaliero per utente (recensioni e nuove
+  schede), dedup dell'indirizzo normalizzato nella stessa città, una
+  recensione per utente per scheda. Le persone fisiche restano escluse
+  (via invito/verifica: tutela privacy e diffamazione).
 - **Invito**: soggetto verificato (account collegato alla propria scheda)
   registra esperienza → email con token monouso (hash nel DB, scadenza
   configurabile, legato a destinatario+esperienza) → riscatto atomico →
-  recensione (UNIQUE su `experienceId` = una recensione per esperienza).
-  Limiti: inviti/giorno per scheda, approvazione sopra soglia, dichiarazione
-  obbligatoria di invito a tutti i clienti (non solo i soddisfatti), revoca.
+  recensione **“Verificata”** (UNIQUE su `experienceId` = una recensione
+  per esperienza). Limiti: inviti/giorno per scheda, approvazione sopra
+  soglia, dichiarazione obbligatoria di invito a tutti i clienti (non solo
+  i soddisfatti), revoca.
 - **Verifica documentale**: upload privato (PDF/PNG/JPG/WebP ≤ 8 MB, magic
   byte) → revisione umana → approvazione collega l'esperienza all'utente →
   documento cancellato (retention configurabile).
@@ -129,9 +139,11 @@ di inattività e sono separate da quelle pubbliche.
   media della categoria, parametri esposti nell'API e nella pagina; sotto
   soglia le schede restano consultabili ma segnate "dati insufficienti".
 - **Membership Premium (guadagnata, non venduta)**: aggregati (medie,
-  criteri, conteggi, prezzi mediani) sempre pubblici; il testo integrale
-  delle recensioni è riservato a chi contribuisce. Ogni recensione verificata
-  pubblicata assegna N giorni di Premium (impostabile, default 30, tetto di
+  criteri, conteggi, prezzi mediani) sempre pubblici, con le **ultime 3
+  recensioni in anteprima offuscata** (estratto + maschera calcolati
+  server-side) per chi non ha il Premium; il testo integrale è riservato a
+  chi contribuisce. Ogni recensione pubblicata (dichiarata o verificata)
+  assegna N giorni di Premium (impostabile, default 30, tetto di
   accumulo), il gating è applicato server-side in `/api/public/entity`
   (al browser non arrivano mai i testi riservati); le proprie recensioni
   restano sempre visibili all'autore e lo staff accede per moderare. Se la
@@ -142,6 +154,17 @@ di inattività e sono separate da quelle pubbliche.
   può concedere/revocare con motivazione. Il Premium è incluso in
   esportazione/eliminazione dati (GDPR). Interruttore di sicurezza nel back
   office (`premiumEnabled=false` ripristina la piena visibilità pubblica).
+- **Foto nelle recensioni** (max 3): ricompresse due volte (canvas nel
+  browser + sharp sul server, max 1280 px JPEG): **metadati EXIF/GPS
+  rimossi** prima della conservazione (`ReviewPhoto`, byte nel DB).
+  Visibili a Premium e staff, e **durevolmente a chi ha allegato almeno una
+  foto a una propria recensione** (gating per utente su ogni singola
+  richiesta in `/api/public/photo/[id]`; le proprie foto sempre visibili
+  all'autore). Rimozione singola dal back office con motivazione.
+- **Voti di utilità (community)**: gli utenti Premium esprimono pollice su
+  (conferma) o giù (disconferma) su ogni recensione (`ReviewVote`, UNIQUE
+  per utente+recensione, mai sulla propria); conteggi pubblici nella
+  scheda. Uno per utente, toggle, rate limit.
 
 ---
 

@@ -79,14 +79,49 @@ export async function GET(_req: Request, ctx: { params: Promise<{ section: strin
         await requireStaff("mod.reviews");
         const revs = await db.review.findMany({
           orderBy: { createdAt: "desc" }, take: 60,
-          include: { entity: { select: { name: true } }, user: { select: { nickname: true } } },
+          include: {
+            entity: { select: { name: true } },
+            user: { select: { nickname: true } },
+            photos: { select: { id: true } },
+            votes: { select: { value: true } },
+          },
         });
         return NextResponse.json({
           ok: true,
           reviews: revs.map(r => ({
             id: r.id, entityName: r.entity.name, author: r.user.nickname, score: r.score,
             text: r.text.slice(0, 140), status: r.status, hiddenReason: r.hiddenReason,
+            verified: r.verified,
+            photosCount: r.photos.length,
+            votesUp: r.votes.filter(v => v.value === 1).length,
+            votesDown: r.votes.filter(v => v.value === -1).length,
             createdAt: r.createdAt.toISOString(), isDemo: r.isDemo,
+          })),
+        });
+      }
+
+      case "foto": {
+        // moderazione delle foto: anteprime (lo staff vede tutto) e rimozione
+        await requireStaff("mod.reviews");
+        const photos = await db.reviewPhoto.findMany({
+          orderBy: { createdAt: "desc" }, take: 120,
+          include: {
+            review: {
+              select: {
+                id: true, status: true, isDemo: true,
+                entity: { select: { name: true } },
+                user: { select: { nickname: true } },
+              },
+            },
+          },
+        });
+        return NextResponse.json({
+          ok: true,
+          photos: photos.map(p => ({
+            id: p.id, reviewId: p.review.id, entityName: p.review.entity.name,
+            author: p.review.user.nickname, reviewStatus: p.review.status,
+            width: p.width, height: p.height, bytes: p.bytes,
+            createdAt: p.createdAt.toISOString(), isDemo: p.isDemo,
           })),
         });
       }

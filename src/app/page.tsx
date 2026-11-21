@@ -13,6 +13,7 @@ import { ContactsView, CookieView, HowItWorksView, MailboxView, ModerationView, 
 import { LoginView, RegisterView, VerifyEmailView } from "@/components/views/auth";
 import { ProfileInvitesView, ProfileSettingsView, ProfileView } from "@/components/views/profile";
 import { InviteView, ProposeView, SubjectAreaView, UpdateReviewView, VerifyExperienceView, WriteReviewView } from "@/components/views/review-flows";
+import { WriteReviewOpenView } from "@/components/views/write-review-open";
 import { AdminView } from "@/components/admin/admin";
 
 function Router() {
@@ -50,6 +51,7 @@ function Router() {
       case "profilo-impostazioni": return <ProfileSettingsView />;
       case "invito": return segs[1] ? <InviteView token={segs[1]} /> : <NotFoundView />;
       case "scrivi": return segs[1] ? <WriteReviewView expId={segs[1]} /> : <NotFoundView />;
+      case "recensione": return <WriteReviewOpenView presetEntityId={route.params.entity} />;
       case "rettifica": return segs[1] ? <UpdateReviewView reviewId={segs[1]} /> : <NotFoundView />;
       case "verifica-esperienza": return <VerifyExperienceView />;
       case "area-soggetto": return <SubjectAreaView />;

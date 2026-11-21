@@ -18,6 +18,10 @@ export type AppSettings = {
   premiumEnabled: boolean;       // Membership Premium: gating recensioni integrali
   premiumDaysPerReview: number;  // giorni Premium per recensione verificata pubblicata
   premiumMaxDays: number;        // cap di accumulo: premiumUntil mai oltre now+questo
+  openReviewsEnabled: boolean;   // contributo aperto: recensioni su immobili/zone senza invito
+  openReviewsPerDay: number;     // limite anti-abuso: recensioni aperte e nuove schede per utente al giorno
+  photosEnabled: boolean;        // foto allegate alle recensioni
+  votesEnabled: boolean;         // voti di utilità (pollice su/giù) riservati ai Premium
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -37,6 +41,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   premiumEnabled: true,
   premiumDaysPerReview: 30,
   premiumMaxDays: 365,
+  openReviewsEnabled: true,
+  openReviewsPerDay: 5,
+  photosEnabled: true,
+  votesEnabled: true,
 };
 
 const SETTINGS_KEY = "app";

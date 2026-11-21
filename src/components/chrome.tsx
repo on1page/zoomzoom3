@@ -122,6 +122,9 @@ export function Header() {
             <a href="#/come-funziona" className={active("come-funziona")}>Come funziona</a>
           </nav>
           <span className="spacer"></span>
+          {boot?.site.openReviewsEnabled ? (
+            <a className="btn btn-primary btn-sm btn-scrivi" href="#/recensione">Scrivi una recensione</a>
+          ) : null}
           {user ? (
             <UserMenu />
           ) : (
@@ -137,6 +140,7 @@ export function Header() {
         </div>
       </header>
       <div className={`mobile-nav${mobileOpen ? " open" : ""}`}>
+        {boot?.site.openReviewsEnabled ? <a className="mobile-cta" href="#/recensione" onClick={() => setMobileOpen(false)}>Scrivi una recensione</a> : null}
         <a href="#/cerca" onClick={() => setMobileOpen(false)}>Cerca</a>
         <a href="#/mappa" onClick={() => setMobileOpen(false)}>Mappa</a>
         <a href="#/classifiche" onClick={() => setMobileOpen(false)}>Classifiche</a>

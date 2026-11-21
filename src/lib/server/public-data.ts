@@ -86,6 +86,25 @@ export async function publicZones() {
   return db.zone.findMany({ orderBy: { name: "asc" } });
 }
 
+// Metadati delle foto di ogni recensione di un'entità (mai i byte: le
+// immagini si servono da /api/public/photo/[id] con controllo di accesso).
+export type PublicPhotoMeta = { id: string; width: number; height: number };
+
+export async function photoMetaForEntity(entityId: string): Promise<Map<string, PublicPhotoMeta[]>> {
+  const photos = await db.reviewPhoto.findMany({
+    where: { review: { entityId, status: "published" } },
+    select: { id: true, reviewId: true, width: true, height: true },
+    orderBy: { createdAt: "asc" },
+  });
+  const map = new Map<string, PublicPhotoMeta[]>();
+  for (const p of photos) {
+    const arr = map.get(p.reviewId) || [];
+    arr.push({ id: p.id, width: p.width, height: p.height });
+    map.set(p.reviewId, arr);
+  }
+  return map;
+}
+
 export async function publicCategoriesPayload() {
   const cats = await getCategories();
   return cats.map(c => ({

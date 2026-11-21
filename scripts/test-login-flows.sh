@@ -28,7 +28,7 @@ curl -s -c /tmp/c-admin.txt -X POST $BASE/api/admin/login -H "Content-Type: appl
 echo ""
 
 echo "=== 4) admin login superadmin con codice TOTP valido ==="
-CODE=$(bun scripts/totp.ts superadmin@esempio.test 2>/dev/null | grep -oE '^[0-9]{6}$' | head -1)
+CODE=$(bun scripts/totp.ts superadmin@esempio.test 2>/dev/null | grep -oE '[0-9]{6}' | head -1)
 echo "codice generato: $CODE"
 curl -s -c /tmp/c-admin.txt -X POST $BASE/api/admin/login -H "Content-Type: application/json" \
   -d "{\"email\":\"superadmin@esempio.test\",\"password\":\"$PW\",\"code\":\"$CODE\"}" -w "\nHTTP %{http_code}\n"

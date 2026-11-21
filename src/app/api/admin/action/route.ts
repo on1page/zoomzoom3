@@ -101,6 +101,21 @@ export async function POST(req: Request) {
         await auditLog({ actorId: actor.id, actorRole: actor.role, action: "Recensione ripristinata", targetType: "review", targetId: rev.id, reason: reason || "Ripristino a seguito di riesame.", isDemo: rev.isDemo });
         return NextResponse.json({ ok: true });
       }
+      case "photo.remove": {
+        // rimozione di una singola foto (privacy/illiceità): la recensione resta
+        const actor = await requireStaff("mod.reviews");
+        if (reason.length < 15) return fail("Motivo obbligatorio (almeno 15 caratteri).");
+        const photo = await db.reviewPhoto.findUnique({ where: { id: p.id }, include: { review: { select: { id: true, userId: true, isDemo: true } } } });
+        if (!photo) return fail("Foto non trovata.", 404);
+        await db.reviewPhoto.delete({ where: { id: photo.id } });
+        await auditLog({ actorId: actor.id, actorRole: actor.role, action: "Foto rimossa dalla recensione", targetType: "review", targetId: photo.review.id, reason, isDemo: photo.review.isDemo });
+        const author = await db.user.findUnique({ where: { id: photo.review.userId } });
+        if (author) {
+          await sendMail(author.email, "Una tua foto è stata rimossa",
+            `La moderazione ha rimosso una foto allegata a una tua recensione con questa motivazione: ${reason}`);
+        }
+        return NextResponse.json({ ok: true });
+      }
 
       /* ---- contestazioni associazione ---- */
       case "dispute.take": {
@@ -323,7 +338,11 @@ export async function POST(req: Request) {
         const mma = num(s.mapMinAggregate, 1, 50); if (mma != null) patch.mapMinAggregate = mma;
         const pdpr = num(s.premiumDaysPerReview, 0, 365); if (pdpr != null) patch.premiumDaysPerReview = pdpr;
         const pmd = num(s.premiumMaxDays, 1, 3650); if (pmd != null) patch.premiumMaxDays = pmd;
+        const orpd = num(s.openReviewsPerDay, 1, 50); if (orpd != null) patch.openReviewsPerDay = orpd;
         if (typeof s.premiumEnabled === "boolean") patch.premiumEnabled = s.premiumEnabled;
+        if (typeof s.openReviewsEnabled === "boolean") patch.openReviewsEnabled = s.openReviewsEnabled;
+        if (typeof s.photosEnabled === "boolean") patch.photosEnabled = s.photosEnabled;
+        if (typeof s.votesEnabled === "boolean") patch.votesEnabled = s.votesEnabled;
         if (typeof s.adsEnabled === "boolean") patch.adsEnabled = s.adsEnabled;
         if (typeof s.adsClient === "string") patch.adsClient = s.adsClient.trim().slice(0, 40);
         const settings = await updateSettings(patch);
@@ -395,6 +414,9 @@ async function wipeDemoData() {
     await db.emailVerifyToken.deleteMany({ where: { userId: { in: ids } } });
   }
   await db.entityProposal.deleteMany({ where: { isDemo: true } });
+  // foto e voti delle recensioni demo (il resto va a cascata con entità e utenti)
+  await db.reviewPhoto.deleteMany({ where: { isDemo: true } });
+  await db.reviewVote.deleteMany({ where: { review: { isDemo: true } } });
   await db.entity.deleteMany({ where: { isDemo: true } });
   await db.experience.deleteMany({ where: { isDemo: true } });
   await db.invite.deleteMany({ where: { isDemo: true } });

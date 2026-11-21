@@ -6,6 +6,7 @@
 import { PrismaClient } from "@prisma/client";
 import { randomBytes, createHash } from "crypto";
 import { scryptSync } from "crypto";
+import sharp from "sharp";
 
 const db = new PrismaClient();
 
@@ -210,6 +211,9 @@ async function main() {
   }
   // 2) contenuti demo (le recensioni seguono a cascata da esperienze e schede)
   await db.entityProposal.deleteMany({ where: { isDemo: true } });
+  // foto e voti delle recensioni demo (il resto va a cascata con entità e utenti)
+  await db.reviewPhoto.deleteMany({ where: { isDemo: true } });
+  await db.reviewVote.deleteMany({ where: { review: { isDemo: true } } });
   await db.entity.deleteMany({ where: { isDemo: true } });
   await db.experience.deleteMany({ where: { isDemo: true } });
   await db.invite.deleteMany({ where: { isDemo: true } });
@@ -391,6 +395,75 @@ async function main() {
   const ferrettiRevs = reviewIdsByEntity.get("ent_am_ferretti") || [];
   const hiddenRep = ferrettiRevs[0];
 
+  // 6bis) FOTO demo: gradienti generati con sharp (nessun file esterno),
+  // allegati alle recensioni di alcuni immobili. Come da regola, sono già
+  // senza metadati: sharp ricompila in JPEG puro.
+  async function demoPhoto(w: number, h: number, rgb: [number, number, number]): Promise<Buffer> {
+    const svg = `<svg width="${w}" height="${h}" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="rgb(${rgb[0]},${rgb[1]},${rgb[2]})"/><stop offset="1" stop-color="rgb(${Math.max(0, rgb[0] - 60)},${Math.max(0, rgb[1] - 45)},${Math.max(0, rgb[2] - 30)})"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/><text x="50%" y="54%" text-anchor="middle" font-family="sans-serif" font-size="26" fill="rgba(255,255,255,0.85)">Foto dimostrativa</text></svg>`;
+    return sharp(Buffer.from(svg)).jpeg({ quality: 80 }).toBuffer({ resolveWithObject: true }).then(o => o.data);
+  }
+  const photoTargets: Array<[string, [number, number, number]]> = [
+    ["ent_i_rondini", [51, 101, 138]],
+    ["ent_i_tigli8", [78, 125, 91]],
+    ["ent_i_girasole", [166, 91, 63]],
+    ["ent_i_fiume", [131, 102, 31]],
+  ];
+  let demoPhotoCount = 0;
+  for (const [entId, rgb] of photoTargets) {
+    const ids = reviewIdsByEntity.get(entId) || [];
+    for (let i = 0; i < Math.min(2, ids.length); i++) {
+      const w = 640 + i * 40;
+      const buf = await demoPhoto(w, 480, rgb);
+      await db.reviewPhoto.create({
+        data: { reviewId: ids[i], data: new Uint8Array(buf), width: w, height: 480, bytes: buf.length, isDemo: true },
+      });
+      demoPhotoCount++;
+    }
+  }
+
+  // 6ter) VOTI demo (effetto community): i recensori premium confermano o
+  // disconfermano alcune recensioni. Un voto per utente e recensione,
+  // mai sulla propria (stessa regola applicata dal server).
+  let demoVoteCount = 0;
+  for (const entId of ["ent_i_rondini", "ent_am_sereni"]) {
+    const ids = reviewIdsByEntity.get(entId) || [];
+    for (let i = 0; i < Math.min(4, ids.length); i++) {
+      const rev = await db.review.findUnique({ where: { id: ids[i] }, select: { userId: true } });
+      if (!rev) continue;
+      for (let j = 0; j < 3; j++) {
+        const voter = reviewers[(i * 3 + j + 2) % reviewers.length];
+        if (voter.id === rev.userId) continue;
+        await db.reviewVote.create({
+          data: { reviewId: ids[i], userId: voter.id, value: r() < 0.78 ? 1 : -1 },
+        });
+        demoVoteCount++;
+      }
+    }
+  }
+
+  // 6quater) Una recensione APERTA (dichiarata, senza invito) demo: mostra il
+  // badge "Dichiarata" e il funzionamento del contributo aperto.
+  const openAuthor = reviewers[6];
+  const expOpen = await db.experience.create({
+    data: {
+      entityId: "ent_i_ciliegio", kind: "Visita e sopralluogo", period: "2026",
+      origin: "self", clientEmail: openAuthor.email, userId: openAuthor.id, status: "active",
+      claimedAt: new Date(daysAgoIso(2)), createdAt: new Date(daysAgoIso(2)), isDemo: true,
+    },
+  });
+  await db.review.create({
+    data: {
+      experienceId: expOpen.id, entityId: "ent_i_ciliegio", userId: openAuthor.id,
+      score: 6.5,
+      criteriaJson: JSON.stringify({ stato: 6, descrizione: 7, spazi: 7.5, rumori: 6, impianti: 5, rapporto: 6.5 }),
+      criteriaVersionId: versionByCat.get("immobile")!,
+      prosJson: JSON.stringify(["Giardino curato e ben esposto a sud", "Struttura sana, nessuna infiltrazione"]),
+      consJson: JSON.stringify(["Caldaia con più di quindici anni da sostituire"]),
+      text: "Ho visitato la villa durante un sopralluogo: struttura sana e giardino esposto a sud, ma la caldaia ha più di quindici anni e andrebbe sostituita. Esperienza dichiarata senza invito: riporto ciò che ho visto, con nome e cognome mai nominati.",
+      status: "published", verified: false, createdAt: new Date(daysAgoIso(2)), isDemo: true,
+    },
+  });
+
   // 8) Esperienza in attesa di verifica documentale (flusso utente)
   const expPending = await db.experience.create({
     data: {
@@ -543,6 +616,8 @@ async function main() {
     schede: await db.entity.count({ where: { isDemo: true } }),
     recensioni: await db.review.count({ where: { isDemo: true } }),
     esperienze: await db.experience.count({ where: { isDemo: true } }),
+    foto: await db.reviewPhoto.count({ where: { isDemo: true } }),
+    voti: await db.reviewVote.count({ where: { review: { isDemo: true } } }),
   };
   console.log("Seed completato:", counts, "in", Date.now() - t0, "ms");
   console.log("Credenziali demo salvate in demo-credentials.json (mai esposte al front-end).");

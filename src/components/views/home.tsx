@@ -96,10 +96,14 @@ export function HomeView() {
               <button className="btn btn-primary" type="submit">Cerca</button>
             </form>
             <div className="hero-badges">
-              <span className="hero-badge"><CheckSvg /> Recensioni solo su invito verificato</span>
+              <span className="hero-badge"><CheckSvg /> Immobili e zone: recensioni aperte a tutti</span>
+              <span className="hero-badge"><CheckSvg /> Persone: solo con esperienza verificata</span>
               <span className="hero-badge"><CheckSvg /> Una recensione per esperienza</span>
-              <span className="hero-badge"><CheckSvg /> Nessun annuncio di vendita o affitto</span>
               <span className="hero-badge"><CheckSvg /> Consultazione libera, senza registrazione</span>
+            </div>
+            <div className="row mt2" style={{ alignItems: "center", flexWrap: "wrap" }}>
+              <a className="btn btn-primary" href="#/recensione">Scrivi una recensione</a>
+              <span className="small muted">Basta l&apos;indirizzo: +{boot.settings.premiumDaysPerReview} giorni Premium per ogni contributo pubblicato</span>
             </div>
           </div>
         </div>
@@ -134,9 +138,9 @@ export function HomeView() {
             <a className="btn btn-ghost btn-sm" href="#/come-funziona">Approfondisci</a>
           </div>
           <div className="steps">
-            <div className="step"><h3>Esperienza registrata</h3><p>Sulla piattaforma esiste una traccia dell&apos;interazione: un invito da un soggetto verificato o una verifica documentale della tua esperienza.</p></div>
-            <div className="step"><h3>Invito con token sicuro</h3><p>Chi ha vissuto l&apos;esperienza riceve un invito email con token a uso singolo e scadenza. Niente inviti in massa: ci sono limiti e controlli.</p></div>
-            <div className="step"><h3>Recensione &quot;verificata&quot;</h3><p>Il badge attesta che l&apos;esperienza esiste, non che ogni affermazione sia vera: per questo ci sono segnalazione, moderazione e appello.</p></div>
+            <div className="step"><h3>Esperienza reale, due strade</h3><p>Per <b>immobili e zone</b> basta dichiarare la tua esperienza: nessun invito, il badge resta “dichiarata”. Per le <b>persone</b> serve l&apos;invito del soggetto o la verifica documentale: il badge “verificata” vale qualcosa proprio per questo.</p></div>
+            <div className="step"><h3>Contributo con incentivo</h3><p>Ogni recensione pubblicata attiva giorni di Membership Premium, che sbloccano i testi integrali; chi allega una foto sblocca anche le foto degli altri. Il premio è per il contributo, non per il voto.</p></div>
+            <div className="step"><h3>Community e moderazione</h3><p>Gli utenti Premium validano o disconfermano le recensioni (pollice su/giù); segnalazioni e moderazione con decisioni motivate chiudono il cerchio: chi bara perde il vantaggio ottenuto.</p></div>
           </div>
         </div>
       </section>
@@ -190,11 +194,11 @@ export function HomeView() {
             <div>
               <div className="card">
                 <h3 className="mt0">Hai vissuto un&apos;esperienza con la casa?</h3>
-                <p className="small">Registrati e richiedi la verifica della tua esperienza, oppure aspetta l&apos;invito email del soggetto verificato. Solo così potrai pubblicare una recensione.</p>
-                <a className="btn btn-primary" href="#/registrati">Crea un account</a>{" "}
+                <p className="small">Per immobili e zone scrivi <b>subito, senza invito</b>: basta trovare la scheda o aggiungere l&apos;indirizzo. Ogni recensione pubblicata attiva {boot.settings.premiumDaysPerReview} giorni di Premium.</p>
+                <a className="btn btn-primary" href="#/recensione">Scrivi una recensione</a>{" "}
                 <a className="btn btn-ghost" href="#/come-funziona">Prima voglio capire</a>
                 <hr />
-                <p className="small muted mb0">Cerchi invece cosa dicono di un quartiere? Vai alla <a href="#/mappa">mappa delle reputazioni</a>. Finora {fmtInt(boot.stats.reviews)} recensioni verificate su {fmtInt(boot.stats.entities)} schede.</p>
+                <p className="small muted mb0">Cerchi invece cosa dicono di un quartiere? Vai alla <a href="#/mappa">mappa delle reputazioni</a>. Finora {fmtInt(boot.stats.reviews)} recensioni su {fmtInt(boot.stats.entities)} schede.</p>
               </div>
             </div>
           </div>

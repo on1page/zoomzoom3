@@ -6,6 +6,8 @@ import { useApp } from "@/lib/client/store";
 import { api, fmt1, fmtMonthYear } from "@/lib/client/api";
 import { navigate } from "@/lib/client/router";
 import { Alert, ChipCat, Modal, VerifBadge } from "../ui-kit";
+import { ReviewFields } from "../review-fields";
+import { PhotoInput } from "../photo-input";
 
 /* ---------- Invito ---------- */
 type InviteInfo =
@@ -134,6 +136,7 @@ function WriteReviewForm({ expId, entityId, entityName, kind, period }: { expId:
   const { boot, toast, refreshBoot } = useApp();
   const [cat, setCat] = useState<{ id: string; name: string; criteria: { key: string; label: string }[]; priceUnits: string[] } | null>(null);
   const [form, setForm] = useState({ score: 5, crit: {} as Record<string, number>, priceAmount: "", priceUnit: "", priceKind: "Concluso/pagato", pros: "", cons: "", text: "", honesty: false, hp: "" });
+  const [photos, setPhotos] = useState<string[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -162,8 +165,8 @@ function WriteReviewForm({ expId, entityId, entityName, kind, period }: { expId:
         <form onSubmit={async e => {
           e.preventDefault();
           setErr(null); setBusy(true);
-          const res = await api<{ reviewId: string; entityId: string; premium: { grantedDays: number; until: string } | null }>("/api/reviews", {
-            body: { experienceId: expId, ...form },
+          const res = await api<{ reviewId: string; entityId: string; photos?: { added: number; skipped: number }; premium: { grantedDays: number; until: string } | null }>("/api/reviews", {
+            body: { experienceId: expId, ...form, photos },
           });
           setBusy(false);
           if (res.ok) {
@@ -177,69 +180,8 @@ function WriteReviewForm({ expId, entityId, entityName, kind, period }: { expId:
             navigate(`#/scheda/${entityId}`);
           } else setErr(res.error);
         }}>
-          <div className="field">
-            <label htmlFor="rv-score">Punteggio complessivo dell&apos;esperienza (0–10)</label>
-            <div className="range-wrap">
-              <input type="range" id="rv-score" min={0} max={10} step={0.5} value={form.score}
-                onChange={e => setForm(f => ({ ...f, score: Number(e.target.value) }))} aria-describedby="rv-score-val" />
-              <span className="range-val" id="rv-score-val" aria-live="polite">{fmt1(form.score)}</span>
-            </div>
-          </div>
-          <fieldset>
-            <legend>Valutazioni per criterio (specifiche della categoria &quot;{cat.name}&quot;)</legend>
-            {cat.criteria.map(c => (
-              <div className="field" key={c.key}>
-                <label htmlFor={`rv-crit-${c.key}`}>{c.label}</label>
-                <div className="range-wrap">
-                  <input type="range" id={`rv-crit-${c.key}`} min={0} max={10} step={0.5}
-                    value={form.crit[c.key] ?? 5}
-                    onChange={e => setForm(f => ({ ...f, crit: { ...f.crit, [c.key]: Number(e.target.value) } }))}
-                    aria-describedby={`rv-crit-${c.key}-val`} />
-                  <span className="range-val" id={`rv-crit-${c.key}-val`} aria-live="polite">{fmt1(form.crit[c.key] ?? 5)}</span>
-                </div>
-              </div>
-            ))}
-          </fieldset>
-          {cat.priceUnits.length ? (
-            <fieldset>
-              <legend>Prezzo richiesto e/o proposto (dato dichiarato, facoltativo)</legend>
-              <div className="row">
-                <div className="field mb0" style={{ flex: 1, minWidth: 120 }}>
-                  <label htmlFor="rv-price">Importo (€)</label>
-                  <input id="rv-price" type="number" min={1} step={1} placeholder="Es. 850" value={form.priceAmount} onChange={e => setForm(f => ({ ...f, priceAmount: e.target.value }))} />
-                </div>
-                <div className="field mb0" style={{ flex: 1, minWidth: 110 }}>
-                  <label htmlFor="rv-price-unit">Periodo</label>
-                  <select id="rv-price-unit" value={form.priceUnit || cat.priceUnits[0]} onChange={e => setForm(f => ({ ...f, priceUnit: e.target.value }))}>
-                    {cat.priceUnits.map(u => <option key={u} value={u}>{u}</option>)}
-                  </select>
-                </div>
-                <div className="field mb0" style={{ flex: 1, minWidth: 150 }}>
-                  <label htmlFor="rv-price-kind">Natura</label>
-                  <select id="rv-price-kind" value={form.priceKind} onChange={e => setForm(f => ({ ...f, priceKind: e.target.value }))}>
-                    {["Richiesto", "Proposto/offerta", "Concluso/pagato"].map(k => <option key={k} value={k}>{k}</option>)}
-                  </select>
-                </div>
-              </div>
-              <span className="hint">Sarà mostrato come <b>dato dichiarato dal recensore</b>: la piattaforma non verifica gli importi, ma aiuta chi consulta a farsi un&apos;idea dei valori praticati.</span>
-            </fieldset>
-          ) : null}
-          <div className="field">
-            <label htmlFor="rv-pros">Aspetti positivi <span className="muted">(uno per riga, almeno uno)</span></label>
-            <textarea id="rv-pros" required value={form.pros} onChange={e => setForm(f => ({ ...f, pros: e.target.value }))}
-              placeholder={"Es.\nTempi di risposta rapidi\nCosti chiari fin dall'inizio"} />
-          </div>
-          <div className="field">
-            <label htmlFor="rv-cons">Criticità <span className="muted">(una per riga, facoltativo)</span></label>
-            <textarea id="rv-cons" value={form.cons} onChange={e => setForm(f => ({ ...f, cons: e.target.value }))}
-              placeholder={"Es.\nDocumentazione consegnata in ritardo"} />
-          </div>
-          <div className="field">
-            <label htmlFor="rv-text">Descrizione dell&apos;esperienza <span className="muted">(almeno 100 caratteri)</span></label>
-            <textarea id="rv-text" required minLength={100} value={form.text} onChange={e => setForm(f => ({ ...f, text: e.target.value }))}
-              placeholder="Racconta l'esperienza in modo concreto e rispettoso: cosa è successo, con quali tempi, quali esiti. Senza dati personali di terzi (nomi completi, telefoni, indirizzi privati)." />
-            <span className="hint">Minimo 100 caratteri. Vedi le <a href="#/regole-recensioni">regole</a>.</span>
-          </div>
+          <ReviewFields cat={cat} form={form} setForm={setForm} />
+          <PhotoInput photos={photos} onChange={setPhotos} enabled={!!boot.site.photosEnabled} />
           <label className="checkline mb2">
             <input type="checkbox" checked={form.honesty} onChange={e => setForm(f => ({ ...f, honesty: e.target.checked }))} required />
             <span><b>Dichiarazione:</b> l&apos;esperienza è personale e il contenuto rispetta le regole; non ho inserito dati personali di terzi senza autorizzazione né finalità promozionali.</span>

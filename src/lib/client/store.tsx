@@ -18,6 +18,8 @@ export type SessionUser = {
   emailVerified: boolean; subjectEntityId: string | null;
   totpEnabled: boolean; isDemo: boolean; createdAt: string;
   premium: { active: boolean; until: string | null };
+  photoAccess?: boolean;
+  photoViaContribution?: boolean;
 };
 export type Bootstrap = {
   site: {
@@ -25,6 +27,9 @@ export type Bootstrap = {
     emailDelivery: "smtp" | "demo" | "disabled";
     googleOAuthEnabled: boolean; adsEnabled: boolean; adsClient: string;
     premiumEnabled: boolean;
+    openReviewsEnabled: boolean;
+    photosEnabled: boolean;
+    votesEnabled: boolean;
   };
   categories: CategoryInfo[];
   zones: ZoneInfo[];

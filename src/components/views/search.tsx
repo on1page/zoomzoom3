@@ -64,7 +64,15 @@ export function SearchView() {
           <h1>Cerca schede e recensioni</h1>
           <p className="sub">Immobili, professionisti, agenzie e soggetti recensibili. La consultazione è libera: non serve un account.</p>
         </div>
+        {boot.site.openReviewsEnabled ? (
+          <a className="btn btn-primary btn-sm" href="#/recensione">Non c&apos;è? Aggiungilo tu</a>
+        ) : null}
       </div>
+      {rows && !rows.length ? (
+        <Alert kind="info">
+          Nessun risultato. Se l&apos;immobile che cerchi non è ancora qui, puoi <a href="#/recensione"><b>aggiungerlo tu dall&apos;indirizzo</b></a> e scrivere la prima recensione: niente catalogo vuoto, il primo mattone lo porti tu (con {boot.settings.premiumDaysPerReview} giorni di Premium).
+        </Alert>
+      ) : null}
       <div className="grid grid-side">
         <form className="card card-pad-s" role="search" onSubmit={apply}>
           <div className="field">

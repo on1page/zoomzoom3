@@ -1,0 +1,732 @@
+     1→"use client";
+     2→// ZoomZoom — landing invito (riscatto), form recensione/rettifica, verifica
+     3→// esperienza documentale, area soggetto verificato, proposta scheda.
+     4→import { useCallback, useEffect, useState } from "react";
+     5→import { useApp } from "@/lib/client/store";
+     6→import { api, fmt1, fmtMonthYear } from "@/lib/client/api";
+     7→import { navigate } from "@/lib/client/router";
+     8→import { Alert, ChipCat, Modal, VerifBadge } from "../ui-kit";
+     9→
+    10→/* ---------- Invito ---------- */
+    11→type InviteInfo =
+    12→  | { state: "invalid" | "revoked" | "expired" | "pending"; message: string }
+    13→  | {
+    14→    state: "valid"; experience: { entityName: string; categoryId: string; kind: string; period: string | null };
+    15→    maskedEmail: string; expiresAt: string; loggedIn: boolean; emailMatches: boolean;
+    16→  };
+    17→
+    18→export function InviteView({ token }: { token: string }) {
+    19→  const { user, refreshBoot, toast } = useApp();
+    20→  const [info, setInfo] = useState<InviteInfo | null>(null);
+    21→  const [busy, setBusy] = useState(false);
+    22→
+    23→  const load = useCallback(async () => {
+    24→    const res = await api<InviteInfo>(`/api/invitations/info/${encodeURIComponent(token)}`);
+    25→    setInfo(res.ok ? res as unknown as InviteInfo : { state: "invalid", message: "Il collegamento non è valido." });
+    26→  }, [token]);
+    27→  useEffect(() => { void load(); }, [load]);
+    28→
+    29→  if (!info) return <div className="container section" style={{ maxWidth: 640 }}><p className="muted">Verifica dell&apos;invito…</p></div>;
+    30→
+    31→  if (info.state !== "valid") {
+    32→    return (
+    33→      <div className="container section" style={{ maxWidth: 640 }}>
+    34→        <h1 className="sr-only">Invito a recensire</h1>
+    35→        <Alert kind="danger">
+    36→          <h1 style={{ margin: "0 0 8px", fontSize: "1.3rem" }}>Invito non utilizzabile</h1>
+    37→          {info.message}
+    38→        </Alert>
+    39→        {info.state === "expired" ? <p className="small">Se pensi sia un errore, scrivi dal modulo <a href="#/contatti">contatti</a>.</p> : null}
+    40→        <p className="small mt3"><a href="#/">&#8592; Torna alla home</a></p>
+    41→      </div>
+    42→    );
+    43→  }
+    44→
+    45→  const claim = async () => {
+    46→    setBusy(true);
+    47→    const res = await api<{ experienceId: string }>("/api/invitations/redeem", { body: { token } });
+    48→    setBusy(false);
+    49→    if (res.ok) {
+    50→      await refreshBoot();
+    51→      toast("Invito accettato: esperienza collegata al tuo account.");
+    52→      navigate(`#/scrivi/${res.experienceId}`);
+    53→    } else {
+    54→      toast(res.error, "err");
+    55→      void load();
+    56→    }
+    57→  };
+    58→
+    59→  return (
+    60→    <div className="container section" style={{ maxWidth: 640 }}>
+    61→      <h1 className="sr-only">Invito a recensire</h1>
+    62→      <Alert kind="ok"><b>Invito valido</b> — collegato a un&apos;esperienza registrata su ZoomZoom.</Alert>
+    63→      <div className="card mb2">
+    64→        <h2 style={{ marginTop: 0, fontSize: "1.15rem" }}>Esperienza da recensire</h2>
+    65→        <p className="mb1"><b>{info.experience.entityName}</b> · {info.experience.kind}{info.experience.period ? ` · ${info.experience.period}` : ""}</p>
+    66→        <p className="small mb1">Destinatario: <b>{info.maskedEmail}</b> · Scadenza: {new Date(info.expiresAt).toLocaleString("it-IT")} · Uso singolo</p>
+    67→        <p className="small muted mb0">La verifica attesta l&apos;esistenza dell&apos;interazione registrata (invito o documento): <b>non garantisce che ogni affermazione sia vera</b>. Le opinioni restano responsabilità di chi le scrive, con moderazione e appello.</p>
+    68→      </div>
+    69→      {!user ? (
+    70→        <>
+    71→          <Alert kind="info">Per usare l&apos;invito accedi o registrati con l&apos;indirizzo email a cui è destinato (<b>{info.maskedEmail}</b>): è così che colleghiamo la recensione all&apos;esperienza.</Alert>
+    72→          <div className="row">
+    73→            <a className="btn btn-primary" href="#/accedi">Accedi</a>
+    74→            <a className="btn btn-ghost" href="#/registrati">Registrati con quell&apos;email</a>
+    75→          </div>
+    76→        </>
+    77→      ) : !info.emailMatches ? (
+    78→        <Alert kind="danger">Questo invito è destinato a un altro indirizzo email. Stai usando l&apos;account <b>{user.email}</b>.</Alert>
+    79→      ) : (
+    80→        <button className="btn btn-primary" onClick={claim} disabled={busy}>Accetta l&apos;invito e scrivi la recensione</button>
+    81→      )}
+    82→      <p className="small mt3"><a href="#/">&#8592; Torna alla home</a></p>
+    83→    </div>
+    84→  );
+    85→}
+    86→
+    87→/* ---------- Scrivi recensione ---------- */
+    88→export function WriteReviewView({ expId }: { expId: string }) {
+    89→  const { user, boot, toast } = useApp();
+    90→  const [state, setState] = useState<"loading" | "form" | "already" | "notavailable">("loading");
+    91→  const [exp, setExp] = useState<{ entityName: string; entityId: string; kind: string; period: string | null; catId: string } | null>(null);
+    92→  const [existingReviewId, setExistingReviewId] = useState<string | null>(null);
+    93→
+    94→  useEffect(() => {
+    95→    if (!user) return;
+    96→    void api<{ experiences: Array<{ id: string; entity: { id: string; name: string }; kind: string; period: string | null; status: string; review: { id: string } | null }> }>("/api/me/overview").then(res => {
+    97→      if (!res.ok) return;
+    98→      const e = res.experiences.find(x => x.id === expId);
+    99→      if (!e || e.status !== "active") { setState("notavailable"); return; }
+   100→      if (e.review) { setExistingReviewId(e.review.id); setState("already"); return; }
+   101→      setExp({ entityName: e.entity.name, entityId: e.entity.id, kind: e.kind, period: e.period, catId: "" });
+   102→      setState("form");
+   103→    });
+   104→  }, [user, expId]);
+   105→
+   106→  if (!user) {
+   107→    return (
+   108→      <div className="container section" style={{ maxWidth: 620 }}>
+   109→        <Alert kind="info">Per scrivere una recensione serve <a href="#/accedi">accedere</a>. Se hai ricevuto un invito, aprilo dal messaggio email.</Alert>
+   110→      </div>
+   111→    );
+   112→  }
+   113→  if (state === "loading") return <div className="container section"><p className="muted">Caricamento…</p></div>;
+   114→  if (state === "already") return (
+   115→    <div className="container section" style={{ maxWidth: 620 }}>
+   116→      <Alert kind="info">
+   117→        <h1 style={{ margin: "0 0 8px", fontSize: "1.3rem" }}>Hai già scritto questa recensione</h1>
+   118→        Per esperienza è ammessa una sola recensione: puoi aggiornarla con una <a href={`#/rettifica/${existingReviewId}`}>rettifica motivata</a>.
+   119→      </Alert>
+   120→    </div>
+   121→  );
+   122→  if (state === "notavailable" || !exp || !boot) return (
+   123→    <div className="container section" style={{ maxWidth: 620 }}>
+   124→      <Alert kind="danger">Questa esperienza non è attiva o non è collegata al tuo account. Gli inviti si usano dal messaggio ricevuto per email.</Alert>
+   125→    </div>
+   126→  );
+   127→
+   128→  const cat = boot.categories.find(c => c.id === (exp.catId || ""));
+   129→  // la categoria si ricava dall'entità: la chiediamo alla scheda pubblica
+   130→  return <WriteReviewForm expId={expId} entityId={exp.entityId} entityName={exp.entityName} kind={exp.kind} period={exp.period} />;
+   131→}
+   132→
+   133→function WriteReviewForm({ expId, entityId, entityName, kind, period }: { expId: string; entityId: string; entityName: string; kind: string; period: string | null }) {
+   134→  const { boot, toast, refreshBoot } = useApp();
+   135→  const [cat, setCat] = useState<{ id: string; name: string; criteria: { key: string; label: string }[]; priceUnits: string[] } | null>(null);
+   136→  const [form, setForm] = useState({ score: 5, crit: {} as Record<string, number>, priceAmount: "", priceUnit: "", priceKind: "Concluso/pagato", pros: "", cons: "", text: "", honesty: false, hp: "" });
+   137→  const [err, setErr] = useState<string | null>(null);
+   138→  const [busy, setBusy] = useState(false);
+   139→
+   140→  useEffect(() => {
+   141→    void api<{ category: typeof cat }>(`/api/public/entity/${entityId}`).then(res => {
+   142→      if (res.ok && res.category) setCat(res.category);
+   143→    });
+   144→  }, [entityId]);
+   145→
+   146→  if (!boot) return null;
+   147→  if (!cat) return <div className="container section"><p className="muted">Caricamento criteri…</p></div>;
+   148→
+   149→  return (
+   150→    <div className="container" style={{ maxWidth: 760, paddingTop: 26, paddingBottom: 30 }}>
+   151→      <div className="section-head">
+   152→        <div>
+   153→          <h1 style={{ margin: 0 }}>Scrivi la recensione</h1>
+   154→          <p className="sub">{entityName} · {kind}{period ? ` · ${period}` : ""} <VerifBadge /></p>
+   155→        </div>
+   156→      </div>
+   157→      <Alert kind="info">Stelle e punteggio: il voto complessivo (0–10, step 0,5) verrà mostrato con la scala a cinque stelle e il valore numerico su 10. I criteri valutano aspetti specifici della categoria.</Alert>
+   158→      {boot.site.premiumEnabled ? (
+   159→        <Alert kind="ok"><b>Membership Premium.</b> Pubblicando questa recensione verificata ottieni <b>{boot.settings.premiumDaysPerReview} giorni di Premium</b>: ti permettono di leggere le recensioni integrali di tutte le schede. Il Premio è legato al contributo, non al voto; viene revocato se la moderazione accerta la frode.</Alert>
+   160→      ) : null}
+   161→      <div className="card">
+   162→        <form onSubmit={async e => {
+   163→          e.preventDefault();
+   164→          setErr(null); setBusy(true);
+   165→          const res = await api<{ reviewId: string; entityId: string; premium: { grantedDays: number; until: string } | null }>("/api/reviews", {
+   166→            body: { experienceId: expId, ...form },
+   167→          });
+   168→          setBusy(false);
+   169→          if (res.ok) {
+   170→            if (res.premium && res.premium.grantedDays > 0) {
+   171→              const fino = res.premium.until ? new Date(res.premium.until).toLocaleDateString("it-IT", { day: "numeric", month: "long", year: "numeric" }) : "";
+   172→              toast(`Recensione pubblicata: grazie! Membership Premium attivata per ${res.premium.grantedDays} giorni${fino ? ` (fino al ${fino})` : ""}.`);
+   173→            } else {
+   174→              toast("Recensione pubblicata: grazie.");
+   175→            }
+   176→            void refreshBoot(); // aggiorna subito lo stato Premium dell'utente
+   177→            navigate(`#/scheda/${entityId}`);
+   178→          } else setErr(res.error);
+   179→        }}>
+   180→          <div className="field">
+   181→            <label htmlFor="rv-score">Punteggio complessivo dell&apos;esperienza (0–10)</label>
+   182→            <div className="range-wrap">
+   183→              <input type="range" id="rv-score" min={0} max={10} step={0.5} value={form.score}
+   184→                onChange={e => setForm(f => ({ ...f, score: Number(e.target.value) }))} aria-describedby="rv-score-val" />
+   185→              <span className="range-val" id="rv-score-val" aria-live="polite">{fmt1(form.score)}</span>
+   186→            </div>
+   187→          </div>
+   188→          <fieldset>
+   189→            <legend>Valutazioni per criterio (specifiche della categoria &quot;{cat.name}&quot;)</legend>
+   190→            {cat.criteria.map(c => (
+   191→              <div className="field" key={c.key}>
+   192→                <label htmlFor={`rv-crit-${c.key}`}>{c.label}</label>
+   193→                <div className="range-wrap">
+   194→                  <input type="range" id={`rv-crit-${c.key}`} min={0} max={10} step={0.5}
+   195→                    value={form.crit[c.key] ?? 5}
+   196→                    onChange={e => setForm(f => ({ ...f, crit: { ...f.crit, [c.key]: Number(e.target.value) } }))}
+   197→                    aria-describedby={`rv-crit-${c.key}-val`} />
+   198→                  <span className="range-val" id={`rv-crit-${c.key}-val`} aria-live="polite">{fmt1(form.crit[c.key] ?? 5)}</span>
+   199→                </div>
+   200→              </div>
+   201→            ))}
+   202→          </fieldset>
+   203→          {cat.priceUnits.length ? (
+   204→            <fieldset>
+   205→              <legend>Prezzo richiesto e/o proposto (dato dichiarato, facoltativo)</legend>
+   206→              <div className="row">
+   207→                <div className="field mb0" style={{ flex: 1, minWidth: 120 }}>
+   208→                  <label htmlFor="rv-price">Importo (€)</label>
+   209→                  <input id="rv-price" type="number" min={1} step={1} placeholder="Es. 850" value={form.priceAmount} onChange={e => setForm(f => ({ ...f, priceAmount: e.target.value }))} />
+   210→                </div>
+   211→                <div className="field mb0" style={{ flex: 1, minWidth: 110 }}>
+   212→                  <label htmlFor="rv-price-unit">Periodo</label>
+   213→                  <select id="rv-price-unit" value={form.priceUnit || cat.priceUnits[0]} onChange={e => setForm(f => ({ ...f, priceUnit: e.target.value }))}>
+   214→                    {cat.priceUnits.map(u => <option key={u} value={u}>{u}</option>)}
+   215→                  </select>
+   216→                </div>
+   217→                <div className="field mb0" style={{ flex: 1, minWidth: 150 }}>
+   218→                  <label htmlFor="rv-price-kind">Natura</label>
+   219→                  <select id="rv-price-kind" value={form.priceKind} onChange={e => setForm(f => ({ ...f, priceKind: e.target.value }))}>
+   220→                    {["Richiesto", "Proposto/offerta", "Concluso/pagato"].map(k => <option key={k} value={k}>{k}</option>)}
+   221→                  </select>
+   222→                </div>
+   223→              </div>
+   224→              <span className="hint">Sarà mostrato come <b>dato dichiarato dal recensore</b>: la piattaforma non verifica gli importi, ma aiuta chi consulta a farsi un&apos;idea dei valori praticati.</span>
+   225→            </fieldset>
+   226→          ) : null}
+   227→          <div className="field">
+   228→            <label htmlFor="rv-pros">Aspetti positivi <span className="muted">(uno per riga, almeno uno)</span></label>
+   229→            <textarea id="rv-pros" required value={form.pros} onChange={e => setForm(f => ({ ...f, pros: e.target.value }))}
+   230→              placeholder={"Es.\nTempi di risposta rapidi\nCosti chiari fin dall'inizio"} />
+   231→          </div>
+   232→          <div className="field">
+   233→            <label htmlFor="rv-cons">Criticità <span className="muted">(una per riga, facoltativo)</span></label>
+   234→            <textarea id="rv-cons" value={form.cons} onChange={e => setForm(f => ({ ...f, cons: e.target.value }))}
+   235→              placeholder={"Es.\nDocumentazione consegnata in ritardo"} />
+   236→          </div>
+   237→          <div className="field">
+   238→            <label htmlFor="rv-text">Descrizione dell&apos;esperienza <span className="muted">(almeno 100 caratteri)</span></label>
+   239→            <textarea id="rv-text" required minLength={100} value={form.text} onChange={e => setForm(f => ({ ...f, text: e.target.value }))}
+   240→              placeholder="Racconta l'esperienza in modo concreto e rispettoso: cosa è successo, con quali tempi, quali esiti. Senza dati personali di terzi (nomi completi, telefoni, indirizzi privati)." />
+   241→            <span className="hint">Minimo 100 caratteri. Vedi le <a href="#/regole-recensioni">regole</a>.</span>
+   242→          </div>
+   243→          <label className="checkline mb2">
+   244→            <input type="checkbox" checked={form.honesty} onChange={e => setForm(f => ({ ...f, honesty: e.target.checked }))} required />
+   245→            <span><b>Dichiarazione:</b> l&apos;esperienza è personale e il contenuto rispetta le regole; non ho inserito dati personali di terzi senza autorizzazione né finalità promozionali.</span>
+   246→          </label>
+   247→          <div className="hp-field"><label htmlFor="rv-hp">Non compilare</label><input id="rv-hp" tabIndex={-1} autoComplete="off" value={form.hp} onChange={e => setForm(f => ({ ...f, hp: e.target.value }))} /></div>
+   248→          {err ? <p className="error-msg" style={{ display: "block" }}>{err}</p> : null}
+   249→          <button className="btn btn-primary btn-block" type="submit" disabled={busy}>Pubblica la recensione</button>
+   250→        </form>
+   251→      </div>
+   252→    </div>
+   253→  );
+   254→}
+   255→
+   256→/* ---------- Rettifica ---------- */
+   257→export function UpdateReviewView({ reviewId }: { reviewId: string }) {
+   258→  const { user, boot, toast } = useApp();
+   259→  const [state, setState] = useState<"loading" | "form" | "notFound" | "notEditable" | "windowOver">("loading");
+   260→  const [rev, setRev] = useState<{
+   261→    entityId: string; entityName: string; catId: string; score: number;
+   262→    criteria: Record<string, number>; pros: string[]; cons: string[]; text: string;
+   263→    price: { amount: number; unit: string; kind: string } | null; createdAt: string;
+   264→  } | null>(null);
+   265→
+   266→  useEffect(() => {
+   267→    if (!user) return;
+   268→    void (async () => {
+   269→      const res = await api<{ reviews: Array<{ id: string; entity: { id: string; name: string }; score: number; status: string; createdAt: string }> }>("/api/me/overview");
+   270→      if (!res.ok) return;
+   271→      const r = res.reviews.find(x => x.id === reviewId);
+   272→      if (!r) { setState("notFound"); return; }
+   273→      if (r.status !== "published") { setState("notEditable"); return; }
+   274→      const days = (Date.now() - new Date(r.createdAt).getTime()) / 86400000;
+   275→      if (days > (boot?.settings.rettificaDays ?? 30)) { setState("windowOver"); return; }
+   276→      const full = await api<{ reviews: Array<{ id: string; criteria: Record<string, number>; pros: string[]; cons: string[]; text: string; price: { amount: number; unit: string; kind: string } | null; entity: { id: string; name: string } }> }>(`/api/public/entity/${r.entity.id}`);
+   277→      if (full.ok) {
+   278→        const fr = (full as unknown as { reviews: Array<{ id: string; criteria: Record<string, number>; pros: string[]; cons: string[]; text: string; price: { amount: number; unit: string; kind: string } | null }> }).reviews.find(x => x.id === reviewId);
+   279→        if (fr) {
+   280→          setRev({
+   281→            entityId: r.entity.id, entityName: r.entity.name, catId: "", score: r.score,
+   282→            criteria: fr.criteria, pros: fr.pros, cons: fr.cons, text: fr.text, price: fr.price, createdAt: r.createdAt,
+   283→          });
+   284→          setState("form");
+   285→          return;
+   286→        }
+   287→      }
+   288→      setState("notFound");
+   289→    })();
+   290→  }, [user, reviewId, boot]);
+   291→
+   292→  if (!user) return <div className="container section" style={{ maxWidth: 620 }}><Alert kind="info">Serve <a href="#/accedi">accedere</a> per rettificare una recensione.</Alert></div>;
+   293→  if (state === "loading") return <div className="container section"><p className="muted">Caricamento…</p></div>;
+   294→  if (state === "notFound") return <div className="container section" style={{ maxWidth: 620 }}><Alert kind="danger">Recensione non trovata.</Alert></div>;
+   295→  if (state === "notEditable") return (
+   296→    <div className="container section" style={{ maxWidth: 620 }}>
+   297→      <Alert kind="danger">La recensione non è modificabile in autonomia: è stata nascosta dalla moderazione. Scrivi dal modulo <a href="#/contatti">contatti</a> per la procedura di correzione.</Alert>
+   298→    </div>
+   299→  );
+   300→  if (state === "windowOver" || !rev || !boot) return (
+   301→    <div className="container section" style={{ maxWidth: 620 }}>
+   302→      <Alert kind="warn">
+   303→        <h1 style={{ margin: "0 0 8px", fontSize: "1.3rem" }}>Finestra di rettifica conclusa</h1>
+   304→        Puoi aggiornare autonomamente entro {boot?.settings.rettificaDays ?? 30} giorni dalla pubblicazione. Dopo, le correzioni passano dalla moderazione: usa il modulo <a href="#/contatti">contatti</a> indicando la recensione.
+   305→      </Alert>
+   306→    </div>
+   307→  );
+   308→
+   309→  return <UpdateReviewForm reviewId={reviewId} rev={rev} />;
+   310→}
+   311→
+   312→function UpdateReviewForm({ reviewId, rev }: { reviewId: string; rev: NonNullable<Parameters<typeof UpdateReviewView>[0]["rev"]> }) {
+   313→  const { boot, toast } = useApp();
+   314→  const [cat, setCat] = useState<{ name: string; criteria: { key: string; label: string }[]; priceUnits: string[] } | null>(null);
+   315→  const [form, setForm] = useState({
+   316→    score: rev.score, crit: rev.criteria, priceAmount: rev.price ? String(rev.price.amount) : "",
+   317→    priceUnit: rev.price?.unit || "", priceKind: rev.price?.kind || "Concluso/pagato",
+   318→    pros: rev.pros.join("\n"), cons: rev.cons.join("\n"), text: rev.text, honesty: true, hp: "",
+   319→    updateReason: "",
+   320→  });
+   321→  const [err, setErr] = useState<string | null>(null);
+   322→  useEffect(() => {
+   323→    void api<{ category: typeof cat }>(`/api/public/entity/${rev.entityId}`).then(res => {
+   324→      if (res.ok && res.category) setCat(res.category);
+   325→    });
+   326→  }, [rev.entityId]);
+   327→  if (!boot) return null;
+   328→  if (!cat) return <div className="container section"><p className="muted">Caricamento criteri…</p></div>;
+   329→
+   330→  return (
+   331→    <div className="container" style={{ maxWidth: 760, paddingTop: 26, paddingBottom: 30 }}>
+   332→      <div className="section-head">
+   333→        <div>
+   334→          <h1 style={{ margin: 0 }}>Aggiorna la recensione</h1>
+   335→          <p className="sub">{rev.entityName} · pubblicata {fmtMonthYear(rev.createdAt)} · aggiornabile entro {boot.settings.rettificaDays} giorni</p>
+   336→        </div>
+   337→      </div>
+   338→      <div className="card">
+   339→        <form onSubmit={async e => {
+   340→          e.preventDefault();
+   341→          setErr(null);
+   342→          const res = await api(`/api/reviews/${reviewId}`, {
+   343→            method: "PUT",
+   344→            body: { ...form, updateReason: form.updateReason },
+   345→          });
+   346→          if (res.ok) {
+   347→            toast("Recensione aggiornata.");
+   348→            navigate(`#/scheda/${rev.entityId}`);
+   349→          } else setErr(res.error);
+   350→        }}>
+   351→          <div className="field">
+   352→            <label htmlFor="rv-score">Punteggio complessivo (0–10)</label>
+   353→            <div className="range-wrap">
+   354→              <input type="range" id="rv-score" min={0} max={10} step={0.5} value={form.score}
+   355→                onChange={e => setForm(f => ({ ...f, score: Number(e.target.value) }))} aria-describedby="rv-score-val" />
+   356→              <span className="range-val" id="rv-score-val" aria-live="polite">{fmt1(form.score)}</span>
+   357→            </div>
+   358→          </div>
+   359→          <fieldset>
+   360→            <legend>Valutazioni per criterio (categoria &quot;{cat.name}&quot;)</legend>
+   361→            {cat.criteria.map(c => (
+   362→              <div className="field" key={c.key}>
+   363→                <label htmlFor={`rv-crit-${c.key}`}>{c.label}</label>
+   364→                <div className="range-wrap">
+   365→                  <input type="range" id={`rv-crit-${c.key}`} min={0} max={10} step={0.5}
+   366→                    value={form.crit[c.key] ?? 5}
+   367→                    onChange={e => setForm(f => ({ ...f, crit: { ...f.crit, [c.key]: Number(e.target.value) } }))}
+   368→                    aria-describedby={`rv-crit-${c.key}-val`} />
+   369→                  <span className="range-val" id={`rv-crit-${c.key}-val`} aria-live="polite">{fmt1(form.crit[c.key] ?? 5)}</span>
+   370→                </div>
+   371→              </div>
+   372→            ))}
+   373→          </fieldset>
+   374→          {cat.priceUnits.length ? (
+   375→            <fieldset>
+   376→              <legend>Prezzo dichiarato (facoltativo)</legend>
+   377→              <div className="row">
+   378→                <div className="field mb0" style={{ flex: 1, minWidth: 120 }}>
+   379→                  <label htmlFor="rv-price">Importo (€)</label>
+   380→                  <input id="rv-price" type="number" min={1} step={1} value={form.priceAmount} onChange={e => setForm(f => ({ ...f, priceAmount: e.target.value }))} />
+   381→                </div>
+   382→                <div className="field mb0" style={{ flex: 1, minWidth: 110 }}>
+   383→                  <label htmlFor="rv-price-unit">Periodo</label>
+   384→                  <select id="rv-price-unit" value={form.priceUnit || cat.priceUnits[0]} onChange={e => setForm(f => ({ ...f, priceUnit: e.target.value }))}>
+   385→                    {cat.priceUnits.map(u => <option key={u} value={u}>{u}</option>)}
+   386→                  </select>
+   387→                </div>
+   388→                <div className="field mb0" style={{ flex: 1, minWidth: 150 }}>
+   389→                  <label htmlFor="rv-price-kind">Natura</label>
+   390→                  <select id="rv-price-kind" value={form.priceKind} onChange={e => setForm(f => ({ ...f, priceKind: e.target.value }))}>
+   391→                    {["Richiesto", "Proposto/offerta", "Concluso/pagato"].map(k => <option key={k} value={k}>{k}</option>)}
+   392→                  </select>
+   393→                </div>
+   394→              </div>
+   395→            </fieldset>
+   396→          ) : null}
+   397→          <div className="field">
+   398→            <label htmlFor="rv-pros">Aspetti positivi (uno per riga)</label>
+   399→            <textarea id="rv-pros" required value={form.pros} onChange={e => setForm(f => ({ ...f, pros: e.target.value }))} />
+   400→          </div>
+   401→          <div className="field">
+   402→            <label htmlFor="rv-cons">Criticità (una per riga)</label>
+   403→            <textarea id="rv-cons" value={form.cons} onChange={e => setForm(f => ({ ...f, cons: e.target.value }))} />
+   404→          </div>
+   405→          <div className="field">
+   406→            <label htmlFor="rv-text">Descrizione dell&apos;esperienza (almeno 100 caratteri)</label>
+   407→            <textarea id="rv-text" required minLength={100} value={form.text} onChange={e => setForm(f => ({ ...f, text: e.target.value }))} />
+   408→          </div>
+   409→          <div className="field">
+   410→            <label htmlFor="rv-reason">Motivo della rettifica <span className="muted">(almeno 10 caratteri, sarà visibile sulla recensione)</span></label>
+   411→            <input id="rv-reason" required minLength={10} value={form.updateReason} onChange={e => setForm(f => ({ ...f, updateReason: e.target.value }))} placeholder="Es. aggiornamento dopo l'intervento promesso" />
+   412→          </div>
+   413→          <div className="hp-field"><label htmlFor="rv-hp">Non compilare</label><input id="rv-hp" tabIndex={-1} autoComplete="off" value={form.hp} onChange={e => setForm(f => ({ ...f, hp: e.target.value }))} /></div>
+   414→          {err ? <p className="error-msg" style={{ display: "block" }}>{err}</p> : null}
+   415→          <div className="row" style={{ justifyContent: "flex-end" }}>
+   416→            <button className="btn btn-primary" type="submit">Salva aggiornamento</button>
+   417→          </div>
+   418→        </form>
+   419→      </div>
+   420→    </div>
+   421→  );
+   422→}
+   423→
+   424→/* ---------- Verifica esperienza (upload) ---------- */
+   425→export function VerifyExperienceView() {
+   426→  const { user, boot, toast } = useApp();
+   427→  const [cat, setCat] = useState("");
+   428→  const [ent, setEnt] = useState("");
+   429→  const [kind, setKind] = useState("");
+   430→  const [period, setPeriod] = useState(String(new Date().getFullYear()));
+   431→  const [note, setNote] = useState("");
+   432→  const [hp, setHp] = useState("");
+   433→  const [file, setFile] = useState<File | null>(null);
+   434→  const [err, setErr] = useState<string | null>(null);
+   435→  const [busy, setBusy] = useState(false);
+   436→
+   437→  if (!user) return <div className="container section" style={{ maxWidth: 700 }}><Alert kind="info">Per richiedere la verifica di un&apos;esperienza serve <a href="#/accedi">accedere</a>.</Alert></div>;
+   438→  if (!boot) return null;
+   439→  const selCat = boot.categories.find(c => c.id === cat);
+   440→  const entitiesOf = (catId: string) => null; // popolato via API sotto
+   441→
+   442→  return (
+   443→    <div className="container" style={{ maxWidth: 700, paddingTop: 26, paddingBottom: 30 }}>
+   444→      <div className="section-head">
+   445→        <div>
+   446→          <h1 style={{ margin: 0 }}>Verifica la tua esperienza</h1>
+   447→          <p className="sub">Per recensire serve un&apos;esperienza registrata. Se non hai ricevuto un invito, puoi proporre la verifica documentale.</p>
+   448→        </div>
+   449→      </div>
+   450→      <Alert kind="info">Carica un documento che dimostri l&apos;esperienza (contratto, fattura, delibera, email di conferma…). Un moderatore valuterà la richiesta, di norma entro 7 giorni. Il documento è accessibile solo al personale autorizzato e viene cancellato dopo la decisione.</Alert>
+   451→      <div className="card">
+   452→        <form onSubmit={async e => {
+   453→          e.preventDefault();
+   454→          setErr(null); setBusy(true);
+   455→          const fd = new FormData();
+   456→          fd.set("entityId", ent); fd.set("kind", kind); fd.set("period", period);
+   457→          fd.set("note", note); fd.set("hp", hp);
+   458→          if (file) fd.set("proof", file);
+   459→          const res = await fetch("/api/experiences/verify-request", { method: "POST", body: fd });
+   460→          const data = await res.json() as { ok: boolean; error?: string };
+   461→          setBusy(false);
+   462→          if (data.ok) {
+   463→            toast("Richiesta registrata: la moderazione valuterà l'esperienza.");
+   464→            navigate("#/profilo");
+   465→          } else setErr(data.error || "Errore.");
+   466→        }}>
+   467→          <div className="field">
+   468→            <label htmlFor="ve-cat">Categoria del soggetto</label>
+   469→            <select id="ve-cat" required value={cat} onChange={e => { setCat(e.target.value); setEnt(""); setKind(""); }}>
+   470→              <option value="">— Scegli —</option>
+   471→              {boot.categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+   472→            </select>
+   473→          </div>
+   474→          {selCat ? (
+   475→            <>
+   476→              <EntitySelect catId={selCat.id} value={ent} onChange={setEnt} />
+   477→              <div className="field">
+   478→                <label htmlFor="ve-kind">Tipo di esperienza</label>
+   479→                <select id="ve-kind" required value={kind} onChange={e => setKind(e.target.value)}>
+   480→                  <option value="">— Scegli il tipo —</option>
+   481→                  {selCat.experienceKinds.map(k => <option key={k} value={k}>{k}</option>)}
+   482→                </select>
+   483→              </div>
+   484→            </>
+   485→          ) : null}
+   486→          <div className="field">
+   487→            <label htmlFor="ve-period">Periodo (anno)</label>
+   488→            <input id="ve-period" type="number" min={2015} max={new Date().getFullYear()} value={period} onChange={e => setPeriod(e.target.value)} required />
+   489→          </div>
+   490→          <div className="field">
+   491→            <label htmlFor="ve-proof">Documento dimostrativo</label>
+   492→            <input id="ve-proof" type="file" required accept=".pdf,.png,.jpg,.jpeg,.webp"
+   493→              onChange={e => setFile(e.target.files?.[0] || null)} />
+   494→            <span className="hint">PDF, PNG, JPG o WebP, massimo 8 MB. Il documento è archiviato in area privata, accessibile solo alla moderazione e cancellato dopo la decisione.</span>
+   495→          </div>
+   496→          <div className="field">
+   497→            <label htmlFor="ve-note">Note per la moderazione</label>
+   498→            <textarea id="ve-note" value={note} onChange={e => setNote(e.target.value)} placeholder="Indicazioni utili, senza dati personali di terzi."></textarea>
+   499→          </div>
+   500→          <div className="hp-field"><label htmlFor="ve-hp">Non compilare</label><input id="ve-hp" tabIndex={-1} autoComplete="off" value={hp} onChange={e => setHp(e.target.value)} /></div>
+   501→          {err ? <p className="error-msg" style={{ display: "block" }}>{err}</p> : null}
+   502→          <button className="btn btn-primary" type="submit" disabled={busy}>Invia richiesta di verifica</button>
+   503→        </form>
+   504→      </div>
+   505→      <p className="small muted mt2">Non trovi la scheda? <a href="#/proponi-soggetto">Proponi un soggetto</a>.</p>
+   506→    </div>
+   507→  );
+   508→}
+   509→
+   510→function EntitySelect({ catId, value, onChange }: { catId: string; value: string; onChange: (v: string) => void }) {
+   511→  const [ents, setEnts] = useState<Array<{ id: string; name: string; zoneName?: string }>>([]);
+   512→  const { boot } = useApp();
+   513→  useEffect(() => {
+   514→    void (async () => {
+   515→      const res = await fetch(`/api/public/search?cat=${catId}`);
+   516→      const data = await res.json() as { rows?: Array<{ entity: { id: string; name: string; zoneId: string | null } }> };
+   517→      setEnts((data.rows || []).map(r => ({
+   518→        id: r.entity.id, name: r.entity.name,
+   519→        zoneName: boot?.zones.find(z => z.id === r.entity.zoneId)?.name,
+   520→      })));
+   521→    })();
+   522→  }, [catId, boot]);
+   523→  return (
+   524→    <div className="field">
+   525→      <label htmlFor="ve-ent">Soggetto</label>
+   526→      <select id="ve-ent" required value={value} onChange={e => onChange(e.target.value)}>
+   527→        <option value="">— Scegli il soggetto —</option>
+   528→        {ents.map(e => <option key={e.id} value={e.id}>{e.name}{e.zoneName ? ` (${e.zoneName})` : ""}</option>)}
+   529→      </select>
+   530→    </div>
+   531→  );
+   532→}
+   533→
+   534→/* ---------- Area soggetto verificato ---------- */
+   535→export function SubjectAreaView() {
+   536→  const { user, boot, toast } = useApp();
+   537→  const [data, setData] = useState<{
+   538→    entity: { id: string; name: string; categoryId: string };
+   539→    category: { name: string; experienceKinds: string[] } | null;
+   540→    stats: { n: number; mean: number | null };
+   541→    invites: { sentToday: number; cap: number; approvalAbove: number };
+   542→    experiences: Array<{ id: string; clientEmail: string; kind: string; period: string | null; status: string; createdAt: string; invite: { expiresAt: string; usedAt: string | null; revoked: boolean } | null; reviewScore: number | null }>;
+   543→    settings: { inviteExpiryDays: number };
+   544→  } | null>(null);
+   545→  const [form, setForm] = useState({ clientEmail: "", kind: "", period: String(new Date().getFullYear()), fair: false, hp: "" });
+   546→  const [err, setErr] = useState<string | null>(null);
+   547→
+   548→  const load = useCallback(async () => {
+   549→    const res = await api<NonNullable<typeof data>>("/api/subject/overview");
+   550→    if (res.ok) setData(res);
+   551→  }, []);
+   552→  useEffect(() => { if (user) void load(); }, [user, load]);
+   553→
+   554→  if (!user) return <div className="container section" style={{ maxWidth: 760 }}><Alert kind="info">Area riservata ai soggetti verificati: <a href="#/accedi">accedi</a> con l&apos;account collegato alla tua scheda.</Alert></div>;
+   555→  if (!data || !boot) return <div className="container section"><p className="muted">Caricamento…</p></div>;
+   556→
+   557→  return (
+   558→    <div className="container" style={{ paddingTop: 26, paddingBottom: 30 }}>
+   559→      <div className="section-head">
+   560→        <div>
+   561→          <h1 style={{ margin: 0 }}>Area del soggetto verificato</h1>
+   562→          <p className="sub">{data.entity.name} · {data.category?.name}</p>
+   563→        </div>
+   564→        <a className="btn btn-ghost" href={`#/scheda/${data.entity.id}`}>Vedi la scheda pubblica</a>
+   565→      </div>
+   566→      <div className="grid grid-3 mb2">
+   567→        <div className="stat">
+   568→          <div className="v">{data.stats.mean == null ? "—" : fmt1(data.stats.mean)}</div>
+   569→          <div className="l">Media complessiva</div>
+   570→          <div className="d">{data.stats.n} recensioni verificate</div>
+   571→        </div>
+   572→        <div className="stat">
+   573→          <div className="v">{data.invites.sentToday}/{data.invites.cap}</div>
+   574→          <div className="l">Inviti usati oggi</div>
+   575→          <div className="d">Limite anti-abuso per soggetto</div>
+   576→        </div>
+   577→        <div className="stat">
+   578→          <div className="v">{data.experiences.length}</div>
+   579→          <div className="l">Esperienze registrate</div>
+   580→          <div className="d">Totali per questa scheda</div>
+   581→        </div>
+   582→      </div>
+   583→      <div className="grid grid-2" style={{ gap: 26 }}>
+   584→        <div className="card">
+   585→          <h2 style={{ marginTop: 0, fontSize: "1.1rem" }}>Registra un&apos;esperienza e invita il cliente</h2>
+   586→          <form onSubmit={async e => {
+   587→            e.preventDefault();
+   588→            setErr(null);
+   589→            const res = await api("/api/subject/experience", { body: { ...form, entityId: data.entity.id } });
+   590→            if (res.ok) {
+   591→              toast("Esperienza registrata e invito inviato: il cliente lo troverà nella propria email.");
+   592→              setForm(f => ({ ...f, clientEmail: "", fair: false }));
+   593→              void load();
+   594→            } else setErr(res.error);
+   595→          }}>
+   596→            <div className="field">
+   597→              <label htmlFor="be-email">Email del cliente</label>
+   598→              <input id="be-email" type="email" required value={form.clientEmail} onChange={e => setForm(f => ({ ...f, clientEmail: e.target.value }))} placeholder="cliente@esempio.it" />
+   599→              <span className="hint">L&apos;invito sarà valido {data.settings.inviteExpiryDays} giorni, un solo uso, legato a questo indirizzo.</span>
+   600→            </div>
+   601→            <div className="field">
+   602→              <label htmlFor="be-kind">Tipo di esperienza</label>
+   603→              <select id="be-kind" required value={form.kind} onChange={e => setForm(f => ({ ...f, kind: e.target.value }))}>
+   604→                <option value="">— Scegli —</option>
+   605→                {(data.category?.experienceKinds || []).map(k => <option key={k} value={k}>{k}</option>)}
+   606→              </select>
+   607→            </div>
+   608→            <div className="field">
+   609→              <label htmlFor="be-period">Periodo (anno)</label>
+   610→              <input id="be-period" type="number" min={2015} max={new Date().getFullYear()} value={form.period} onChange={e => setForm(f => ({ ...f, period: e.target.value }))} required />
+   611→            </div>
+   612→            <label className="checkline mb2">
+   613→              <input type="checkbox" checked={form.fair} onChange={e => setForm(f => ({ ...f, fair: e.target.checked }))} required />
+   614→              <span><b>Dichiarazione:</b> invito <em>tutti</em> i clienti coinvolti in questa interazione, non soltanto quelli soddisfatti. L&apos;invio selettivo viola le regole e può portare alla sospensione della scheda.</span>
+   615→            </label>
+   616→            <div className="hp-field"><label htmlFor="be-hp">Non compilare</label><input id="be-hp" tabIndex={-1} autoComplete="off" value={form.hp} onChange={e => setForm(f => ({ ...f, hp: e.target.value }))} /></div>
+   617→            {err ? <p className="error-msg" style={{ display: "block" }}>{err}</p> : null}
+   618→            <button className="btn btn-primary" type="submit">Registra e invia invito</button>
+   619→          </form>
+   620→          <p className="small muted mt2 mb0">Oltre {data.invites.approvalAbove} inviti al giorno l&apos;esperienza richiede l&apos;approvazione della moderazione prima di diventare attiva.</p>
+   621→        </div>
+   622→        <div>
+   623→          <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Esperienze e inviti</h2>
+   624→          <div className="table-wrap">
+   625→            <table className="table">
+   626→              <thead><tr><th scope="col">Cliente</th><th scope="col">Stato</th><th scope="col">Invito</th><th scope="col">Recensione</th></tr></thead>
+   627→              <tbody>
+   628→                {data.experiences.map(e => (
+   629→                  <tr key={e.id}>
+   630→                    <td>{maskEmail(e.clientEmail)}<br /><span className="small muted">{e.kind}{e.period ? ` · ${e.period}` : ""}</span></td>
+   631→                    <td>{e.status === "pending" ? <span className="pill pill-amber">In approvazione</span> : <span className="pill pill-green">Attiva</span>}</td>
+   632→                    <td>
+   633→                      {!e.invite ? <span className="pill pill-gray">—</span>
+   634→                        : e.invite.usedAt ? <span className="pill pill-green">Invito riscattato</span>
+   635→                        : e.invite.revoked ? <span className="pill pill-red">Revocato</span>
+   636→                        : new Date(e.invite.expiresAt) < new Date() ? <span className="pill pill-gray">Invito scaduto</span>
+   637→                        : <span className="pill pill-amber">Invito in attesa</span>}
+   638→                    </td>
+   639→                    <td>{e.reviewScore != null ? `${fmt1(e.reviewScore)}/10` : "—"}</td>
+   640→                  </tr>
+   641→                ))}
+   642→                {!data.experiences.length ? <tr><td colSpan={4} className="muted">Nessuna esperienza registrata.</td></tr> : null}
+   643→              </tbody>
+   644→            </table>
+   645→          </div>
+   646→          <Alert kind="warn">
+   647→            <b>Anticipazione delle recensioni negative?</b> Non è possibile bloccare la pubblicazione: le recensioni negative verificate sono parte del contratto di trasparenza del servizio. Puoi rispondere attraverso il modulo contatti: la moderazione valuta l&apos;inserimento di una nota.
+   648→          </Alert>
+   649→        </div>
+   650→      </div>
+   651→    </div>
+   652→  );
+   653→}
+   654→
+   655→function maskEmail(em: string): string {
+   656→  const p = em.split("@");
+   657→  return p.length === 2 ? `${p[0].slice(0, 1)}*****@${p[1]}` : "—";
+   658→}
+   659→
+   660→/* ---------- Proponi un soggetto ---------- */
+   661→export function ProposeView() {
+   662→  const { user, boot, toast } = useApp();
+   663→  const [form, setForm] = useState({ categoryId: "", name: "", subtitle: "", address: "", zoneId: "", justification: "", contactEmail: user?.email || "", hp: "" });
+   664→  const [err, setErr] = useState<string | null>(null);
+   665→  if (!boot) return null;
+   666→  const selCat = boot.categories.find(c => c.id === form.categoryId);
+   667→  return (
+   668→    <div className="container" style={{ maxWidth: 640, paddingTop: 26, paddingBottom: 30 }}>
+   669→      <div className="section-head">
+   670→        <div>
+   671→          <h1 style={{ margin: 0 }}>Proponi un soggetto</h1>
+   672→          <p className="sub">La creazione delle schede passa dalla revisione della moderazione: così evitiamo schede arbitrarie o usate per scopi impropri.</p>
+   673→        </div>
+   674→      </div>
+   675→      <div className="card">
+   676→        <form onSubmit={async e => {
+   677→          e.preventDefault();
+   678→          setErr(null);
+   679→          const res = await api("/api/proposals", { body: form });
+   680→          if (res.ok) {
+   681→            toast("Proposta inviata: la moderazione la valuterà.");
+   682→            setForm(f => ({ ...f, name: "", subtitle: "", address: "", zoneId: "", justification: "" }));
+   683→          } else setErr(res.error);
+   684→        }}>
+   685→          <div className="field">
+   686→            <label htmlFor="pr-cat">Categoria</label>
+   687→            <select id="pr-cat" required value={form.categoryId} onChange={e => setForm(f => ({ ...f, categoryId: e.target.value }))}>
+   688→              <option value="">— Scegli —</option>
+   689→              {boot.categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+   690→            </select>
+   691→          </div>
+   692→          <div className="field">
+   693→            <label htmlFor="pr-name">Nome della scheda</label>
+   694→            <input id="pr-name" required minLength={3} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Es. Impresa Edile XYZ" />
+   695→            <span className="hint">Per le persone fisiche verranno usate solo le iniziali, decise dalla moderazione.</span>
+   696→          </div>
+   697→          <div className="field">
+   698→            <label htmlFor="pr-sub">Breve descrizione (facoltativa)</label>
+   699→            <input id="pr-sub" value={form.subtitle} onChange={e => setForm(f => ({ ...f, subtitle: e.target.value }))} placeholder="Es. Manutenzione caldaie e impianti" />
+   700→          </div>
+   701→          {selCat && !selCat.isPerson ? (
+   702→            <div className="field">
+   703→              <label htmlFor="pr-addr">Indirizzo (solo per immobili e attività)</label>
+   704→              <input id="pr-addr" value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} placeholder="Via, civico, città" />
+   705→            </div>
+   706→          ) : null}
+   707→          <div className="field">
+   708→            <label htmlFor="pr-zone">Zona di riferimento</label>
+   709→            <select id="pr-zone" value={form.zoneId} onChange={e => setForm(f => ({ ...f, zoneId: e.target.value }))}>
+   710→              <option value="">— Scegli —</option>
+   711→              {boot.zones.map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
+   712→            </select>
+   713→          </div>
+   714→          <div className="field">
+   715→            <label htmlFor="pr-just">Perché è utile questa scheda</label>
+   716→            <textarea id="pr-just" required minLength={20} value={form.justification} onChange={e => setForm(f => ({ ...f, justification: e.target.value }))} placeholder="Es. ho interagito con questo professionista e vorrei poter condividere l'esperienza verificata."></textarea>
+   717→          </div>
+   718→          {!user ? (
+   719→            <div className="field">
+   720→              <label htmlFor="pr-email">Email di contatto</label>
+   721→              <input id="pr-email" type="email" required value={form.contactEmail} onChange={e => setForm(f => ({ ...f, contactEmail: e.target.value }))} placeholder="nome@esempio.it" />
+   722→            </div>
+   723→          ) : null}
+   724→          <div className="hp-field"><label htmlFor="pr-hp">Non compilare</label><input id="pr-hp" tabIndex={-1} autoComplete="off" value={form.hp} onChange={e => setForm(f => ({ ...f, hp: e.target.value }))} /></div>
+   725→          {err ? <p className="error-msg" style={{ display: "block" }}>{err}</p> : null}
+   726→          <button className="btn btn-primary" type="submit">Invia proposta</button>
+   727→        </form>
+   728→      </div>
+   729→    </div>
+   730→  );
+   731→}
+   732→

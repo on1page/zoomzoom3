@@ -55,6 +55,7 @@ model User {
   consents          Consent[]
   privacyRequests   PrivacyRequest[]
   premiumGrants     PremiumGrant[]
+  reviewVotes       ReviewVote[]
 
   @@index([role])
 }
@@ -205,7 +206,7 @@ model Experience {
   entity      Entity   @relation(fields: [entityId], references: [id], onDelete: Cascade)
   kind        String
   period      String?
-  // business | verification-request | seed
+  // business | verification-request | self (dichiarata dall'utente) | seed
   origin      String
   clientEmail String
   userId      String?  // utente che ha reclamato l'esperienza
@@ -291,6 +292,8 @@ model Review {
   // contributo che ha generato il Premium (se la recensione viene nascosta
   // per frode, il grant si revoca e il Premium si ricalcola)
   premiumGrant PremiumGrant?
+  photos ReviewPhoto[]
+  votes  ReviewVote[]
 
   @@index([entityId, status])
   @@index([userId])
@@ -315,6 +318,40 @@ model PremiumGrant {
   revokedReason String?
 
   @@index([userId])
+}
+
+// Foto allegate a una recensione (contributo aperto). L'immagine viene
+// ricompilata lato server in JPEG: i metadati (EXIF, GPS incluso) vengono
+// rimossi prima della conservazione. L'accesso alle foto è riservato ai
+// Premium e a chi ha a sua volta contribuito con almeno una foto.
+model ReviewPhoto {
+  id        String   @id @default(cuid())
+  reviewId  String
+  review    Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  data      Bytes    // JPEG senza metadati
+  width     Int
+  height    Int
+  bytes     Int
+  createdAt DateTime @default(now())
+  isDemo    Boolean  @default(false)
+
+  @@index([reviewId])
+}
+
+// Voto di utilità sulla recensione (effetto community): riservato agli
+// utenti Premium, uno per utente e per recensione, mai sulla propria.
+// value = 1 (pollice su: conferma) | -1 (pollice giù: non confermata).
+model ReviewVote {
+  id        String   @id @default(cuid())
+  reviewId  String
+  review    Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  value     Int
+  createdAt DateTime @default(now())
+
+  @@unique([reviewId, userId])
+  @@index([reviewId])
 }
 
 model Report {

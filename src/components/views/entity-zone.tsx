@@ -1,5 +1,10 @@
 "use client";
 // ZoomZoom — scheda entità e scheda zona.
+// Contributo aperto: chi non ha il Premium vede le ultime 3 recensioni in
+// anteprima offuscata (il testo integrale non lascia mai il server), le foto
+// restano riservate ai Premium e a chi ha contribuito con una foto, i voti
+// di utilità (pollice su/giù) sono conteggi pubblici ma li esprimono i
+// Premium. Le recensioni senza invito mostrano il badge "dichiarata".
 import { useCallback, useEffect, useState } from "react";
 import { useApp } from "@/lib/client/store";
 import { api, fmt1, fmtInt, fmtMonthYear } from "@/lib/client/api";
@@ -7,49 +12,58 @@ import { Alert, ChipCat, Crumbs, CriteriaBars, DemoChip, insuffChip, MethodNoteB
 import { MapLegend, MapViewport } from "../map";
 import { AdSlot } from "../chrome";
 
+type ReviewItem = {
+  id: string; author: string; score: number; criteria: Record<string, number>;
+  criteriaLabels: Record<string, string> | null;
+  pros: string[]; cons: string[];
+  price: { amount: number; unit: string; kind: string } | null;
+  text: string; verified: boolean;
+  createdAt: string; updatedAt: string | null; updateReason: string | null; isDemo: boolean;
+  photos: Array<{ id: string; width: number; height: number }>;
+  votes: { up: number; down: number };
+  myVote: number | null;
+  teaser?: boolean;
+};
+
 type EntityPayload = {
   entity: {
     id: string; categoryId: string; name: string; subtitle: string | null; address: string | null;
-    zoneId: string | null; geo: { x: number; y: number } | null; initialsOnly: boolean;
+    zoneId: string | null; geo: { lat: number; lng: number } | null; initialsOnly: boolean;
     verifiedBusiness: boolean; isDemo: boolean;
     stats: { n: number; mean: number | null; crit: Record<string, number | null>; sufficient: boolean };
     priceStats: { unit: string; min: number; max: number; median: number; n: number } | null;
   };
   category: { id: string; name: string; shortName: string; hexColor: string; icon: string; isPerson: boolean; isMapped: boolean; criteria: { key: string; label: string }[] } | null;
-  reviews: Array<{
-    id: string; author: string; score: number; criteria: Record<string, number>;
-    criteriaLabels: Record<string, string> | null;
-    pros: string[]; cons: string[];
-    price: { amount: number; unit: string; kind: string } | null;
-    text: string; status: string; hiddenReason: string | null; verified: boolean;
-    createdAt: string; updatedAt: string | null; updateReason: string | null; isDemo: boolean;
-  }>;
+  reviews: ReviewItem[];
+  teasers: ReviewItem[];
   hiddenCount: number;
   publishedCount: number;
   premium: {
     enabled: boolean; daysPerReview: number; locked: boolean;
     activeUntil: string | null; lockedCount: number;
   };
+  photos: { enabled: boolean; canView: boolean; viaContribution: boolean };
+  votes: { enabled: boolean; canVote: boolean };
   settings: { minReviews: number; rettificaDays: number };
 };
 
 // Scheda riservata agli utenti Premium: aggregati pubblici, testi integrali
-// sbloccati contribuendo. È il cartello mostrato al posto delle recensioni
+// sbloccati contribuendo. È il cartello mostrato sopra l'anteprima offuscata
 // quando l'utente non ha l'accesso (il server non invia i testi in alcun caso).
 function PremiumLockedBox({ lockedCount, daysPerReview, logged }: { lockedCount: number; daysPerReview: number; logged: boolean }) {
   return (
-    <div className="premium-locked" role="note" aria-label="Recensioni riservate agli utenti Premium">
+    <div className="premium-locked" role="note" aria-label="Recensioni integrali riservate agli utenti Premium">
       <div className="premium-locked-head">
         <span className="premium-lock" aria-hidden="true">🔒</span>
         <div>
           <h3 style={{ margin: 0 }}>{lockedCount > 0 ? `${lockedCount} ${lockedCount === 1 ? "recensione riservata" : "recensioni riservate"}` : "Recensioni riservate"}</h3>
-          <p className="small mb0">Le medie, i criteri e i conteggi restano pubblici: è il testo integrale che si sblocca con la Membership Premium.</p>
+          <p className="small mb0">Medie, criteri e conteggi restano pubblici; qui sotto le ultime tre in <b>anteprima offuscata</b>. Il testo integrale si sblocca con la Membership Premium.</p>
         </div>
       </div>
-      <p className="small mb1">Il Premium non si compra: si guadagna contribuendo. Ogni recensione verificata che pubblichi attiva <b>{daysPerReview} giorni di Premium</b> (accumulabili), che ti lascia leggere tutte le recensioni del sito.</p>
+      <p className="small mb1">Il Premium non si compra: si guadagna contribuendo. Ogni recensione che pubblichi attiva <b>{daysPerReview} giorni di Premium</b> (accumulabili), che ti lascia leggere tutte le recensioni del sito. Allegiando una foto sblocchi anche le foto degli altri.</p>
       <div className="row">
         {logged ? (
-          <a className="btn btn-primary btn-sm" href="#/verifica-esperienza">Verifica la tua esperienza</a>
+          <a className="btn btn-primary btn-sm" href="#/recensione">Scrivi una recensione</a>
         ) : (
           <a className="btn btn-primary btn-sm" href="#/accedi">Accedi per iniziare</a>
         )}{" "}
@@ -57,6 +71,135 @@ function PremiumLockedBox({ lockedCount, daysPerReview, logged }: { lockedCount:
       </div>
       <p className="small muted mb0">Le tue recensioni restano sempre visibili a te. La moderazione può revocare il Premium ottenuto con contributi fraudolenti.</p>
     </div>
+  );
+}
+
+// Testo in anteprima: l'estratto iniziale è leggibile, la maschera di punti
+// (calcolata dal server) viene resa sfocata: effetto "offuscato" senza mai
+// ricevere il testo integrale.
+function TeaserText({ text }: { text: string }) {
+  const i = text.indexOf("•");
+  if (i === -1) return <p className="review-body mb0">{text}</p>;
+  return (
+    <p className="review-body mb0">
+      {text.slice(0, i)}
+      <span className="rev-mask" aria-hidden="true">{text.slice(i)}</span>
+    </p>
+  );
+}
+
+function PhotosStrip({ r, canView, hintContribution }: { r: ReviewItem; canView: boolean; hintContribution: boolean }) {
+  if (!r.photos.length) return null;
+  if (canView) {
+    return (
+      <div className="photo-grid">
+        {r.photos.map(p => (
+          <a key={p.id} href={`/api/public/photo/${p.id}`} target="_blank" rel="noopener noreferrer" title="Apri la foto in dimensione originale">
+            <img src={`/api/public/photo/${p.id}`} alt="Foto dell'immobile allegata alla recensione" loading="lazy" />
+          </a>
+        ))}
+      </div>
+    );
+  }
+  return (
+    <div className="photo-grid">
+      {r.photos.map((p, i) => (
+        <div key={p.id} className="photo-tile-locked" title="Foto riservata: si sblocca con il Premium o contribuendo con una foto">
+          <span aria-hidden="true">🔒</span>
+          <span>Foto {i + 1}</span>
+        </div>
+      ))}
+      {hintContribution ? <p className="small muted mb0" style={{ gridColumn: "1 / -1" }}>Le foto si sbloccano con la Membership Premium oppure allegando una foto a una tua recensione.</p> : null}
+    </div>
+  );
+}
+
+function VoteBar({ r, canVote, enabled }: { r: ReviewItem; canVote: boolean; enabled: boolean }) {
+  const { user } = useApp();
+  const [v, setV] = useState({ up: r.votes.up, down: r.votes.down, mine: r.myVote });
+  const [busy, setBusy] = useState(false);
+  if (!enabled) return null;
+  const vote = async (value: number) => {
+    if (busy) return;
+    setBusy(true);
+    const next = v.mine === value ? 0 : value; // clic di nuovo = ritira il voto
+    const res = await api<{ up: number; down: number; mine: number | null }>(`/api/reviews/${r.id}/vote`, { body: { value: next } });
+    setBusy(false);
+    if (res.ok) setV({ up: res.up, down: res.down, mine: res.mine });
+  };
+  return (
+    <div className="vote-bar">
+      <span className="small muted">Ti risulta attendibile?</span>
+      <button type="button" className={`vote-btn up${v.mine === 1 ? " on" : ""}`} disabled={!canVote || busy}
+        onClick={() => void vote(1)}
+        title={canVote ? "Confermi la plausibilità di questa recensione" : "Il voto è riservato agli utenti Premium: si ottiene pubblicando una recensione"}
+        aria-label="Pollice su: recensione attendibile">👍 <span className="vote-n">{v.up}</span></button>
+      <button type="button" className={`vote-btn down${v.mine === -1 ? " on" : ""}`} disabled={!canVote || busy}
+        onClick={() => void vote(-1)}
+        title={canVote ? "Questa recensione non ti torna: esprimi il disconoscimento" : "Il voto è riservato agli utenti Premium: si ottiene pubblicando una recensione"}
+        aria-label="Pollice giù: recensione non confermata">👎 <span className="vote-n">{v.down}</span></button>
+      {!canVote ? <span className="small muted">{user ? "votano gli utenti Premium" : <a href="#/accedi">accedi per votare</a>}</span> : null}
+    </div>
+  );
+}
+
+function ReviewCard({ r, photos, votes, onReport }: {
+  r: ReviewItem;
+  photos: EntityPayload["photos"];
+  votes: EntityPayload["votes"];
+  onReport?: (id: string) => void;
+}) {
+  const { user } = useApp();
+  return (
+    <article className="review" id={`rev-${r.id}`}>
+      <div className="review-head">
+        <div className="review-author">
+          <span className="avatar" aria-hidden="true">{r.author.slice(0, 2).toUpperCase()}</span>
+          <div>
+            <b>{r.author}</b>{" "}
+            {r.verified
+              ? <VerifBadge />
+              : <span className="pill pill-amber" title="Recensione scritta senza invito: l'esperienza è dichiarata dall'autore, soggetta a moderazione">Dichiarata</span>}
+            <div className="review-meta">
+              Pubblicata: {fmtMonthYear(r.createdAt)}{r.updatedAt ? ` · aggiornata ${fmtMonthYear(r.updatedAt)}` : ""}
+            </div>
+          </div>
+        </div>
+        <div className="score-line">
+          <Stars score={r.score} />
+          <span className="score-num">{fmt1(r.score)} <small>/10</small></span>
+        </div>
+      </div>
+      {r.price ? (
+        <p className="review-meta mb1" style={{ marginTop: 2 }}>
+          <b>Prezzo {r.price.kind.toLowerCase()}: </b> {fmtInt(r.price.amount)} {r.price.unit}{" "}
+          <span className="muted">(dato dichiarato dal recensore, non verificato)</span>
+        </p>
+      ) : null}
+      {!r.teaser && (r.pros.length || r.cons.length) ? (
+        <div className="pc-grid">
+          <div className="pc-box pc-pros">
+            <h4>Punti di forza</h4>
+            <ul>{r.pros.map((p, i) => <li key={i}>{p}</li>)}</ul>
+          </div>
+          <div className="pc-box pc-cons">
+            <h4>Criticità</h4>
+            <ul>{r.cons.map((c, i) => <li key={i}>{c}</li>)}</ul>
+          </div>
+        </div>
+      ) : null}
+      {r.teaser ? <TeaserText text={r.text} /> : <p className="review-body mb0">{r.text}</p>}
+      {photos.enabled ? <PhotosStrip r={r} canView={photos.canView} hintContribution={!!user && !photos.canView} /> : null}
+      {r.updateReason ? <p className="updated-note">Motivo dell&apos;aggiornamento: {r.updateReason}</p> : null}
+      <VoteBar r={r} canVote={votes.canVote} enabled={votes.enabled} />
+      <div className="review-foot">
+        {r.isDemo ? <DemoChip /> : null}
+        <span className="spacer"></span>
+        {user && onReport ? (
+          <button className="btn btn-ghost btn-xs" onClick={() => onReport(r.id)}>Segnala</button>
+        ) : null}
+      </div>
+    </article>
   );
 }
 
@@ -121,7 +264,7 @@ export function EntityView({ id }: { id: string }) {
               </div>
               <div>
                 <div><Stars score={st.mean} size={24} /></div>
-                <div className="score-n">{st.n === 1 ? "1 recensione verificata" : `${st.n} recensioni verificate`}</div>
+                <div className="score-n">{st.n === 1 ? "1 recensione" : `${st.n} recensioni`}</div>
                 {st.n > 0 && !st.sufficient ? <div className="mt1">{insuffChip(st.n)} la media non è ancora statisticamente solida</div> : null}
               </div>
               {ent.priceStats ? (
@@ -138,7 +281,7 @@ export function EntityView({ id }: { id: string }) {
                 <CriteriaBars criteria={cat.criteria} stats={st} />
               </>
             ) : (
-              <Alert kind="info">Ancora nessuna recensione: questa scheda non ha medie o classifiche.</Alert>
+              <Alert kind="info">Ancora nessuna recensione: questa scheda non ha medie o classifiche. {cat.isPerson ? "" : "Puoi essere il primo a scrivere la tua."}</Alert>
             )}
             <MethodNoteBox />
             <AdSlot position="scheda-mid" />
@@ -151,56 +294,22 @@ export function EntityView({ id }: { id: string }) {
             {data.premium.locked ? (
               <PremiumLockedBox lockedCount={data.premium.lockedCount} daysPerReview={data.premium.daysPerReview} logged={!!user} />
             ) : null}
+            {data.premium.locked && data.teasers.length ? (
+              <div className="grid">
+                <p className="small muted" style={{ marginTop: 10 }}>Anteprima: ultime {data.teasers.length} recensioni, testo offuscato. Il resto è riservato.</p>
+                {data.teasers.map(r => <ReviewCard key={r.id} r={r} photos={data.photos} votes={data.votes} />)}
+              </div>
+            ) : null}
             <div className="grid">
               {data.premium.locked && data.reviews.length ? (
                 <p className="small muted" style={{ marginTop: 10 }}>Queste sono le tue recensioni su questa scheda (sempre visibili a te):</p>
               ) : null}
               {data.reviews.map(r => (
-                <article className="review" key={r.id} id={`rev-${r.id}`}>
-                  <div className="review-head">
-                    <div className="review-author">
-                      <span className="avatar" aria-hidden="true">{r.author.slice(0, 2).toUpperCase()}</span>
-                      <div>
-                        <b>{r.author}</b> {r.verified ? <VerifBadge /> : null}
-                        <div className="review-meta">
-                          Pubblicata: {fmtMonthYear(r.createdAt)}{r.updatedAt ? ` · aggiornata ${fmtMonthYear(r.updatedAt)}` : ""}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="score-line">
-                      <Stars score={r.score} />
-                      <span className="score-num">{fmt1(r.score)} <small>/10</small></span>
-                    </div>
-                  </div>
-                  {r.price ? (
-                    <p className="review-meta mb1" style={{ marginTop: 2 }}>
-                      <b>Prezzo {r.price.kind.toLowerCase()}: </b> {fmtInt(r.price.amount)} {r.price.unit}{" "}
-                      <span className="muted">(dato dichiarato dal recensore, non verificato)</span>
-                    </p>
-                  ) : null}
-                  {(r.pros.length || r.cons.length) ? (
-                    <div className="pc-grid">
-                      <div className="pc-box pc-pros">
-                        <h4>Punti di forza</h4>
-                        <ul>{r.pros.map((p, i) => <li key={i}>{p}</li>)}</ul>
-                      </div>
-                      <div className="pc-box pc-cons">
-                        <h4>Criticità</h4>
-                        <ul>{r.cons.map((c, i) => <li key={i}>{c}</li>)}</ul>
-                      </div>
-                    </div>
-                  ) : null}
-                  <p className="review-body mb0">{r.text}</p>
-                  {r.updateReason ? <p className="updated-note">Motivo dell&apos;aggiornamento: {r.updateReason}</p> : null}
-                  <div className="review-foot">
-                    {r.isDemo ? <DemoChip /> : null}
-                    <span className="spacer"></span>
-                    {user && (
-                      <button className="btn btn-ghost btn-xs" onClick={() => setReportFor(r.id)}>Segnala</button>
-                    )}
-                  </div>
-                </article>
+                <ReviewCard key={r.id} r={r} photos={data.photos} votes={data.votes} onReport={setReportFor} />
               ))}
+              {!data.reviews.length && !data.teasers.length ? (
+                <p className="small muted">{cat.isPerson ? "Nessuna recensione pubblica al momento." : "Nessuna recensione: quella giusta potrebbe essere la tua."}</p>
+              ) : null}
               {data.hiddenCount ? (
                 <div className="hidden-note">
                   {data.hiddenCount} {data.hiddenCount === 1 ? "recensione è stata nascosta" : "recensioni sono state nascoste"} dopo una decisione di moderazione documentata (vedi <a href="#/moderazione">criteri e appello</a>).
@@ -210,9 +319,20 @@ export function EntityView({ id }: { id: string }) {
           </div>
           <aside>
             <div className="card mb2">
-              <h3 style={{ marginTop: 0 }}>Vuoi recensire {cat.isPerson ? "questa persona" : "questo soggetto"}?</h3>
-              <p className="small">Servono due condizioni: un account verificato e un&apos;<b>esperienza registrata</b> su ZoomZoom, che arriva dall&apos;invito email di un soggetto verificato oppure dalla verifica documentale della tua esperienza.</p>
-              <a className="btn btn-primary btn-block" href="#/verifica-esperienza">Verifica la tua esperienza</a>
+              {cat.isPerson ? (
+                <>
+                  <h3 style={{ marginTop: 0 }}>Vuoi recensire questa persona?</h3>
+                  <p className="small">Servono due condizioni: un account verificato e un&apos;<b>esperienza registrata</b> su ZoomZoom, che arriva dall&apos;invito email di un soggetto verificato oppure dalla verifica documentale della tua esperienza.</p>
+                  <a className="btn btn-primary btn-block" href="#/verifica-esperienza">Verifica la tua esperienza</a>
+                </>
+              ) : (
+                <>
+                  <h3 style={{ marginTop: 0 }}>Hai vissuto questo posto?</h3>
+                  <p className="small">Per immobili e zone <b>non serve nessun invito</b>: dichiara la tua esperienza e pubblica. Ogni recensione vale <b>{boot.settings.premiumDaysPerReview} giorni di Premium</b>; con una foto alleghi anche la prova e sblocchi le foto di tutti.</p>
+                  <a className="btn btn-primary btn-block" href={`#/recensione?entity=${ent.id}`}>Scrivi una recensione</a>
+                  {ent.categoryId === "immobile" ? <p className="small muted mt1 mb0" style={{ textAlign: "center" }}>oppure <a href="#/recensione">cerca / aggiungi un altro immobile</a></p> : null}
+                </>
+              )}
               <p className="small muted mt2 mb0">Una sola recensione per esperienza; aggiornabile con rettifica motivata entro {boot.settings.rettificaDays} giorni.</p>
             </div>
             <div className="card mb2">
@@ -425,28 +545,22 @@ export function ZoneView({ entityId }: { entityId: string }) {
             <MethodNoteBox />
             <div className="section-head mt3"><h2>Recensioni della zona</h2></div>
             {data.premium.locked ? (
-              <PremiumLockedBox lockedCount={data.premium.lockedCount} daysPerReview={data.premium.daysPerReview} logged={!!user} />
+              <>
+                <PremiumLockedBox lockedCount={data.premium.lockedCount} daysPerReview={data.premium.daysPerReview} logged={!!user} />
+                {data.teasers.length ? (
+                  <div className="grid">
+                    {data.teasers.slice(0, 3).map(r => <ReviewCard key={r.id} r={r} photos={data.photos} votes={data.votes} />)}
+                  </div>
+                ) : null}
+              </>
             ) : (
               <div className="grid">
-                {data.reviews.slice(0, 3).map(r => (
-                  <article className="review" key={r.id}>
-                    <div className="review-head">
-                      <div className="review-author">
-                        <span className="avatar" aria-hidden="true">{r.author.slice(0, 2).toUpperCase()}</span>
-                        <div>
-                          <b>{r.author}</b> {r.verified ? <VerifBadge /> : null}
-                          <div className="review-meta">Pubblicata: {fmtMonthYear(r.createdAt)}</div>
-                        </div>
-                      </div>
-                      <div className="score-line"><Stars score={r.score} /><span className="score-num">{fmt1(r.score)} <small>/10</small></span></div>
-                    </div>
-                    <p className="review-body mb0">{r.text}</p>
-                  </article>
-                ))}
+                {data.reviews.slice(0, 3).map(r => <ReviewCard key={r.id} r={r} photos={data.photos} votes={data.votes} />)}
               </div>
             )}
             <div className="mt2">
-              <a className="btn btn-ghost" href={`#/scheda/${entityId}`}>Tutte le recensioni e i criteri della zona</a>
+              <a className="btn btn-ghost" href={`#/scheda/${entityId}`}>Tutte le recensioni e i criteri della zona</a>{" "}
+              <a className="btn btn-primary" href={`#/recensione?entity=${entityId}`}>Recensisci questa zona</a>
             </div>
           </div>
           <aside>
