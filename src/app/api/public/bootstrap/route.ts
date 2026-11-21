@@ -38,7 +38,11 @@ export async function GET() {
       votesEnabled: settings.votesEnabled,
     },
     categories: cats,
-    zones: zones.map(z => ({ id: z.id, name: z.name })),
+    zones: zones.map(z => ({
+      id: z.id, name: z.name,
+      province: z.province, region: z.region,
+      lat: z.gpsLat, lng: z.gpsLng,
+    })),
     settings: {
       minReviews: settings.minReviews,
       rettificaDays: settings.rettificaDays,

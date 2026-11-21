@@ -142,6 +142,12 @@ model CategoryVersion {
 model Zone {
   id      String  @id // slug città (es. "milano")
   name    String
+  // provincia e regione (per le zone create dalla geocodifica: qualsiasi
+  // comune o paese d'Italia può entrare nel catalogo, non solo quelle in seed)
+  province String?
+  region   String?
+  // seed | user | geocode — da dove nasce la zona
+  source   String  @default("seed")
   gpsLat  Float   // centro città reale, WGS84
   gpsLng  Float
   radiusM Int     @default(3000) // raggio indicativo dell'area urbana, in metri

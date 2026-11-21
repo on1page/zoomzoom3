@@ -12,7 +12,13 @@ export type CategoryInfo = {
   experienceKinds: string[];
   priceUnits: string[];
 };
-export type ZoneInfo = { id: string; name: string };
+export type ZoneInfo = {
+  id: string; name: string;
+  // campi opzionali (retrocompatibili): presenti sulle zone nuove,
+  // assenti sui payload salvati in cache dal client
+  province?: string | null; region?: string | null;
+  lat?: number; lng?: number;
+};
 export type SessionUser = {
   id: string; email: string; nickname: string; role: string;
   emailVerified: boolean; subjectEntityId: string | null;

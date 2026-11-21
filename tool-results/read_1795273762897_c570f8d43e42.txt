@@ -1,0 +1,654 @@
+     1→// ZoomZoom — seed dei dati dimostrativi (città italiane reali, contenuti fittizi).
+     2→// Le zone corrispondono a città reali con coordinate GPS reali, per una mappa
+     3→// fedele al territorio italiano; TUTTI i contenuti restano fittizi e isDemo=true.
+     4→// Il seed è idempotente: ricrea da zero solo i dati demo, senza toccare dati "reali".
+     5→// Uso: bun scripts/seed.ts
+     6→import { PrismaClient } from "@prisma/client";
+     7→import { randomBytes, createHash } from "crypto";
+     8→import { scryptSync } from "crypto";
+     9→import sharp from "sharp";
+    10→
+    11→const db = new PrismaClient();
+    12→
+    13→// Password degli account demo: visibile SOLO qui e nel README, mai nel front-end.
+    14→// Il dominio esempio.test è riservato (RFC 6761): non sono credenziali reali.
+    15→const DEMO_PW = "ZoomZoom-Demo-2026";
+    16→
+    17→function hashPassword(password: string): string {
+    18→  const salt = randomBytes(16).toString("hex");
+    19→  const hash = scryptSync(password, salt, 64, { N: 16384, r: 8, p: 1 }).toString("hex");
+    20→  return `scrypt$16384$8$1$${salt}$${hash}`;
+    21→}
+    22→const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
+    23→
+    24→/* RNG deterministico per dati fittizi riproducibili */
+    25→function mulberry32(seed: number) {
+    26→  let a = seed >>> 0;
+    27→  return function () {
+    28→    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    29→    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    30→    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    31→    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    32→  };
+    33→}
+    34→const rndPick = <T>(r: () => number, arr: T[]): T => arr[Math.floor(r() * arr.length)];
+    35→const rndInt = (r: () => number, a: number, b: number) => a + Math.floor(r() * (b - a + 1));
+    36→
+    37→// Città reali distribuite su tutto il territorio italiano (coordinate WGS84
+    38→// dei centri storici). Coprono Nord-Ovest, Nord-Est, Centro, Sud e Isole.
+    39→const ZONES = [
+    40→  { id: "torino", name: "Torino", lat: 45.0703, lng: 7.6869, radius: 4000 },
+    41→  { id: "milano", name: "Milano", lat: 45.4642, lng: 9.1900, radius: 4000 },
+    42→  { id: "genova", name: "Genova", lat: 44.4056, lng: 8.9463, radius: 3000 },
+    43→  { id: "venezia", name: "Venezia", lat: 45.4408, lng: 12.3155, radius: 3000 },
+    44→  { id: "bologna", name: "Bologna", lat: 44.4949, lng: 11.3426, radius: 3000 },
+    45→  { id: "firenze", name: "Firenze", lat: 43.7696, lng: 11.2558, radius: 3000 },
+    46→  { id: "roma", name: "Roma", lat: 41.9028, lng: 12.4964, radius: 5000 },
+    47→  { id: "napoli", name: "Napoli", lat: 40.8518, lng: 14.2681, radius: 4000 },
+    48→  { id: "bari", name: "Bari", lat: 41.1171, lng: 16.8719, radius: 3000 },
+    49→  { id: "reggio-calabria", name: "Reggio Calabria", lat: 38.1113, lng: 15.6470, radius: 3000 },
+    50→  { id: "palermo", name: "Palermo", lat: 38.1157, lng: 13.3615, radius: 4000 },
+    51→  { id: "cagliari", name: "Cagliari", lat: 39.2238, lng: 9.1217, radius: 3000 },
+    52→];
+    53→
+    54→// Tipi di esperienza e unità prezzo (copia locale delle costanti applicative,
+    55→// per mantenere lo script di seed autonomo e rapido)
+    56→const EXP_KINDS: Record<string, string[]> = {
+    57→  immobile: ["Abitazione in affitto", "Abitazione di proprietà", "Soggiorno prolungato", "Visita e sopralluogo"],
+    58→  zona: ["Residenza attuale (oltre 6 mesi)", "Residenza precedente", "Lavoro o studio quotidiano nella zona"],
+    59→  proprietario: ["Contratto di affitto in corso", "Contratto di affitto cessato", "Interazioni da richiedente"],
+    60→  affittuario: ["Affitto del mio immobile", "Affitto cessato di recente", "Interazione da coobbligato/garante"],
+    61→  amministratore: ["Condominio in cui abito", "Condominio di proprietà affittata", "Assemblea e gestione economica"],
+    62→  agenzia: ["Servizio di intermediazione ricevuto", "Valutazione o consulenza su un immobile", "Assistenza dopo il servizio"],
+    63→  ditta: ["Intervento di manutenzione", "Lavori e lavori o ristrutturazione", "Perizia o consulenza tecnica", "Impianti e installazioni"],
+    64→};
+    65→
+    66→const DEMO_TEXTS: Record<string, { pros: string[]; cons: string[]; bodies: string[] }> = {
+    67→  immobile: {
+    68→    pros: ["Spazi ben distribuiti e luminosi", "Impianti recenti e a norma", "Ottimo isolamento acustico", "Parti comuni curate", "Spese di riscaldamento contenute", "Servizi e trasporti a pochi passi", "Nessuna infiltrazione né umidità"],
+    69→    cons: ["Umidità in bagno e in cucina", "Infissi da sostituire", "Rumori frequenti dal piano superiore", "Portoncino d'ingresso spesso guasto", "Aria condizionata assente", "Scala buia e poco pulita", "Manutenzioni richieste e rinviate"],
+    70→    bodies: [
+    71→      "Ho vissuto qui per due anni: la descrizione ricevuta corrispondeva in gran parte alla realtà, con qualche eccezione sullo stato dell'impianto elettrico. Nel complesso una convivenza tranquilla.",
+    72→      "L'appartamento è ampio e ben esposto, la zona è silenziosa. La manutenzione straordinaria del tetto è stata gestita con tempi accettabili e spese ripartite correttamente.",
+    73→      "La casa corrisponde alle fotografie, ma l'edificio soffre di scarsa insonorizzazione: si sente tutto dai vicini. Da valutare con attenzione se si lavora da casa.",
+    74→      "Esperienza discreta: nessun problema strutturale, ma piccole manutenzioni rimandate a lungo e una caldaia che ha richiesto più interventi in inverno.",
+    75→    ],
+    76→  },
+    77→  zona: {
+    78→    pros: ["Tutti i servizi a pochi passi", "Bus frequenti e fermata vicina", "Mercato e negozi di quartiere", "Vicino al parco e alla pista ciclabile", "Zona silenziosa la sera", "Scuole e asili presenti"],
+    79→    cons: ["Poco verde nelle vicinanze", "Parcheggio difficile", "Illuminazione pubblica insufficiente", "Traffico nelle ore di punta", "Pochi esercizi aperti la domenica", "Rumori nei weekend"],
+    80→    bodies: [
+    81→      "Abito in questa zona da cinque anni: i servizi essenziali ci sono tutti e il quartiere è comodo anche senza automobile.",
+    82→      "Zona ben collegata al centro, con un buon rapporto tra costi e qualità della vita. Il punto debole è il parcheggio, quasi impossibile la sera.",
+    83→      "Ho vissuto qui durante gli studi: trasporti comodi e vita tranquilla in giornata, con qualche episodio di rumore il sabato sera.",
+    84→      "Quartiere in evoluzione: sono arrivati nuovi esercizi e si respira un clima migliore rispetto a qualche anno fa.",
+    85→    ],
+    86→  },
+    87→  proprietario: {
+    88→    pros: ["Sempre disponibile per le manutenzioni", "Contratto chiaro, senza clausole ambigue", "Deposito restituito integralmente e nei tempi", "Risponde entro poche ore", "Rispetta la privacy dell'inquilino", "Nessun aumento a sorpresa"],
+    89→    cons: ["Manutenzioni richieste e mai eseguite", "Difficile da contattare, risponde dopo settimane", "Trattenute ingiustificate sul deposito", "Visite senza preavviso", "Clausole contrattuali poco chiare", "Aumenti non discussi"],
+    90→    bodies: [
+    91→      "Il rapporto è stato professionale: richieste di intervento gestite in tempi ragionevoli e massima correttezza alla chiusura del contratto.",
+    92→      "Persona corretta nelle scadenze, ma molto lenta nella gestione delle richieste di manutenzione: un guasto è stato risolto dopo settimane.",
+    93→      "Esperienza negativa: più solleciti per una perdita in bagno risolti solo dopo mesi, con discussioni sul deposito alla fine del rapporto.",
+    94→      "Proprietario serio e trasparente: contratto registrato correttamente e nessuna pressazione durante tutto il periodo di affitto.",
+    95→    ],
+    96→  },
+    97→  affittuario: {
+    98→    pros: ["Pagamenti sempre puntuali", "Immobile restituito in ottimo stato", "Comunica subito ogni problema", "Rispettoso dei vicini e del condominio", "Documenti sempre in regola"],
+    99→    cons: ["Ritardi ripetuti nei pagamenti", "Immobile restituito in stato trascurato", "Comunicazioni incomplete o in ritardo", "Lamentele frequenti dai vicini", "Documentazione consegnata in ritardo"],
+   100→    bodies: [
+   101→      "Il periodo di affitto è proceduto senza intoppi: canone sempre puntuale e ottima cura degli spazi, restituiti impeccabili.",
+   102→      "Inquilino corretto nel complesso, con qualche ritardo nei pagamenti sempre comunicato in anticipo e giustificato.",
+   103→      "Esperienza difficile: pagamenti irregolari e segnalazioni dei vicini per rumori notturni ripetuti.",
+   104→    ],
+   105→  },
+   106→  amministratore: {
+   107→    pros: ["Conti chiari e preventivati", "Comunicazioni puntuali", "Manutenzioni programmate", "Assemblee gestite con equilibrio", "Interventi urgenti in poche ore"],
+   108→    cons: ["Conti consegnati in forte ritardo", "Risponde solo dopo molti solleciti", "Manutenzioni ordinarie trascurate", "Assemblee convocate all'ultimo", "Preventivi poco dettagliati"],
+   109→    bodies: [
+   110→      "Il nostro condominio è seguito da anni: bilanci trasparenti, interventi tempestivi e fornitori selezionati con criterio.",
+   111→      "Amministrazione nel complesso adeguata, ma la comunicazione con i condomini può migliorare molto: circolari tardive e risposte generiche.",
+   112→      "Esperienza altalenante: buono il rapporto con i fornitori, pessima la tempistica dei documenti di fine anno, arrivati a fine marzo.",
+   113→    ],
+   114→  },
+   115→  agenzia: {
+   116→    pros: ["Personale preparato e paziente", "Costi dichiarati fin dall'inizio", "Pratica gestita senza intoppi", "Informazioni veritiere sull'immobile", "Disponibili anche dopo la conclusione"],
+   117→    cons: ["Costi aggiuntivi emersi solo alla fine", "Informazioni parziali sui difetti dell'immobile", "Risposte lente alle richieste", "Cambio di referente a metà pratica", "Pressioni per decidere in fretta"],
+   118→    bodies: [
+   119→      "Mi sono affidato a loro per la vendita del mio appartamento: pratica seguita con cura e costi chiari dal primo incontro.",
+   120→      "Servizio corretto ma lento: la pratica si è conclusa con settimane di ritardo rispetto alle previsioni comunicate.",
+   121→      "Esperienza deludente: alcune criticità dell'immobile sono emerse solo dopo la firma dell'incarico, con costi finali diversi dal preventivo.",
+   122→    ],
+   123→  },
+   124→  ditta: {
+   125→    pros: ["Lavoro eseguito con cura e pulizia", "Tempi rispettati in pieno", "Preventivo chiaro e confermato", "Personale cortese e professionale", "Garanzia offerta senza discussioni"],
+   126→    cons: ["Lavoro ripassato più volte per difetti", "Ritardo di settimane sulla consegna", "Costi finali oltre il preventivo", "Cantiere lasciato sporco", "Assistenza post-intervento difficile da raggiungere"],
+   127→    bodies: [
+   128→      "Ho commissionato una ristrutturazione del bagno: risultato ottimo, area lasciata pulita e tempi rispettati.",
+   129→      "Intervento di manutenzione puntuale e ben eseguito, con un piccolo extra giustificato e concordato prima di procedere.",
+   130→      "Lavoro nel complesso buono, ma i tempi sono slittati di due settimane senza avvisi tempestivi.",
+   131→      "Perizia consegnata completa e nei termini, con spiegazioni chiare sui limiti della valutazione.",
+   132→    ],
+   133→  },
+   134→};
+   135→
+   136→const PRICE_HINTS: Record<string, [number, number, string]> = {
+   137→  ent_i_rondini: [620, 1180, "€/mese"], ent_i_girasole: [580, 950, "€/mese"], ent_i_tigli8: [700, 1100, "€/mese"],
+   138→  ent_i_dazio: [480, 800, "€/mese"], ent_i_fiume: [720, 1200, "€/mese"], ent_i_ciliegio: [285000, 335000, "€ totale"],
+   139→  ent_p_gm: [620, 1100, "€/mese"], ent_p_lb: [700, 1200, "€/mese"], ent_p_rt: [650, 1050, "€/mese"],
+   140→  ent_am_sereni: [900, 1700, "€/anno"], ent_am_ferretti: [700, 1400, "€/anno"], ent_am_gcv: [800, 1600, "€/anno"],
+   141→  ent_ag_portico: [2500, 6000, "€ totale"], ent_ag_casanova: [2000, 5000, "€ totale"], ent_ag_chiavi: [2200, 5500, "€ totale"],
+   142→  ent_d_valli: [9000, 15000, "€ totale"], ent_d_pezzoli: [300, 600, "€ totale"], ent_d_fiamma: [250, 700, "€ totale"], ent_d_grillo: [400, 900, "€ totale"],
+   143→};
+   144→
+   145→const TARGETS: Array<[string, number, number]> = [
+   146→  ["ent_i_rondini", 5, 7.8], ["ent_i_girasole", 3, 6.4], ["ent_i_tigli8", 4, 8.2],
+   147→  ["ent_i_dazio", 2, 5.5], ["ent_i_fiume", 3, 8.6], ["ent_i_ciliegio", 1, 9.0],
+   148→  ["ent_z_milano", 12, 7.9], ["ent_z_roma", 11, 7.1], ["ent_z_napoli", 9, 6.3],
+   149→  ["ent_z_torino", 8, 7.5], ["ent_z_bologna", 7, 6.8], ["ent_z_palermo", 6, 5.9],
+   150→  ["ent_z_firenze", 5, 8.1], ["ent_z_venezia", 4, 7.2], ["ent_z_bari", 4, 6.5],
+   151→  ["ent_z_genova", 3, 5.6], ["ent_z_cagliari", 2, 7.0],
+   152→  ["ent_p_gm", 4, 8.3], ["ent_p_lb", 2, 4.5], ["ent_p_rt", 3, 6.0],
+   153→  ["ent_a_mc", 2, 8.5], ["ent_a_sd", 1, 5.0],
+   154→  ["ent_am_sereni", 9, 8.7], ["ent_am_ferretti", 4, 5.2], ["ent_am_gcv", 3, 6.8],
+   155→  ["ent_ag_portico", 11, 7.4], ["ent_ag_casanova", 5, 6.1], ["ent_ag_chiavi", 2, 3.8],
+   156→  ["ent_d_valli", 6, 8.8], ["ent_d_pezzoli", 3, 7.0], ["ent_d_fiamma", 4, 6.3], ["ent_d_grillo", 2, 8.0],
+   157→];
+   158→
+   159→const UPDATE_REASONS = ["Ho corretto un dettaglio dopo la pubblicazione.", "Aggiornamento dopo l'intervento di manutenzione promesso.", "Precisazione sui tempi di risposta."];
+   160→
+   161→function daysAgoIso(days: number): string {
+   162→  return new Date(Date.now() - days * 86400000).toISOString();
+   163→}
+   164→
+   165→async function main() {
+   166→  console.log("Seed dati demo ZoomZoom (città italiane reali, contenuti tutti fittizi)…");
+   167→  const t0 = Date.now();
+   168→
+   169→  // 0) Categorie (se assenti) — replica ensureCategoriesSeeded senza dipendenze
+   170→  const CAT_SEED: Array<{ id: string; name: string; shortName: string; description: string; hexColor: string; icon: string; isPerson: boolean; isMapped: boolean; criteria: Array<{ key: string; label: string }> }> = [
+   171→    { id: "immobile", name: "Immobili e indirizzi", shortName: "Immobili", description: "Appartamenti, case e singoli indirizzi: stato reale, gestione e vivibilità, raccontati da chi ci ha vissuto.", hexColor: "#33658A", icon: "immobile", isPerson: false, isMapped: true, criteria: [
+   172→      { key: "stato", label: "Stato di manutenzione" }, { key: "descrizione", label: "Corrispondenza con la descrizione ricevuta" }, { key: "spazi", label: "Qualità degli spazi e luce naturale" }, { key: "rumori", label: "Rumori e rapporti di vicinato" }, { key: "impianti", label: "Impianti, riscaldamento ed efficienza" }, { key: "rapporto", label: "Rapporto qualità-prezzo" }] },
+   173→    { id: "zona", name: "Zone e aree geografiche", shortName: "Zone", description: "Città e zone del territorio italiano: servizi, trasporti, sicurezza percepita e qualità della vita quotidiana.", hexColor: "#4E7D5B", icon: "zona", isPerson: false, isMapped: true, criteria: [
+   174→      { key: "servizi", label: "Servizi alla persona e vivibilità" }, { key: "trasporti", label: "Trasporti e mobilità" }, { key: "sicurezza", label: "Sicurezza percepita" }, { key: "verde", label: "Verde, aria e ambiente" }, { key: "costi", label: "Costi della vita nella zona" }] },
+   175→    { id: "proprietario", name: "Proprietari", shortName: "Proprietari", description: "Il rapporto con chi affitta o gestisce un immobile: contratto, trasparenza, manutenzione e rispetto.", hexColor: "#6E5E93", icon: "proprietario", isPerson: true, isMapped: false, criteria: [
+   176→      { key: "contratto", label: "Chiarezza del contratto e trasparenza" }, { key: "risposta", label: "Disponibilità e tempi di risposta" }, { key: "manutenzione", label: "Gestione di guasti e manutenzione" }, { key: "deposito", label: "Correttezza sul deposito cauzionale" }, { key: "privacy", label: "Rispetto della privacy e degli spazi" }, { key: "rapporto", label: "Rapporto qualità-prezzo" }] },
+   177→    { id: "affittuario", name: "Affittuari", shortName: "Affittuari", description: "Il rapporto con chi vive in un immobile in affitto: pagamenti, cura degli spazi e comunicazione.", hexColor: "#8B4E67", icon: "affittuario", isPerson: true, isMapped: false, criteria: [
+   178→      { key: "pagamenti", label: "Puntualità e correttezza dei pagamenti" }, { key: "cura", label: "Cura e pulizia dell'immobile" }, { key: "comunicazione", label: "Comunicazione e segnalazione dei problemi" }, { key: "regole", label: "Rispetto di regole del condominio e dei vicini" }, { key: "documenti", label: "Correttezza documentale e comunicazioni obbligatorie" }] },
+   179→    { id: "amministratore", name: "Amministratori di condominio", shortName: "Amministratori", description: "Gestione dei condomini: conti, trasparenza, parti comuni, assemblee e tempestività degli interventi.", hexColor: "#27696F", icon: "amministratore", isPerson: false, isMapped: false, criteria: [
+   180→      { key: "conti", label: "Gestione economica e trasparenza dei conti" }, { key: "comunicazione", label: "Comunicazione con i condomini" }, { key: "comuni", label: "Manutenzione delle parti comuni" }, { key: "assemblee", label: "Convocazione e conduzione delle assemblee" }, { key: "competenza", label: "Tempestività e competenza tecnica" }, { key: "rapporto", label: "Rapporto qualità-prezzo (compenso)" }] },
+   181→    { id: "agenzia", name: "Agenzie immobiliari", shortName: "Agenzie", description: "Il servizio delle agenzie: comunicazione, trasparenza sui costi, gestione della pratica e onestà delle informazioni.", hexColor: "#83661F", icon: "agenzia", isPerson: false, isMapped: false, criteria: [
+   182→      { key: "comunicazione", label: "Comunicazione e professionalità del personale" }, { key: "trasparenza", label: "Trasparenza su costi e condizioni" }, { key: "pratica", label: "Gestione della pratica e degli adempimenti" }, { key: "onestà", label: "Onestà delle informazioni fornite" }, { key: "supporto", label: "Supporto durante e dopo il servizio" }, { key: "rapporto", label: "Rapporto qualità-prezzo (compenso)" }] },
+   183→    { id: "ditta", name: "Ditte e professionisti della casa", shortName: "Ditte e professionisti", description: "Imprese, artigiani e tecnici che operano su immobili e condomini: qualità, tempi, preventivi e garanzie.", hexColor: "#A65B3F", icon: "ditta", isPerson: false, isMapped: false, criteria: [
+   184→      { key: "qualita", label: "Qualità del lavoro e seguito" }, { key: "tempi", label: "Rispetto di tempi e impegni" }, { key: "preventivo", label: "Chiarezza e rispetto del preventivo" }, { key: "professionalita", label: "Professionalità del personale" }, { key: "assistenza", label: "Assistenza e garanzia post-intervento" }] },
+   185→  ];
+   186→  if (await db.category.count() === 0) {
+   187→    for (let i = 0; i < CAT_SEED.length; i++) {
+   188→      const c = CAT_SEED[i];
+   189→      await db.category.create({
+   190→        data: {
+   191→          id: c.id, name: c.name, shortName: c.shortName, description: c.description,
+   192→          hexColor: c.hexColor, icon: c.icon, isPerson: c.isPerson, isMapped: c.isMapped,
+   193→          orderIndex: i, isActive: true, isDemo: true,
+   194→          criteria: { create: c.criteria.map((cr, j) => ({ key: cr.key, label: cr.label, orderIndex: j })) },
+   195→        },
+   196→      });
+   197→    }
+   198→    console.log("Categorie create:", CAT_SEED.length);
+   199→  }
+   200→
+   201→  // 1) Pulizia dei soli dati demo (idempotente)
+   202→  const demoUsers = await db.user.findMany({ where: { isDemo: true }, select: { id: true } });
+   203→  const demoUserIds = demoUsers.map(u => u.id);
+   204→  if (demoUserIds.length) {
+   205→    await db.auditLog.deleteMany({ where: { actorId: { in: demoUserIds } } });
+   206→    await db.consent.deleteMany({ where: { userId: { in: demoUserIds } } });
+   207→    await db.privacyRequest.deleteMany({ where: { userId: { in: demoUserIds } } });
+   208→    await db.session.deleteMany({ where: { userId: { in: demoUserIds } } });
+   209→    await db.backupCode.deleteMany({ where: { userId: { in: demoUserIds } } });
+   210→    await db.emailVerifyToken.deleteMany({ where: { userId: { in: demoUserIds } } });
+   211→  }
+   212→  // 2) contenuti demo (le recensioni seguono a cascata da esperienze e schede)
+   213→  await db.entityProposal.deleteMany({ where: { isDemo: true } });
+   214→  // foto e voti delle recensioni demo (il resto va a cascata con entità e utenti)
+   215→  await db.reviewPhoto.deleteMany({ where: { isDemo: true } });
+   216→  await db.reviewVote.deleteMany({ where: { review: { isDemo: true } } });
+   217→  await db.entity.deleteMany({ where: { isDemo: true } });
+   218→  await db.experience.deleteMany({ where: { isDemo: true } });
+   219→  await db.invite.deleteMany({ where: { isDemo: true } });
+   220→  await db.report.deleteMany({ where: { isDemo: true } });
+   221→  await db.dispute.deleteMany({ where: { isDemo: true } });
+   222→  await db.emailLog.deleteMany({ where: { isDemo: true } });
+   223→  await db.zone.deleteMany({ where: { isDemo: true } });
+   224→  // concessioni Premium dei demo (verrebbero comunque rimosse a cascata con l'utente)
+   225→  await db.premiumGrant.deleteMany({ where: { user: { isDemo: true } } });
+   226→  // 3) infine gli utenti demo
+   227→  if (demoUserIds.length) {
+   228→    await db.user.deleteMany({ where: { id: { in: demoUserIds } } });
+   229→  }
+   230→
+   231→  // 2) Zone: città reali (coordinate vere, contenuti dimostrativi)
+   232→  for (const z of ZONES) {
+   233→    await db.zone.create({ data: { id: z.id, name: z.name, gpsLat: z.lat, gpsLng: z.lng, radiusM: z.radius, isDemo: true } });
+   234→  }
+   235→  // la descrizione della categoria "zona" viene allineata alla copertura nazionale
+   236→  await db.category.update({ where: { id: "zona" }, data: { description: "Città e zone del territorio italiano: servizi, trasporti, sicurezza percepita e qualità della vita quotidiana." } });
+   237→
+   238→  // 3) Utenti demo (staff con TOTP; credenziali salvate in demo-credentials.json, mai nel front-end)
+   239→  const credentials: Record<string, { password: string; totpSecret?: string }> = {};
+   240→  async function mkUser(email: string, nickname: string, role: string, opts: { subject?: string; totp?: string } = {}) {
+   241→    const u = await db.user.create({
+   242→      data: {
+   243→        email, nickname, role, emailVerified: true,
+   244→        passwordHash: hashPassword(DEMO_PW),
+   245→        subjectEntityId: opts.subject || null,
+   246→        totpSecretEnc: opts.totp ? encryptSecretStatic(opts.totp) : null,
+   247→        totpEnabled: !!opts.totp,
+   248→        createdAt: new Date(daysAgoIso(rndInt(r, 60, 700))),
+   249→        isDemo: true,
+   250→      },
+   251→    });
+   252→    credentials[email] = { password: DEMO_PW, ...(opts.totp ? { totpSecret: opts.totp } : {}) };
+   253→    return u;
+   254→  }
+   255→  const r = mulberry32(0x41424954);
+   256→  // TOTP segreti demo generati in modo deterministico (visibili solo nel file credenziali)
+   257→  const totpA = base32(randomBytesStatic(r, 20));
+   258→  const totpB = base32(randomBytesStatic(r, 20));
+   259→  const totpC = base32(randomBytesStatic(r, 20));
+   260→
+   261→  const uArianna = await mkUser("utente@esempio.test", "Arianna_84", "user", {});
+   262→  const uAgenzia = await mkUser("agenzia@esempio.test", "Il Portico Immobiliare", "user", { subject: "ent_ag_portico" });
+   263→  await mkUser("moderatore@esempio.test", "Ufficio Moderazione", "moderator", { totp: totpA });
+   264→  await mkUser("admin@esempio.test", "Amministrazione ZoomZoom", "admin", { totp: totpB });
+   265→  await mkUser("superadmin@esempio.test", "Super Amministrazione", "superadmin", { totp: totpC });
+   266→
+   267→  const NICKS = ["MarcoT_79","GiuliaF","Luca_e_Sara","CasaPerDue","GeometraCurioso","MartaB","FerroVie","NuovaCasa2026","AnnaPaola","DavideG88","SoleQuarto","TreFiglie","Camilla_R","VivoInQuartiere","PaoloM1962","LeGiare","Roberta_C","DueBambini","AbitoInCentro","SergioETania","PrimaCasa","MicolF"];
+   268→  const reviewers = [];
+   269→  for (let i = 0; i < NICKS.length; i++) {
+   270→    reviewers.push(await mkUser(`recensione${i + 1}@esempio.test`, NICKS[i], "user", {}));
+   271→  }
+   272→  const uMarco = reviewers[0];
+   273→
+   274→  // 4) Snapshot criteri per recensioni demo
+   275→  const cats = await db.category.findMany({ include: { criteria: { orderBy: { orderIndex: "asc" }, where: { active: true } } } });
+   276→  const versionByCat = new Map<string, string>();
+   277→  for (const c of cats) {
+   278→    const snap = JSON.stringify(c.criteria.map(cr => ({ key: cr.key, label: cr.label })));
+   279→    const v = await db.categoryVersion.create({
+   280→      data: { categoryId: c.id, version: 1, criteriaSnapshot: snap, priceUnitsJson: "[]" },
+   281→    });
+   282→    versionByCat.set(c.id, v.id);
+   283→  }
+   284→  console.log("Zone e categorie pronte.", Date.now() - t0, "ms");
+   285→
+   286→  // 5) Entità (id fissi per coerenza con i PRICE_HINTS)
+   287→  async function mkEnt(id: string, catId: string, name: string, subtitle: string, zoneId: string, opts: { address?: string; geo?: { lat: number; lng: number }; initials?: boolean; business?: boolean; owner?: string } = {}) {
+   288→    return db.entity.create({
+   289→      data: {
+   290→        id, categoryId: catId, name, subtitle, zoneId,
+   291→        address: opts.address || null,
+   292→        geoLat: opts.geo ? opts.geo.lat : null, geoLng: opts.geo ? opts.geo.lng : null,
+   293→        initialsOnly: !!opts.initials, verifiedBusiness: !!opts.business,
+   294→        ownerUserId: opts.owner || null,
+   295→        status: "published", proposedBy: "seed",
+   296→        createdAt: new Date(daysAgoIso(rndInt(r, 100, 800))), isDemo: true,
+   297→      },
+   298→    });
+   299→  }
+   300→  for (const z of ZONES) {
+   301→    await mkEnt("ent_z_" + z.id, "zona", z.name, "Città reale — contenuti dimostrativi", z.id);
+   302→  }
+   303→  await mkEnt("ent_i_rondini", "immobile", "Palazzo delle Rondini", "Edificio residenziale", "milano", { address: "Via del Filatoio 14, Milano", geo: { lat: 45.4658, lng: 9.1880 } });
+   304→  await mkEnt("ent_i_girasole", "immobile", "Casa Girasole", "Appartamento", "roma", { address: "Vicolo dei Beccai 3, Roma", geo: { lat: 41.8953, lng: 12.4832 } });
+   305→  await mkEnt("ent_i_tigli8", "immobile", "Residenza I Tigli 8", "Condominio residenziale", "torino", { address: "Viale dei Tigli 8, Torino", geo: { lat: 45.0677, lng: 7.6834 } });
+   306→  await mkEnt("ent_i_dazio", "immobile", "Casa del Dazio", "Appartamento", "napoli", { address: "Piazza del Dazio 2, Napoli", geo: { lat: 40.8530, lng: 14.2652 } });
+   307→  await mkEnt("ent_i_fiume", "immobile", "Casa sul Fiume", "Appartamento con vista", "bologna", { address: "Lungofiume Altino 21, Bologna", geo: { lat: 44.4931, lng: 11.3390 } });
+   308→  await mkEnt("ent_i_ciliegio", "immobile", "Villa Ciliegio", "Villa unifamiliare", "firenze", { address: "Via dei Ciliegi 45, Firenze", geo: { lat: 43.7702, lng: 11.2570 } });
+   309→  await mkEnt("ent_p_gm", "proprietario", "G. M.", "Proprietario di immobili in affitto — Milano", "milano", { initials: true });
+   310→  await mkEnt("ent_p_lb", "proprietario", "L. B.", "Proprietario di immobili in affitto — Bologna", "bologna", { initials: true });
+   311→  await mkEnt("ent_p_rt", "proprietario", "R. T.", "Proprietario di immobili in affitto — Torino", "torino", { initials: true });
+   312→  await mkEnt("ent_a_mc", "affittuario", "M. C.", "Affittuario — Milano", "milano", { initials: true });
+   313→  await mkEnt("ent_a_sd", "affittuario", "S. D.", "Affittuario — Napoli", "napoli", { initials: true });
+   314→  await mkEnt("ent_am_sereni", "amministratore", "Condomini Sereni", "Studio di amministrazione condominiale", "milano", { address: "Via del Filatoio 30, Milano" });
+   315→  await mkEnt("ent_am_ferretti", "amministratore", "Studio Ferretti Condomini", "Amministrazione condominiale", "napoli", { address: "Piazza della Stazione 8, Napoli" });
+   316→  await mkEnt("ent_am_gcv", "amministratore", "Gestioni Condominiali Due Torri", "Amministrazione condominiale", "bologna", { address: "Via degli Orti 12, Bologna" });
+   317→  await mkEnt("ent_ag_portico", "agenzia", "Il Portico Immobiliare", "Agenzia di intermediazione (account verificato)", "milano", { address: "Piazza del Mercato 4, Milano", business: true, owner: uAgenzia.id });
+   318→  await mkEnt("ent_ag_casanova", "agenzia", "Casa Nova Studio Immobiliare", "Agenzia di intermediazione", "torino", { address: "Viale dei Tigli 22, Torino" });
+   319→  await mkEnt("ent_ag_chiavi", "agenzia", "Le Chiavi Bianche", "Agenzia di intermediazione", "napoli", { address: "Via della Croce 7, Napoli" });
+   320→  await mkEnt("ent_d_valli", "ditta", "Impresa Edile Fratelli Valli", "Lavori edili e ristrutturazioni", "bologna", { address: "Via dei Mugnai 9, Bologna" });
+   321→  await mkEnt("ent_d_pezzoli", "ditta", "Geom. Pezzoli — Perizie e catasto", "Professionista tecnico", "milano", { address: "Via del Filatoio 2, Milano" });
+   322→  await mkEnt("ent_d_fiamma", "ditta", "Fiamma Blu Impianti", "Impianti idraulici e termici", "torino", { address: "Via dei Platani 18, Torino" });
+   323→  await mkEnt("ent_d_grillo", "ditta", "Il Grillo — Traslochi e piccoli lavori", "Traslochi e manutenzione leggera", "napoli", { address: "Via Aldo Moro 3, Napoli" });
+   324→
+   325→  // 6) Recensioni generate (fittizie, marcate)
+   326→  const entCat = new Map((await db.entity.findMany({ select: { id: true, categoryId: true } })).map(e => [e.id, e.categoryId]));
+   327→  const roundHalf = (v: number) => Math.round(v * 2) / 2;
+   328→  const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
+   329→  function shuffle<T>(arr: T[]): T[] {
+   330→    const a = arr.slice();
+   331→    for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+   332→    return a;
+   333→  }
+   334→  const reviewIdsByEntity = new Map<string, string[]>();
+   335→  let expSeq = 0, revSeq = 0;
+   336→  for (let ti = 0; ti < TARGETS.length; ti++) {
+   337→    const [entId, count, target] = TARGETS[ti];
+   338→    const catId = entCat.get(entId)!;
+   339→    const cat = cats.find(c => c.id === catId)!;
+   340→    const texts = DEMO_TEXTS[catId];
+   341→    let pool = shuffle(reviewers);
+   342→    if (entId === "ent_ag_portico") pool = [uMarco, ...pool.filter(u => u.id !== uMarco.id)].slice(0, Math.max(count, 22));
+   343→    if (entId === "ent_z_milano" || entId === "ent_d_valli") pool = [uArianna, ...pool.filter(u => u.id !== uArianna.id)].slice(0, Math.max(count, 22));
+   344→    for (let i = 0; i < count; i++) {
+   345→      const author = pool[i % pool.length];
+   346→      const daysAgo = rndInt(r, 5, 560);
+   347→      expSeq++;
+   348→      const exp = await db.experience.create({
+   349→        data: {
+   350→          entityId: entId, kind: rndPick(r, EXP_KINDS[catId] || ["Esperienza diretta"]),
+   351→          period: String(2024 + rndInt(r, 0, 2)),
+   352→          origin: entId === "ent_ag_portico" && i === 0 ? "business" : "seed",
+   353→          clientEmail: author.email, userId: author.id, status: "active",
+   354→          createdAt: new Date(daysAgoIso(daysAgo + rndInt(r, 5, 45))),
+   355→          claimedAt: new Date(daysAgoIso(daysAgo)), isDemo: true,
+   356→        },
+   357→      });
+   358→      const score = clamp(roundHalf(target + (r() - 0.5) * 3), 0.5, 10);
+   359→      const crit: Record<string, number> = {};
+   360→      for (const c of cat.criteria) crit[c.key] = clamp(roundHalf(score + (r() - 0.5) * 3), 0.5, 10);
+   361→      const ph = PRICE_HINTS[entId];
+   362→      const hasPrice = !!(ph && cat.id !== "zona" && cat.id !== "affittuario");
+   363→      const hasUpdate = r() < 0.14;
+   364→      revSeq++;
+   365→      const review = await db.review.create({
+   366→        data: {
+   367→          experienceId: exp.id, entityId: entId, userId: author.id,
+   368→          score, criteriaJson: JSON.stringify(crit), criteriaVersionId: versionByCat.get(catId)!,
+   369→          prosJson: JSON.stringify(shuffle(texts.pros).slice(0, rndInt(r, 1, 3))),
+   370→          consJson: JSON.stringify(shuffle(texts.cons).slice(0, rndInt(r, 1, 2))),
+   371→          priceAmount: hasPrice ? rndInt(r, ph[0], ph[1]) : null,
+   372→          priceUnit: hasPrice ? ph[2] : null,
+   373→          priceKind: hasPrice ? (r() < 0.6 ? "Concluso/pagato" : r() < 0.5 ? "Richiesto" : "Proposto/offerta") : null,
+   374→          text: rndPick(r, texts.bodies), status: "published",
+   375→          verified: true, createdAt: new Date(daysAgoIso(daysAgo)),
+   376→          updatedAt: hasUpdate ? new Date(daysAgoIso(Math.max(1, daysAgo - rndInt(r, 2, 20)))) : null,
+   377→          updateReason: hasUpdate ? rndPick(r, UPDATE_REASONS) : null, isDemo: true,
+   378→        },
+   379→      });
+   380→      const arr = reviewIdsByEntity.get(entId) || [];
+   381→      arr.push(review.id);
+   382→      reviewIdsByEntity.set(entId, arr);
+   383→    }
+   384→  }
+   385→
+   386→  // 7) Una recensione nascosta dalla moderazione (decisione registrata)
+   387→  const casanovaRevs = reviewIdsByEntity.get("ent_ag_casanova") || [];
+   388→  const hiddenRev = casanovaRevs[0];
+   389→  if (hiddenRev) {
+   390→    await db.review.update({
+   391→      where: { id: hiddenRev },
+   392→      data: { status: "hidden", hiddenReason: "Contenuto promozionale ripetuto, privo di esperienza diretta (decisione di moderazione)." },
+   393→    });
+   394→  }
+   395→  const ferrettiRevs = reviewIdsByEntity.get("ent_am_ferretti") || [];
+   396→  const hiddenRep = ferrettiRevs[0];
+   397→
+   398→  // 6bis) FOTO demo: gradienti generati con sharp (nessun file esterno),
+   399→  // allegati alle recensioni di alcuni immobili. Come da regola, sono già
+   400→  // senza metadati: sharp ricompila in JPEG puro.
+   401→  async function demoPhoto(w: number, h: number, rgb: [number, number, number]): Promise<Buffer> {
+   402→    const svg = `<svg width="${w}" height="${h}" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="rgb(${rgb[0]},${rgb[1]},${rgb[2]})"/><stop offset="1" stop-color="rgb(${Math.max(0, rgb[0] - 60)},${Math.max(0, rgb[1] - 45)},${Math.max(0, rgb[2] - 30)})"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/><text x="50%" y="54%" text-anchor="middle" font-family="sans-serif" font-size="26" fill="rgba(255,255,255,0.85)">Foto dimostrativa</text></svg>`;
+   403→    return sharp(Buffer.from(svg)).jpeg({ quality: 80 }).toBuffer({ resolveWithObject: true }).then(o => o.data);
+   404→  }
+   405→  const photoTargets: Array<[string, [number, number, number]]> = [
+   406→    ["ent_i_rondini", [51, 101, 138]],
+   407→    ["ent_i_tigli8", [78, 125, 91]],
+   408→    ["ent_i_girasole", [166, 91, 63]],
+   409→    ["ent_i_fiume", [131, 102, 31]],
+   410→  ];
+   411→  let demoPhotoCount = 0;
+   412→  for (const [entId, rgb] of photoTargets) {
+   413→    const ids = reviewIdsByEntity.get(entId) || [];
+   414→    for (let i = 0; i < Math.min(2, ids.length); i++) {
+   415→      const w = 640 + i * 40;
+   416→      const buf = await demoPhoto(w, 480, rgb);
+   417→      await db.reviewPhoto.create({
+   418→        data: { reviewId: ids[i], data: new Uint8Array(buf), width: w, height: 480, bytes: buf.length, isDemo: true },
+   419→      });
+   420→      demoPhotoCount++;
+   421→    }
+   422→  }
+   423→
+   424→  // 6ter) VOTI demo (effetto community): i recensori premium confermano o
+   425→  // disconfermano alcune recensioni. Un voto per utente e recensione,
+   426→  // mai sulla propria (stessa regola applicata dal server).
+   427→  let demoVoteCount = 0;
+   428→  for (const entId of ["ent_i_rondini", "ent_am_sereni"]) {
+   429→    const ids = reviewIdsByEntity.get(entId) || [];
+   430→    for (let i = 0; i < Math.min(4, ids.length); i++) {
+   431→      const rev = await db.review.findUnique({ where: { id: ids[i] }, select: { userId: true } });
+   432→      if (!rev) continue;
+   433→      for (let j = 0; j < 3; j++) {
+   434→        const voter = reviewers[(i * 3 + j + 2) % reviewers.length];
+   435→        if (voter.id === rev.userId) continue;
+   436→        await db.reviewVote.create({
+   437→          data: { reviewId: ids[i], userId: voter.id, value: r() < 0.78 ? 1 : -1 },
+   438→        });
+   439→        demoVoteCount++;
+   440→      }
+   441→    }
+   442→  }
+   443→
+   444→  // 6quater) Una recensione APERTA (dichiarata, senza invito) demo: mostra il
+   445→  // badge "Dichiarata" e il funzionamento del contributo aperto.
+   446→  const openAuthor = reviewers[6];
+   447→  const expOpen = await db.experience.create({
+   448→    data: {
+   449→      entityId: "ent_i_ciliegio", kind: "Visita e sopralluogo", period: "2026",
+   450→      origin: "self", clientEmail: openAuthor.email, userId: openAuthor.id, status: "active",
+   451→      claimedAt: new Date(daysAgoIso(2)), createdAt: new Date(daysAgoIso(2)), isDemo: true,
+   452→    },
+   453→  });
+   454→  await db.review.create({
+   455→    data: {
+   456→      experienceId: expOpen.id, entityId: "ent_i_ciliegio", userId: openAuthor.id,
+   457→      score: 6.5,
+   458→      criteriaJson: JSON.stringify({ stato: 6, descrizione: 7, spazi: 7.5, rumori: 6, impianti: 5, rapporto: 6.5 }),
+   459→      criteriaVersionId: versionByCat.get("immobile")!,
+   460→      prosJson: JSON.stringify(["Giardino curato e ben esposto a sud", "Struttura sana, nessuna infiltrazione"]),
+   461→      consJson: JSON.stringify(["Caldaia con più di quindici anni da sostituire"]),
+   462→      text: "Ho visitato la villa durante un sopralluogo: struttura sana e giardino esposto a sud, ma la caldaia ha più di quindici anni e andrebbe sostituita. Esperienza dichiarata senza invito: riporto ciò che ho visto, con nome e cognome mai nominati.",
+   463→      status: "published", verified: false, createdAt: new Date(daysAgoIso(2)), isDemo: true,
+   464→    },
+   465→  });
+   466→
+   467→  // 8) Esperienza in attesa di verifica documentale (flusso utente)
+   468→  const expPending = await db.experience.create({
+   469→    data: {
+   470→      entityId: "ent_p_gm", kind: "Contratto di affitto cessato", period: "2025",
+   471→      origin: "verification-request", clientEmail: uArianna.email, userId: null,
+   472→      status: "pending", note: "Contratto di affitto registrato, anni 2023-2025. Chiedo di poter recensire la mia esperienza.",
+   473→      requestedById: uArianna.id, createdAt: new Date(daysAgoIso(3)), isDemo: true,
+   474→    },
+   475→  });
+   476→
+   477→  // 9) Inviti demo: uno attivo (token solo nell'email log demo), uno scaduto, uno usato
+   478→  const expInvite = await db.experience.create({
+   479→    data: {
+   480→      entityId: "ent_ag_portico", kind: "Servizio di intermediazione ricevuto", period: "2026",
+   481→      origin: "business", clientEmail: uArianna.email, userId: null, status: "active",
+   482→      note: "Esperienza registrata dal soggetto verificato (Il Portico Immobiliare).",
+   483→      createdAt: new Date(daysAgoIso(2)), isDemo: true,
+   484→    },
+   485→  });
+   486→  const tokActive = randomBytes(32).toString("hex");
+   487→  await db.invite.create({
+   488→    data: {
+   489→      experienceId: expInvite.id, email: uArianna.email, tokenHash: sha256(tokActive),
+   490→      quotaOwner: "ent_ag_portico", expiresAt: new Date(Date.now() + 5 * 86400000), isDemo: true,
+   491→    },
+   492→  });
+   493→  const tokExpired = randomBytes(32).toString("hex");
+   494→  const expExpired = await db.experience.create({
+   495→    data: {
+   496→      entityId: "ent_ag_portico", kind: "Servizio di intermediazione ricevuto", period: "2025",
+   497→      origin: "business", clientEmail: "cliente.passato@esempio.test", userId: null, status: "active",
+   498→      createdAt: new Date(daysAgoIso(10)), isDemo: true,
+   499→    },
+   500→  });
+   501→  await db.invite.create({
+   502→    data: {
+   503→      experienceId: expExpired.id, email: "cliente.passato@esempio.test", tokenHash: sha256(tokExpired),
+   504→      quotaOwner: "ent_ag_portico", expiresAt: new Date(daysAgoIso(3)), isDemo: true,
+   505→    },
+   506→  });
+   507→  // invito usato: esperienza del reviewer 0 su ent_ag_portico (prima del pool)
+   508→  const usedExp = await db.experience.create({
+   509→    data: {
+   510→      entityId: "ent_ag_portico", kind: "Servizio di intermediazione ricevuto", period: "2024",
+   511→      origin: "business", clientEmail: uMarco.email, userId: uMarco.id, status: "active",
+   512→      claimedAt: new Date(daysAgoIso(20)), createdAt: new Date(daysAgoIso(28)), isDemo: true,
+   513→    },
+   514→  });
+   515→  await db.invite.create({
+   516→    data: {
+   517→      experienceId: usedExp.id, email: uMarco.email, tokenHash: sha256(randomBytes(32).toString("hex")),
+   518→      quotaOwner: "ent_ag_portico", expiresAt: new Date(daysAgoIso(21)), usedAt: new Date(daysAgoIso(20)), isDemo: true,
+   519→    },
+   520→  });
+   521→
+   522→  // 10) Segnalazioni e contestazioni demo
+   523→  const uModerator = await db.user.findUnique({ where: { email: "moderatore@esempio.test" } });
+   524→  const casanovaPublished = casanovaRevs.find(id => id !== hiddenRev);
+   525→  if (casanovaPublished) {
+   526→    await db.report.create({
+   527→      data: {
+   528→        targetType: "review", targetId: casanovaPublished, reporterUserId: uMarco.id,
+   529→        reason: "falsita",
+   530→        details: "Il modello di immobile descritto non corrisponde a nessuna unità gestita dall'agenzia: la recensione sembra provenire da un concorrente.",
+   531→        status: "received", createdAt: new Date(daysAgoIso(1)), isDemo: true,
+   532→      },
+   533→    });
+   534→  }
+   535→  if (hiddenRep) {
+   536→    await db.report.create({
+   537→      data: {
+   538→        targetType: "review", targetId: hiddenRep, reporterUserId: reviewers[5].id,
+   539→        reason: "dati-personali",
+   540→        details: "La recensione cita il nominativo completo e la scala di un condomino.",
+   541→        status: "reviewing", createdAt: new Date(daysAgoIso(2)), isDemo: true,
+   542→        decisions: {
+   543→          create: { byId: uModerator!.id, action: "Presa in carico", reason: "In valutazione da parte della moderazione.", at: new Date(daysAgoIso(1)) },
+   544→        },
+   545→      },
+   546→    });
+   547→  }
+   548→  await db.dispute.create({
+   549→    data: {
+   550→      entityId: "ent_p_lb", claimantEmail: "persona.interessata@esempio.test",
+   551→      claim: "La scheda 'L. B.' si riferisce a una persona diversa da me: chiedo la revisione dell'associazione tra la scheda e il mio nominativo.",
+   552→      status: "received", createdAt: new Date(daysAgoIso(1)), isDemo: true,
+   553→    },
+   554→  });
+   555→
+   556→  // 10bis) Membership Premium dei recensori demo: ogni recensione pubblicata
+   557→  // genera il grant come nel meccanismo reale. Nell'istanza demo le scadenze
+   558→  // partono da adesso (il seed gira ora): così i login demo mostrano lo stato
+   559→  // Premium attivo e il gating si prova con l'utente normale.
+   560→  const PREMIUM_DAYS = 30;
+   561→  const demoReviews = await db.review.findMany({
+   562→    where: { isDemo: true, status: "published" },
+   563→    select: { id: true, userId: true, createdAt: true },
+   564→  });
+   565→  const nowSeed = Date.now();
+   566→  const premiumByUser = new Map<string, Date>();
+   567→  if (demoReviews.length) {
+   568→    await db.premiumGrant.createMany({
+   569→      data: demoReviews.map(r => {
+   570→        const expiresAt = new Date(Math.max(nowSeed, r.createdAt.getTime() + PREMIUM_DAYS * 86400000) + PREMIUM_DAYS * 86400000);
+   571→        const cur = premiumByUser.get(r.userId);
+   572→        if (!cur || expiresAt > cur) premiumByUser.set(r.userId, expiresAt);
+   573→        return { userId: r.userId, reviewId: r.id, days: PREMIUM_DAYS, origin: "seed", grantedAt: r.createdAt, expiresAt };
+   574→      }),
+   575→    });
+   576→    for (const [uid, until] of premiumByUser) {
+   577→      await db.user.update({ where: { id: uid }, data: { premiumUntil: until } });
+   578→    }
+   579→  }
+   580→
+   581→  // 11) Log demo
+   582→  await db.auditLog.createMany({
+   583→    data: [
+   584→      { actorId: uModerator!.id, actorRole: "moderator", action: "Recensione nascosta", targetType: "review", targetId: hiddenRev, reason: "Contenuto promozionale, non pertinente a un'esperienza diretta.", at: new Date(daysAgoIso(5)), isDemo: true },
+   585→      { actorId: uModerator!.id, actorRole: "moderator", action: "Esperienza verificata e approvata", targetType: "experience", targetId: expPending.id, reason: "Documento di contratto ritenuto sufficiente.", at: new Date(daysAgoIso(12)), isDemo: true },
+   586→    ],
+   587→  });
+   588→  await db.securityLog.createMany({
+   589→    data: [
+   590→      { type: "login_failed_repeat", severity: "warn", details: "5 tentativi di accesso falliti per moderatore@esempio.test — blocco temporaneo di 60 s applicato.", at: new Date(daysAgoIso(4)), isDemo: true },
+   591→      { type: "admin_login_ok", severity: "info", details: "Accesso all'area amministrativa riuscito con 2FA (admin@esempio.test).", at: new Date(daysAgoIso(3)), isDemo: true },
+   592→      { type: "invite_token_invalid", severity: "warn", details: "Tentativo di riscatto di un token di invito non valido o già usato (possibile enumerazione).", at: new Date(daysAgoIso(2)), isDemo: true },
+   593→      { type: "totp_enabled", severity: "info", details: "Autenticazione a due fattori attivata per un account amministrativo.", at: new Date(daysAgoIso(1)), isDemo: true },
+   594→    ],
+   595→  });
+   596→
+   597→  // 12) Email demo (casella dimostrativa: contengono il link con il token SOLO in demo)
+   598→  await db.emailLog.createMany({
+   599→    data: [
+   600→      { to: uArianna.email, subject: "Benvenuta su ZoomZoom (istanza demo)", body: "Grazie per la registrazione. Il tuo indirizzo email è stato verificato con il codice contenuto in questo messaggio dimostrativo.", linksJson: "[]", status: "queued", at: new Date(daysAgoIso(30)), isDemo: true },
+   601→      { to: uArianna.email, subject: "Il Portico Immobiliare ti invita a recensire la tua esperienza", body: "Hai ricevuto un invito collegato a un'esperienza registrata sulla piattaforma: 'Servizio di intermediazione ricevuto' con Il Portico Immobiliare. Il collegamento è valido 7 giorni e per un solo uso. L'invito verifica l'esistenza dell'interazione registrata, non la veridicità delle affermazioni.", linksJson: JSON.stringify([{ label: "Apri l'invito e scrivi la recensione", href: "#/invito/" + tokActive }]), status: "queued", at: new Date(daysAgoIso(2)), isDemo: true },
+   602→      { to: uArianna.email, subject: "Richiesta di verifica esperienza ricevuta", body: "Abbiamo ricevuto la tua richiesta di verifica per l'esperienza con G. M. (Contratto di affitto cessato). Un moderatore esaminerà il documento caricato: riceverai un aggiornamento entro 7 giorni.", linksJson: "[]", status: "queued", at: new Date(daysAgoIso(3)), isDemo: true },
+   603→    ],
+   604→  });
+   605→
+   606→  // 13) Credenziali demo in file locale (NON pubblico, NON nel front-end)
+   607→  const fs = await import("fs");
+   608→  fs.writeFileSync("demo-credentials.json", JSON.stringify({
+   609→    _nota: "Credenziali dell'istanza DEMO. Dominio esempio.test riservato (RFC 6761): non sono credenziali valide su alcun sistema reale. Per il codice TOTP: bun scripts/totp.ts <email>",
+   610→    ...credentials,
+   611→  }, null, 2));
+   612→  fs.appendFileSync(".gitignore", "\ndemo-credentials.json\n");
+   613→
+   614→  const counts = {
+   615→    utenti: await db.user.count({ where: { isDemo: true } }),
+   616→    schede: await db.entity.count({ where: { isDemo: true } }),
+   617→    recensioni: await db.review.count({ where: { isDemo: true } }),
+   618→    esperienze: await db.experience.count({ where: { isDemo: true } }),
+   619→    foto: await db.reviewPhoto.count({ where: { isDemo: true } }),
+   620→    voti: await db.reviewVote.count({ where: { review: { isDemo: true } } }),
+   621→  };
+   622→  console.log("Seed completato:", counts, "in", Date.now() - t0, "ms");
+   623→  console.log("Credenziali demo salvate in demo-credentials.json (mai esposte al front-end).");
+   624→  console.log("Invito demo attivo per utente@esempio.test: visibile nella casella demo del back office.");
+   625→}
+   626→
+   627→/* Utils statici (seed senza import del modulo con next/headers) */
+   628→import { createCipheriv } from "crypto";
+   629→function encryptSecretStatic(plain: string): string {
+   630→  const APP_SECRET = process.env.APP_SECRET || "";
+   631→  if (!APP_SECRET) throw new Error("APP_SECRET mancante in .env");
+   632→  const key = createHash("sha256").update(APP_SECRET).digest();
+   633→  const iv = randomBytes(12);
+   634→  const cipher = createCipheriv("aes-256-gcm", key, iv);
+   635→  const enc = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
+   636→  return `${iv.toString("hex")}.${cipher.getAuthTag().toString("hex")}.${enc.toString("hex")}`;
+   637→}
+   638→function randomBytesStatic(r: () => number, n: number): Buffer {
+   639→  // per il seed serve entropia reale per i segreti TOTP, non RNG deterministico
+   640→  return randomBytes(n);
+   641→}
+   642→function base32(bytes: Buffer): string {
+   643→  const B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+   644→  let bits = 0, val = 0, out = "";
+   645→  for (const b of bytes) {
+   646→    val = (val << 8) | b; bits += 8;
+   647→    while (bits >= 5) { out += B32[(val >>> (bits - 5)) & 31]; bits -= 5; }
+   648→  }
+   649→  if (bits > 0) out += B32[(val << (5 - bits)) & 31];
+   650→  return out;
+   651→}
+   652→
+   653→main().catch(e => { console.error(e); process.exit(1); }).finally(() => db.$disconnect());
+   654→
