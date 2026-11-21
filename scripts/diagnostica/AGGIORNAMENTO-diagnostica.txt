@@ -1,0 +1,146 @@
+ZoomZoom — Diagnosi dal vivo: chi sta rispondendo quando clicchi "Aggiungi e Scrivi la Recensione"?
+====================================================================================
+
+COSA HA DETTO LA TUA VERIFICA (E PERCHÉ NON BASTA)
+--------------------------------------------------
+La verifica "bun scripts/verifica-schema.ts" ha certificato tre cose della
+CARTELLA del progetto: il file prisma/schema.prisma è aggiornato, il client
+generato in node_modules è aggiornato, il database ha le colonne nuove.
+Tutto vero, tutto a posto. Eppure l'errore continua.
+
+Il perché è semplice, ed è l'ultimo tassello: quell'errore NON nasce dai
+file né dal database. Nasce dal PROCESSO del server che risponde al click:
+quel processo ha ancora in pancia il client VECCHIO (caricato in memoria
+prima dell'aggiornamento, o costruito da file vecchi). Una verifica che
+guarda i file sul disco non può accorgersene — proprio come controllare
+l'elenco nel cassetto mentre qualcuno ti risponde ancora col vecchio
+elenco imparato a memoria.
+
+Ci sono SOLO tre modi in cui può succedere:
+  A) un processo locale del server è rimasto attivo con il client vecchio
+     (un "fantasma" rimasto in ascolto mentre tu ne avviavi un altro);
+  B) il server è stato avviato da una COPIA DIVERSA del progetto (una
+     cartella gemella non aggiornata);
+  C) — il più probabile — stai cliccando sul SITO PUBBLICO (Vercel): là il
+     client del database nasce dalla BUILD, dai file pubblicati su git. Se
+     il prisma/schema.prisma aggiornato non è mai stato pubblicato, ogni
+     deploy continua a costruire il client vecchio. E qui sta il punto
+     decisive: "bun run db:push" dal tuo computer aggiorna il DATABASE
+     (infatti le colonne ci sono: la tua verifica lo ha provato), ma NON
+     PUÒ TOCCARE il client dentro il sito pubblico. Per questo l'errore è
+     identico da giorni, per quante volte tu abbia rifatto db:push e
+     riavviato: il rimedio giusto non è mai arrivato sul server giusto.
+
+IL NUOVO STRUMENTO: /api/diagnostica (2 minuti, risponde il server VIVO)
+------------------------------------------------------------------------
+Una piccola pagina di servizio che non guarda i file: interroga il server
+che la apre, nel processo esatto che gestisce le recensioni, e fa LA
+STESSA lettura che fa il salvataggio della località. Se il client è
+vecchio, si ferma lì — davanti ai tuoi occhi — e lo dice chiaramente.
+Rivela anche da quale CARTELLA gira il server (caso B) e lo stato del
+database che quel server raggiunge.
+
+Uso:
+  1. nel browser:  http://localhost:3000/api/diagnostica
+     → dice la verità sul server LOCALE;
+  2. nel browser:  https://TUO-SITO/api/diagnostica   (dopo il deploy)
+     → dice la verità sul SITO PUBBLICO.
+Leggi il campo "verdetto" della risposta: contiene già il rimedio per il
+caso trovato. In più, "bun scripts/verifica-schema.ts" (aggiornato in
+questo pacchetto) ora fa anche lui la prova dal vivo: riconosce il
+processo in ascolto sulla porta 3000, interroga /api/diagnostica, verifica
+che il server giri dalla cartella giusta e mostra gli ultimi errori dai
+log del server (dev.log / server.log).
+
+I TRE CASI E IL RIMEDIO ESATTO
+------------------------------
+CASO A — la diagnostica su localhost dice client VECCHIO (processo fantasma):
+  PowerShell, dalla cartella del progetto (C:\Users\Carlo\sito\zoomzoom):
+      Get-Process bun,node -ErrorAction SilentlyContinue | Stop-Process -Force
+      Remove-Item -Recurse -Force .next
+      bun run db:push
+      bun run dev
+  Poi nel browser premi Ctrl+F5 per ricaricare bene la pagina, e riprova.
+
+CASO B — il campo "cartellaDelServer" è DIVERSO da C:\Users\Carlo\sito\zoomzoom:
+  il server attivo gira da un'altra copia del progetto. Chiudi il
+  terminale da cui lo hai avviato e riavvia "bun run dev" dalla cartella
+  aggiornata (oppure copia questo pacchetto nella cartella che serve e
+  ripeti db:push + riavvio là).
+
+CASO C — la diagnostica sul SITO PUBBLICO dice client VECCHIO (il più probabile):
+  bisogna PUBBLICARE il file aggiornato, perché là il client nasce dalla
+  build. Dalla cartella del progetto:
+      git status --short
+  Se prisma/schema.prisma compare come modificato ("M") o nuovo ("??"),
+  ERA PROPRIO QUESTO il problema: il file aggiornato non era mai stato
+  pubblicato. Pubblica:
+      git add prisma/schema.prisma src/app/api/diagnostica/route.ts scripts/verifica-schema.ts
+      git commit -m "schema con province/region/source + diagnostica server"
+      git push
+  Attendi il redeploy di Vercel (1-2 minuti, si vede nella dashboard), poi
+  riapri https://TUO-SITO/api/diagnostica finché non dice "aggiornato".
+  (Su Vercel il client viene generato automaticamente durante la build:
+  pubblicare il file è sufficiente. Il database è già a posto — la tua
+  verifica lo ha dimostrato — quindi là non serve altro.)
+
+REGOLA FINALE: riprova la recensione solo dopo che /api/diagnostica dice
+"aggiornato" sul server dove fai il test (locale E pubblico, se li usi
+entrambi).
+
+FILE DEL PACCHETTO
+------------------
+src/app/api/diagnostica/route.ts   NUOVO — diagnostica dal vivo. Sola
+                                   lettura: nessun dato degli utenti,
+                                   nessun segreto (né l'indirizzo del
+                                   database). Si può togliere in qualsiasi
+                                   momento senza alcun effetto.
+scripts/verifica-schema.ts         AGGIORNATO — alle 4 prove di prima
+                                   (file, client, build, database) aggiunge
+                                   la prova DAL VIVO del server attivo
+                                   (processo, cartella, client in memoria)
+                                   e la lettura degli ultimi errori dai
+                                   log del server.
+
+Nessuna modifica a: schema del database, dipendenze, variabili d'ambiente,
+logica del sito (creazione schede, recensioni, zone: tutto intoccato).
+Solo un file di servizio nuovo e lo script di verifica potenziato.
+
+INSTALLAZIONE
+-------------
+1) Estrai lo zip in una cartella temporanea.
+2) PowerShell (mantenendo i percorsi):
+       Copy-Item -Recurse -Force "C:\percorso\estratto\src" "C:\Users\Carlo\sito\zoomzoom\"
+       Copy-Item -Recurse -Force "C:\percorso\estratto\scripts" "C:\Users\Carlo\sito\zoomzoom\"
+3) Se il server di sviluppo è già acceso NON serve riavviarlo: la nuova
+   pagina si carica da sola. Apri:  http://localhost:3000/api/diagnostica
+   (se non risponde, riavvia con "bun run dev" e riprova)
+4) Per il sito pubblico: pubblica i file (comandi git del CASO C —
+   verifica prima con "git status --short" lo stato di prisma/schema.prisma),
+   attendi il redeploy, poi apri:  https://TUO-SITO/api/diagnostica
+5) Quando la diagnostica dice "aggiornato" dove testi: riprova la
+   recensione.
+
+TEST ESEGUITI SU QUESTA VERSIONE (tutti verdi)
+----------------------------------------------
+- /api/diagnostica provata DAL VIVO sul server di sviluppo: risponde in
+  un decimo di secondo con la diagnosi completa (ambiente, cartella,
+  schema, client, tabella) e il verdetto in italiano;
+- RIPRODUZIONE ESATTA DEL TUO CASO: generato un client da uno schema
+  senza province/region/source e fatta la stessa lettura della route →
+  scatta lo stesso identico errore e la diagnostica lo riconosce,
+  estraendo il campo mancante ("province") dal messaggio;
+- verifica-schema potenziata provata con server attivo: individua il
+  processo in ascolto sulla porta 3000, interroga la diagnostica, confor-
+  ma la cartella del server e legge i log (dev.log: nessun falso errore);
+- le 4 prove originali (file, client, build, database) invariate e
+  rieseguite: tutte corrette.
+
+SE ANCHE LA DIAGNOSTICA DICESSE "AGGIORNATO" DOVUNQUE
+------------------------------------------------------
+Ma l'errore comparisse ancora, allora il quadro cambierebbe: mandami
+  1. la risposta JSON di /api/diagnostica del server dove vedi l'errore
+     (basta copiare quello che esce nel browser);
+  2. la riga "[entities] errore interno in ensureZone" dal terminale del
+     server (la sezione 6 della verifica la mostra da sola).
+Con quelli la diagnosi è certa al primo sguardo.

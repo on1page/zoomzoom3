@@ -1,18 +1,23 @@
-// ZoomZoom — diagnostica rapida dell'errore
+// ZoomZoom — diagnostica completa dell'errore
 // "Il software del sito non è aggiornato all'ultima versione (client del
 // database generato da uno schema precedente)".
 //
-// Controlla, in un colpo solo, le quattro cose che devono essere allineate
+// Controlla, in un colpo solo, le SEI cose che possono essere disallineate
 // quando si crea una località nuova (copertura nazionale):
 //   1. il FILE prisma/schema.prisma del progetto;
 //   2. il CLIENT Prisma generato in node_modules (quello che usa "bun run dev");
 //   3. il CLIENT incorporato nella build di produzione .next/standalone
 //      (quello che usa "bun run start" — bun run db:push NON lo tocca!);
-//   4. le COLONNE della tabella Zone nel DATABASE (prova concreta a runtime).
+//   4. le COLONNE della tabella Zone nel DATABASE (prova concreta a runtime);
+//   5. IL SERVER CHE STA RISPONDENDO ADESSO sulla porta 3000: quale processo
+//      è in ascolto, da quale cartella gira e — la prova decisiva — se il
+//      client che ha IN MEMORIA è aggiornato (chiama /api/diagnostica);
+//   6. gli ULTIMI ERRORI registrati nei log del server (dev.log / server.log).
 //
 // Uso, dalla cartella del progetto:
 //       bun scripts/verifica-schema.ts
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
 
 const CAMPI: readonly string[] = ["province", "region", "source"];
 
@@ -37,10 +42,19 @@ function riga(etichetta: string, stato: Stato, dettaglio: string) {
   console.log(`  ${simbolo[stato]}  ${etichetta} — ${dettaglio}`);
 }
 
+function esegui(cmd: string[]): string {
+  try {
+    const r = Bun.spawnSync(cmd, { stdout: "pipe", stderr: "pipe" });
+    return new TextDecoder().decode(r.stdout).trim();
+  } catch {
+    return "";
+  }
+}
+
 const problemi: string[] = [];
 
 async function main() {
-  console.log("ZoomZoom — verifica schema / client / database");
+  console.log("ZoomZoom — verifica schema / client / database / server vivo");
   console.log("(diagnostica dell'errore \"Il software del sito non è aggiornato…\")\n");
 
   /* ---------- 1. FILE prisma/schema.prisma ---------- */
@@ -132,14 +146,115 @@ async function main() {
     problemi.push("client Prisma non avviabile: bun install && bunx prisma generate");
   }
 
+  /* ---------- 5. IL SERVER CHE STA RISPONDENDO ADESSO (prova dal vivo) ---------- */
+  // Le prove 1–4 certificano i FILE e il DATABASE di QUESTA cartella. Ma
+  // l'errore lo produce il PROCESSO che risponde al click: se è rimasto
+  // indietro (o gira da un'altra cartella, o è il sito pubblico), qui si
+  // vede subito.
+  console.log("\n5. IL SERVER CHE STA RISPONDENDO ADESSO (prova dal vivo, porta 3000)");
+  const win = process.platform === "win32";
+
+  // chi è in ascolto sulla porta 3000?
+  const netstat = win
+    ? esegui(["cmd.exe", "/c", "netstat -ano | findstr :3000"])
+    : esegui(["sh", "-c", "lsof -nP -iTCP:3000 -sTCP:LISTEN 2>/dev/null || ss -tln 2>/dev/null | grep :3000 || true"]);
+  const righeAscolto = netstat ? netstat.split(/\r?\n/).filter(l => /:3000/.test(l) && /LISTEN/i.test(l)).slice(0, 4) : [];
+  if (righeAscolto.length) {
+    for (const l of righeAscolto) console.log(`  [INFO ]  in ascolto: ${l.trim().replace(/\s+/g, " ").slice(0, 150)}`);
+    if (win) {
+      // su Windows: nome del processo per ogni PID in ascolto
+      const pids = [...new Set(righeAscolto.map(l => l.trim().split(/\s+/).pop() ?? "").filter(p => /^\d+$/.test(p)))].slice(0, 3);
+      for (const pid of pids) {
+        const t = esegui(["cmd.exe", "/c", `tasklist /FI "PID eq ${pid}" /FO CSV /NH`]);
+        if (t && !/INFO:/.test(t)) console.log(`  [INFO ]  processo PID ${pid}: ${t.split(/\r?\n/)[0].slice(0, 120)}`);
+      }
+    }
+  } else {
+    console.log("  [  ---  ]  nessun processo locale in ascolto sulla porta 3000");
+  }
+
+  // il server risponde? e soprattutto: che client ha IN MEMORIA?
+  // (serve la route /api/diagnostica del pacchetto aggiornato)
+  let vivo: {
+    ambiente?: string; cartellaDelServer?: string;
+    clientDatabase?: string; tabellaZone?: string; verdetto?: string;
+  } | null = null;
+  try {
+    const r = await fetch("http://localhost:3000/api/diagnostica", { signal: AbortSignal.timeout(3000) });
+    if (r.ok) {
+      vivo = await r.json();
+      const clientVecchio = String(vivo?.clientDatabase ?? "").includes("VECCHIO");
+      riga("http://localhost:3000/api/diagnostica", clientVecchio ? "VECCHIO" : "OK",
+        clientVecchio
+          ? "il server locale ATTIVO ha un client VECCHIO in memoria (processo rimasto indietro)"
+          : "il server locale ATTIVO ha client e database aggiornati");
+      console.log(`  [INFO ]  ambiente: ${vivo?.ambiente ?? "?"} · cartella del server: ${vivo?.cartellaDelServer ?? "?"}`);
+      console.log(`  [INFO ]  tabella Zone vista dal server: ${vivo?.tabellaZone ?? "?"}`);
+      if (vivo?.verdetto) console.log(`  [INFO ]  verdetto del server: ${String(vivo.verdetto).slice(0, 200)}`);
+      // gira dalla cartella giusta?
+      if (vivo?.cartellaDelServer) {
+        try {
+          if (resolvePath(vivo.cartellaDelServer) !== resolvePath(process.cwd())) {
+            console.log("  [ATTENZIONE]  il server attivo gira da una cartella DIVERSA da questa!");
+            problemi.push(`il server attivo gira da “${vivo.cartellaDelServer}” e non da questa cartella: spegnilo e riavvia “bun run dev” dalla cartella del progetto aggiornata`);
+          }
+        } catch { /* confronto sole informativo */ }
+      }
+      if (clientVecchio) {
+        problemi.push("il processo del server locale ha un client VECCHIO: chiudi TUTTI i terminali del server (Ctrl+C), eventualmente riavvia il computer, elimina la cartella .next, poi «bun run db:push» e «bun run dev»");
+      }
+    } else {
+      riga("server locale", "ERRORE",
+        `risponde sulla porta 3000 ma /api/diagnostica dà errore ${r.status}: copia nel progetto anche src/app/api/diagnostica/route.ts (pacchetto aggiornato) e riesegui questa verifica`);
+    }
+  } catch {
+    console.log("  [  ---  ]  nessun server attivo su http://localhost:3000");
+    console.log("             Se l'errore lo vedi lo stesso, lo stai guardando su un ALTRO");
+    console.log("             server (il SITO PUBBLICO o un'altra copia del progetto):");
+    console.log("             apri nel browser  https://TUO-SITO/api/diagnostica  per");
+    console.log("             la stessa diagnosi, fatta là dove il sito risponde davvero.");
+  }
+
+  /* ---------- 6. ULTIMI ERRORI NEI LOG DEL SERVER ---------- */
+  console.log("\n6. LOG DEL SERVER (ultimi errori di salvataggio località)");
+  for (const f of ["dev.log", "server.log"]) {
+    try {
+      const s = readFileSync(f, "utf8");
+      const stat = statSync(f);
+      console.log(`  [INFO ]  ${f} (ultimo aggiornamento: ${stat.mtime.toLocaleString("it-IT")})`);
+      const trovate = s.split(/\r?\n/)
+        .filter(l => /\[entities\] errore interno|Unknown (argument|field)|P2022|DB_CLIENT_VECCHIO/.test(l))
+        .slice(-3);
+      if (!trovate.length) {
+        console.log("             nessun errore di salvataggio località registrato");
+      } else {
+        for (const l of trovate) console.log(`             ${l.trim().slice(0, 220)}`);
+      }
+    } catch {
+      console.log(`  [  ---  ]  ${f} assente (server avviato senza log su file: normale)`);
+    }
+  }
+
   /* ---------- verdetto ---------- */
   console.log("\n---------- VERDETTO ----------");
   if (!problemi.length) {
-    console.log("Tutto allineato: file, client e database sono a posto.");
-    console.log("Se il messaggio compare ancora, il server che risponde NON è questa cartella");
-    console.log("(vecchio processo ancora attivo? altra copia del progetto? sito pubblico");
-    console.log("con il file non ancora pubblicato? in quel caso: git add prisma/schema.prisma,");
-    console.log("commit, push e attendere il redeploy di Vercel).");
+    const serverVivoOk = vivo && !String(vivo.clientDatabase ?? "").includes("VECCHIO");
+    if (serverVivoOk) {
+      console.log("Tutto allineato: file, client, database E il server locale attivo.");
+      console.log("Se il messaggio compare comunque, lo stai vedendo su un ALTRO server:");
+      console.log("quasi certamente il SITO PUBBLICO. Conferma subito: apri nel browser");
+      console.log("    https://TUO-SITO/api/diagnostica");
+      console.log("Se là il client risulta VECCHIO, il rimedio è PUBBLICARE il file");
+      console.log("prisma/schema.prisma (git add + commit + push, poi attendi il redeploy):");
+      console.log("il “bun run db:push” dal tuo computer aggiorna il DATABASE, ma il client");
+      console.log("dentro il sito pubblico nasce dalla BUILD, dai file pubblicati.");
+    } else {
+      console.log("Tutto allineato: file, client e database sono a posto.");
+      console.log("Se il messaggio compare ancora, il server che risponde NON è questa cartella");
+      console.log("(vecchio processo ancora attivo? altra copia del progetto? sito pubblico");
+      console.log("con il file non ancora pubblicato? in quel caso: git add prisma/schema.prisma,");
+      console.log("commit, push e attendere il redeploy di Vercel).");
+    }
   } else {
     console.log("Da fare, nell'ordine:");
     problemi.forEach((p, i) => console.log(`  ${i + 1}. ${p}`));

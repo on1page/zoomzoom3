@@ -1,0 +1,21 @@
+// fixture del test: Zone COM'ERA PRIMA della copertura nazionale
+// (senza province/region/source) — serve solo a riprodurre l'errore
+// "Unknown argument `province`" del client vecchio
+generator client {
+  provider = "prisma-client-js"
+  output   = "../client-vecchio"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Zone {
+  id      String  @id
+  name    String
+  gpsLat  Float
+  gpsLng  Float
+  radiusM Int     @default(3000)
+  isDemo  Boolean @default(false)
+}
