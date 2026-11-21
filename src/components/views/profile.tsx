@@ -59,7 +59,7 @@ export function ProfileView() {
       <div className="section-head">
         <div>
           <h1 style={{ margin: 0 }}>Ciao, {user.nickname}</h1>
-          <p className="sub">Email verificata: <b>{user.email}</b> · Account dal {fmtMonthYear(user.createdAt.toISOString ? user.createdAt.toISOString() : String(user.createdAt))}</p>
+          <p className="sub">Email verificata: <b>{user.email}</b>{user.createdAt ? <> · Account dal {fmtMonthYear(user.createdAt.toISOString ? user.createdAt.toISOString() : String(user.createdAt))}</> : null}</p>
         </div>
       </div>
       <ProfileTabs active="#/profilo" />
@@ -191,7 +191,7 @@ export function ProfileSettingsView() {
       <ProfileTabs active="#/profilo-impostazioni" />
       <div className="card mb2">
         <h2 style={{ fontSize: "1.05rem", marginTop: 0 }}>Dati principali</h2>
-        <p className="small muted">Email (privata, verificata): <b>{user.email}</b> · Account dal {fmtMonthYear(String(user.createdAt))}</p>
+        <p className="small muted">Email (privata, verificata): <b>{user.email}</b>{user.createdAt ? <> · Account dal {fmtMonthYear(String(user.createdAt))}</> : null}</p>
         <form onSubmit={async e => {
           e.preventDefault();
           const res = await api<{ nickname: string }>("/api/me/nickname", { body: { nickname: nick } });

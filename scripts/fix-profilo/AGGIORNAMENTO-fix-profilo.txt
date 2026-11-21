@@ -1,0 +1,86 @@
+ZoomZoom — Aggiornamento: fix pagina profilo (errore "pagina nera" dopo il login)
+=================================================================================
+
+Cosa risolve
+------------
+Dopo il login come utente normale (es. utente@esempio.test), l'app mostrava una
+pagina nera con l'errore "Application error: a client-side exception has
+occurred" (il testo inglese che vedevi come "this page can't be load"): pagine
+Profilo, Inviti e Impostazioni erano inaccessibili, mentre la homepage
+funzionava e risultavi collegato come ARIANNA_84.
+
+Causa (verificata riproducendo l'errore in un browser reale):
+- la chiamata /api/public/bootstrap, che il client fa dopo il login, NON
+  includeva il campo "createdAt" nei dati dell'utente;
+- la pagina profilo usava quel campo per scrivere "Account dal marzo 2026"
+  e, trovandolo assente, andava in crash tutto l'albero React (per questo
+  spariva tutta la pagina, non solo un pezzo);
+- era un bug latente del progetto: si vede solo al primo login effettivo di
+  un utente nell'area personale, per questo non era emerso prima.
+
+La correzione è doppia:
+1. il server ora include "createdAt" nella risposta di bootstrap
+   (allineata con /api/auth/me, che già lo includeva);
+2. la pagina profilo è stata resa difensiva: se il campo mancasse di nuovo,
+  la data non viene mostrata ma la pagina NON va più in crash.
+
+File modificati (solo 2, nessuna nuova dipendenza, nessuna modifica al database)
+--------------------------------------------------------------------------------
+src/app/api/public/bootstrap/route.ts   (aggiunto createdAt nel payload utente)
+src/components/views/profile.tsx        (resa difensiva la riga della data,
+                                         sia in Panoramica sia in Impostazioni)
+
+Installazione
+-------------
+1) Copia i file di questo pacchetto dentro la cartella del progetto
+   (C:\Users\Carlo\sito\zoomzoom), mantenendo i percorsi. Da PowerShell,
+   dopo aver estratto lo zip in una cartella temporanea:
+
+       Copy-Item -Recurse -Force "C:\percorso\estratto\src" "C:\Users\Carlo\sito\zoomzoom\"
+
+   (Copy-Item sovrascrive i file esistenti con lo stesso nome.)
+
+2) Nessuna dipendenza da installare, nessun db:push, nessuna variabile nuova.
+
+3) Pubblica:
+
+       cd C:\Users\Carlo\sito\zoomzoom
+       git add src/app/api/public/bootstrap/route.ts src/components/views/profile.tsx
+       git commit -m "fix: pagina profilo crash dopo login (createdAt mancante in bootstrap)"
+       git push
+
+4) Al deploy completato: accedi con utente@esempio.test → la pagina profilo
+   deve caricarsi con "Ciao, ARIANNA_84", la tabella delle esperienze e le
+   schede Inviti / Impostazioni.
+
+Verificato nel mirror
+---------------------
+- login utente@esempio.test: OK;
+- #/profilo: rende "Ciao, ARIANNA_84" + "Account dal marzo 2026" + tabella
+  esperienze, zero errori JavaScript nella console;
+- #/profilo-inviti e #/profilo-impostazioni: OK;
+- flusso admin con 2FA e QR: intatto.
+
+Nota su quest'altro problema (area admin: "Errore interno: riprova più tardi")
+-----------------------------------------------------------------------------
+Quello è un problema DIVERSO, non si risolve con questo pacchetto: dipende
+dalla variabile APP_SECRET su Vercel. I segreti 2FA nel database sono cifrati
+con l'APP_SECRET che avevi in locale quando hai eseguito il seed: se su Vercel
+manca o è diversa (virgolette incluse, spazi, valore rigenerato), la decifratura
+fallisce e il server risponde 500 "Errore interno".
+
+Checklist su Vercel (Settings → Environment Variables, ambiente Production):
+- APP_SECRET deve esistere e valere ESATTAMENTE la riga del tuo .env locale,
+  SENZA le virgolette e senza spazi (è una stringa base64 di 44 caratteri che
+  finisce con "=");
+- DEMO_MODE deve valere esattamente: true (senza virgolette);
+- dopo ogni correzione: Redeploy (Deployments → ⋯ → Redeploy).
+
+Per leggere il valore locale: apri C:\Users\Carlo\sito\zoomzoom\.env e copia
+la parte dopo APP_SECRET= . Attenzione: se il .env ha APP_SECRET=AbCd...=,
+su Vercel incolla SOLO AbCd...= (niente virgolette anche se nel file ci
+fossero).
+
+Come conferma finale: nel log di Vercel (Logs) un accesso admin fallito che
+dice "APP_SECRET non configurata" = variabile mancante; "unable to
+authenticate data" = valore diverso da quello usato col seed.

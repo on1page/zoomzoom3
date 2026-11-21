@@ -45,6 +45,7 @@ export async function GET() {
       id: user.id, email: user.email, nickname: user.nickname, role: user.role,
       emailVerified: user.emailVerified, subjectEntityId: user.subjectEntityId,
       totpEnabled: user.totpEnabled, isDemo: user.isDemo,
+      createdAt: user.createdAt.toISOString(),
     } : null,
   });
 }
