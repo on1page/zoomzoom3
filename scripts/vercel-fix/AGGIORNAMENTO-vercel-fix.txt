@@ -1,0 +1,133 @@
+ZoomZoom — Forzare Vercel a usare il nuovo schema (correzione definitiva)
+====================================================================================
+
+LA DIAGNOSI È CERTA (la tua diagnostica lo ha provato)
+------------------------------------------------------
+Sul server di Vercel la diagnostica ha letto, DENTRO la funzione che serve
+il sito, il file prisma/schema.prisma: è AGGIORNATO (contiene province/
+region/source). Eppure il client del database lì è VECCHIO.
+
+Com'è possibile? Per come funziona Vercel: il client del database viene
+generato UNA VOLTA, quando i pacchetti vengono installati durante una
+build. Le build successive, se il file delle dipendenze (bun.lock) non è
+cambiato, RIUSANO la cache di node_modules: niente reinstallazione,
+niente rigenerazione. Il client era stato generato in una build fatta
+quando lo schema era ancora vecchio; da allora Vercel lo ha conservato
+nella cache e lo ha rifilato a ogni deploy, anche a quelli con lo schema
+già aggiornato nel repo.
+
+Ecco perché "bun run db:push" non poteva funzionare, per quante volte lo
+hai eseguito: quel comando aggiorna il DATABASE (e il client del tuo
+computer), non la cache di Vercel.
+
+Il rimedio ha due mosse: una riga che rende la rigenerazione AUTOMATICA a
+ogni build, e (se serve) la pulizia della cache con un redeploy forzato.
+
+MOSSA 1 — LA RIGA PERMANENTE: "postinstall" (previene per sempre)
+------------------------------------------------------------------
+Nel package.json del progetto, dentro la sezione "scripts", aggiungi una
+riga (è già pronta nel package.json di questo pacchetto):
+
+    "postinstall": "prisma generate",
+
+Così: ogni volta che Vercel installa i pacchetti (cioè a OGNI build),
+rigenera il client del database partendo dal prisma/schema.prisma presente
+nel repo — che è già aggiornato. È la prassi ufficiale Prisma per i
+deploy su Vercel/serverless; senza questa riga il client nasce solo
+quando la cache è vuota, ed è esattamente il buco in cui siete caduti.
+
+ATTENZIONE prima di copiare il file: il package.json del pacchetto è
+identico a quello del progetto, con la SOA riga in più. Se nel tempo hai
+aggiunto tu altre dipendenze o script al tuo package.json, NON copiarlo
+sopra: apri il tuo package.json e aggiungi a mano solo quella riga dentro
+"scripts" (ricorda la virgola alla fine della riga precedente). Se invece
+non lo hai mai toccato, copia pure il file del pacchetto.
+
+MOSSA 2 — IL "FORZA" VERO: redeploy con cache pulita
+----------------------------------------------------
+La Mossa 1, da sola, al prossimo deploy rigenera il client (il postinstall
+viene eseguito sempre, anche con la cache riusata). Se vuoi essere certo
+al 100% fin da subito, o se dopo la Mossa 1 la diagnostica dicesse ancora
+VECCHIO, pulisci la cache di Vercel:
+
+  1. apri  https://vercel.com  ed entra nel progetto del sito;
+  2. scheda "Deployments" (in alto);
+  3. clicca la deployment più recente (la prima dell'elenco);
+  4. menu "..." in alto a destra → "Redeploy";
+  5. NELLA FINESTRA CHE SI APRE spunta l'opzione
+       "Clear Build Cache and Redeploy"
+     (È QUELLA la casella che butta via la cache con il client vecchio);
+  6. conferma e attendi 2-3 minuti la build (la vedi avanzare nella
+     stessa pagina).
+
+SEQUENZA CONSIGLIATA (5 minuti in tutto)
+----------------------------------------
+1) Ferma il server di sviluppo locale (Ctrl+C) — non serve per Vercel,
+   ma tienilo spento finché non hai finito, così nessun confonde le prove.
+2) Copia il package.json del pacchetto nel progetto (o aggiungi a mano la
+   riga "postinstall": "prisma generate" — vedi Mossa 1):
+       Copy-Item -Force "C:\percorso\estratto\package.json" "C:\Users\Carlo\sito\zoomzoom\package.json"
+3) Pubblica e rilascia:
+       cd C:\Users\Carlo\sito\zoomzoom
+       git add package.json
+       git commit -m "rigenera il client del database a ogni build (postinstall)"
+       git push
+   Questo fa partire SUBITO una build nuova su Vercel (con il postinstall
+   attivo). Attendi che compaia "Ready".
+4) VERIFICA (la prova che decide tutto): apri nel browser
+       https://TUO-SITO/api/diagnostica
+   "clientDatabase" deve dire "aggiornato (conosce province/region/source)".
+5) Se dice ancora VECCHIO: fai la Mossa 2 (Redeploy con "Clear Build Cache
+   and Redeploy") e ricontrolla /api/diagnostica.
+6) Quando la diagnostica dice "aggiornato": riprova subito la recensione
+   ("Aggiungi e Scrivi la Recensione") — questa volta la località viene
+   salvata.
+
+PERCHÉ QUESTA VOLTA È DIVERSO
+-----------------------------
+Le volte scorse il rimedio (db:push) agiva sul database e sul tuo
+computer: giusto, ma non toccava la vera origine del problema, il client
+congelato nella cache di Vercel. Ora si interviene esattamente lì: la
+rigenerazione avviene DENTRO la build di Vercel, dallo schema che la
+diagnostica ha confermato essere già aggiornato nel repo.
+
+FILE DEL PACCHETTO
+------------------
+package.json — identico a quello del progetto, con la sola aggiunta di
+                "postinstall": "prisma generate" negli script.
+                (Se hai modifiche tue in package.json: aggiungi la riga
+                a mano invece di copiare il file.)
+
+Nessuna modifica a: schema del database, logica del sito, dipendenze,
+variabili d'ambiente. Il database NON va toccato: è già aggiornato (la
+diagnostica locale lo ha provato).
+
+TEST ESEGUITI SU QUESTA VERSIONE
+--------------------------------
+- "bun run postinstall" eseguito: genera il client in meno di mezzo
+  secondo e il client risultante contiene province/region/source
+  (verificato a macchina sul file generato);
+- la riga è compatibile con l'installazione locale su Windows (bun run
+  install / bun install eseguono il postinstall del progetto sempre);
+- nessun altro script toccato: dev, build, start, db:push ecc. restano
+  identici.
+
+SE DOPO LA MOSSA 2 DICESSE ANCORA VECCHIO
+-----------------------------------------
+Vorrebbe dire che la build di Vercel usa un comando o una cache
+particolare (per esempio un Build Command personalizzato che salta
+l'installazione). In quel caso:
+  1. apri su Vercel la deployment → "Building" / "Build Logs";
+  2. cerca la riga "Generated Prisma Client" (deve esserci, generata dal
+     postinstall; se manca, il postinstall non è partito);
+  3. mandami quelle prime 20-30 righe dei Build Logs insieme alla risposta
+     di /api/diagnostica: con quelle si vede al primo sguardo quale
+     comando Vercel sta davvero eseguendo.
+
+NOTA SULLA DIAGNOSTICA
+----------------------
+La pagina /api/diagnostica puoi lasciarla: è sola lettura, non espone
+nessun dato degli utenti né segreti, e ti tornerà utile ai prossimi
+aggiornamenti per verificare in un click che locale e pubblico siano
+allineati. Se preferisci toglierla, basta eliminare il file
+src/app/api/diagnostica/route.ts e rifare il deploy: nessun effetto.
