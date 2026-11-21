@@ -1,0 +1,167 @@
+ZoomZoom — Aggiornamento: mappa reale dell'intero territorio italiano
+=====================================================================
+
+Cosa fa questo aggiornamento
+----------------------------
+La mappa precedente NON era una carta geografica reale: era uno schema
+vettoriale fedele al prototipo PDF, con la città fittizia di Valserrana
+disegnata a mano (i "quartieri" erano poligoni SVG, non luoghi esistenti).
+
+Ora la mappa è REALE e copre tutto il territorio italiano:
+- cartografia OpenStreetMap (i tile pubblici usati da migliaia di siti e app),
+  caricata con Leaflet, la libreria open source più diffusa per mappe web;
+- la vista iniziale mostra l'Italia intera: penisola, Sicilia, Sardegna e
+  isole minori, dal Piemonte alla Calabria (bordo geografico vero);
+- 12 città reali distribuite su tutto il territorio — Nord-Ovest (Torino,
+  Milano, Genova), Nord-Est (Venezia, Bologna), Centro (Firenze, Roma),
+  Sud (Napoli, Bari, Reggio Calabria), Isole (Palermo, Cagliari) — con le
+  coordinate GPS reali (WGS84) dei centri storici;
+- i contenuti delle città restano dati dimostrativi inventati (marcati
+  isDemo, come prima): reali sono la cartografia e le posizioni.
+
+Funzioni nuove della mappa (pagina #/mappa e homepage):
+- pan (trascina), zoom (rotella, pulsanti in alto a destra), scala in km;
+- bottone "Vista Italia": riporta sempre all'insieme nazionale;
+- elenco "La tua città…" + GPS facoltativo: trova la città coperta più
+  vicina; le coordinate servono solo al momento e vengono SCARTATE,
+  mai salvate (privacy by design, come richiesto);
+- pin per città con media aggregata e numero di recensioni; a livello
+  nazionale le etichette si dispongono senza sovrapporsi (anti-collisione);
+- a zoom ravvicinato compaiono i punti immobile, cliccabili, con popup
+  (media, recensioni, link alla scheda);
+- cerchio tratteggiato = aggregati sospesi: troppo poche recensioni per
+  pubblicare la media senza rischiare di risalire alle persone.
+
+Privacy invariata (anzi: rafforzata): solo immobili come punti (il loro
+indirizzo è di per sé pubblico), aggregati di città con soglia minima e
+soppressione selettiva, persone fisiche MAI geolocalizzate; dalla mappa
+non si risale a chi ha scritto una recensione né a quando.
+
+File modificati
+---------------
+prisma/schema.prisma                    (Zone ed Entity: niente più poligoni
+                                         SVG; le zone sono città reali con
+                                         coordinate e raggio; Entity passa da
+                                         geoX/geoY a geoLat/geoLng — versione
+                                         PostgreSQL con url + directUrl,
+                                         identica alla tua)
+scripts/seed.ts                         (dati demo sulle 12 città reali:
+                                         coordinate vere, contenuti fittizi;
+                                         seed idempotente, ricrea SOLO i dati
+                                         demo e aggiorna demo-credentials.json)
+src/components/map.tsx                  (NUOVA mappa Leaflet/OpenStreetMap:
+                                         sostituisce integralmente il vecchio
+                                         componente SVG)
+src/app/globals.css                     (stili dei pin e dei popup Leaflet al
+                                         posto di quelli della mappa SVG)
+src/app/api/public/map/route.ts         (risponde con le città reali: lat/lng,
+                                         raggio, aggregati con soppressione)
+src/lib/server/public-data.ts           (tipo PublicEntity: geo {lat,lng})
+src/lib/server/categories.ts            (descrizione categoria "zona" estesa
+                                         alla copertura nazionale)
+src/app/api/admin/action/route.ts       (approvazione proposte: salva posizioni
+                                         reali geoLat/geoLng invece di x/y)
+src/lib/client/router.ts                (hash letto dopo l'idratazione: fix di
+                                         compatibilità col prerender)
+src/components/views/map-rankings-category.tsx  (testi pagina mappa: "città",
+                                         hint Vista Italia)
+src/components/views/home.tsx           (sottotitolo della sezione mappa in
+                                         homepage)
+src/components/views/search.tsx         (filtro di ricerca: "Città")
+src/components/views/entity-zone.tsx    (nota sulla posizione senza più
+                                         "città fittizia")
+
+Nuova dipendenza (l'unica)
+--------------------------
+leaflet 1.9.4 (runtime) + @types/leaflet 1.9.12 (solo sviluppo).
+Nessuna API key: i tile pubblici di OpenStreetMap non la richiedono.
+Nessuna nuova variabile d'ambiente.
+
+Installazione
+-------------
+1) Ferma il server di sviluppo (Ctrl+C).
+
+2) Copia i file di questo pacchetto dentro la cartella del progetto
+   (C:\Users\Carlo\sito\zoomzoom), mantenendo i percorsi. Da PowerShell,
+   dopo aver estratto lo zip in una cartella temporanea:
+
+       Copy-Item -Recurse -Force "C:\percorso\estratto\prisma" "C:\Users\Carlo\sito\zoomzoom\"
+       Copy-Item -Recurse -Force "C:\percorso\estratto\scripts" "C:\Users\Carlo\sito\zoomzoom\"
+       Copy-Item -Recurse -Force "C:\percorso\estratto\src" "C:\Users\Carlo\sito\zoomzoom\"
+
+   (Copy-Item sovrascrive i file esistenti con lo stesso nome.)
+
+3) Installa la nuova dipendenza (la mappa):
+
+       cd C:\Users\Carlo\sito\zoomzoom
+       bun add leaflet@1.9.4
+       bun add -d @types/leaflet@1.9.12
+
+4) Applica le modifiche al database:
+
+       bun run db:push
+
+   Cosa cambia: la tabella Zone perde le colonne del disegno (poly, labelX,
+   labelY) e guadagna radiusM; la tabella Entity sostituisce geoX/geoY con
+   geoLat/geoLng. Prisma segnala che le colonne eliminate comportano perdita
+   di dati: è previsto e va confermato (riguarda solo le posizioni finora
+   salvate, che il seed del punto 5 ricrea con quelle vere). Se avevi già
+   entità NON demo con posizione impostata, quella posizione va reinserita
+   dal back office (le altre loro informazioni restano al loro posto).
+
+5) Ricrea i dati demo sulle città reali:
+
+       bun scripts\seed.ts
+
+   Il seed è idempotente: cancella SOLO i dati marcati isDemo (le vecchie
+   zone fittizie di Valserrana comprese) e non tocca eventuali dati reali.
+   Password e segreti 2FA demo sono deterministici: restano gli stessi di
+   demo-credentials.json (utente@esempio.test / ZoomZoom-Demo-2026 e gli
+   account staff con 2FA). Su Vercel deve valere lo stesso APP_SECRET che
+   hai già configurato (vedi note del pacchetto fix-profilo), così i
+   segreti 2FA si decifrano correttamente.
+
+6) Riavvia e verifica in locale:
+
+       bun run dev
+
+   - #/mappa e homepage: la vista iniziale è tutta l'Italia, da Torino a
+     Palermo e Cagliari; trascina, zooma, usa "Vista Italia" per tornare;
+   - clicca una città (es. Milano): apre la scheda della città;
+   - ingrandisci su una città: compaiono i punti immobile cliccabili;
+   - #/ricerca: il filtro si chiama "Città" con le 12 città reali;
+   - una città con poche recensioni (es. Cagliari) appare tratteggiata:
+     aggregato sospeso, comportamento privacy corretto.
+
+7) Pubblica su Vercel:
+
+       git add prisma/schema.prisma scripts/seed.ts src
+       git commit -m "mappa reale: OpenStreetMap/Leaflet su tutto il territorio italiano"
+       git push
+
+   Nessuna variabile d'ambiente nuova: DATABASE_URL, DIRECT_URL e APP_SECRET
+   restano quelle già configurate.
+
+Verificato nel mirror
+---------------------
+- endpoint /api/public/map: 12 città con coordinate reali, aggregati e
+  soppressione sotto soglia (Cagliari: aggregato sospeso, cerchio
+  tratteggiato) — regole privacy applicate;
+- 6 punti immobile con coordinate reali nelle città giuste (Milano, Roma,
+  Torino, Napoli…), popup con media e link alla scheda;
+- database ricreato dal seed: 12 zone città + entità con posizioni reali;
+- nessun riferimento residuo ai vecchi campi (poly, labelX, labelY, geoX,
+  geoY) in tutto il codice;
+- flussi di login, 2FA con QR e pagina profilo: intatti.
+
+Note
+----
+- Tile OpenStreetMap: gratuiti per traffico leggero con attribuzione
+  (già presente nella legenda della mappa: la licenza ODbL la richiede,
+  non rimuoverla). Se il sito cresce, si può passare a un tile provider
+  commerciale o self-hosted cambiando solo la URL in src/components/map.tsx
+  (riga con L.tileLayer) e i crediti: tutto il resto non cambia.
+- Recensioni, schede, inviti, area personale e back office NON cambiano:
+  questo aggiornamento tocca solo mappa, zone/città e i testi collegati.
+- L'endpoint /api/public/map resta l'unica sorgente dei dati della mappa:
+  nessuna logica geografica nel front-end.

@@ -1,0 +1,426 @@
+// ZoomZoom — schema del database (Prisma + PostgreSQL/Supabase).
+// I valori enumerati sono validati a livello applicativo
+// (src/lib/server/validation.ts) e i JSON sono serializzati.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  emailVerified   Boolean   @default(false)
+  // scrypt: salt + hash, formato "scrypt$N$r$p$salt$hash" — MAI testo in chiaro
+  passwordHash    String?
+  nickname        String
+  // user | moderator | admin | superadmin (validazione applicativa)
+  role            String    @default("user")
+  subjectEntityId String?
+  totpSecretEnc   String? // cifrato AES-256-GCM con APP_SECRET
+  pendingTotpSecretEnc String? // 2FA in fase di attivazione (cifrato)
+  totpEnabled     Boolean   @default(false)
+  // primo accesso con 2FA riuscito: prima di questa data (e solo dopo la
+  // verifica della password) il login può mostrare una sola volta il QR
+  // di registrazione dell'app di autenticazione
+  firstTotpLoginAt DateTime?
+  disabled        Boolean   @default(false)
+  failedLogins    Int       @default(0)
+  lockedUntil     DateTime?
+  googleSub       String?   @unique // soggetto Google OAuth (se usato)
+  createdAt       DateTime  @default(now())
+  isDemo          Boolean   @default(false)
+
+  sessions          Session[]
+  backupCodes       BackupCode[]
+  emailVerifyTokens EmailVerifyToken[]
+  reviews           Review[]
+  experiences       Experience[]   @relation("claimedExperiences")
+  requestedExps     Experience[]   @relation("requestedExperiences")
+  reports           Report[]
+  reportDecisions   ReportDecision[]
+  disputeDecisions  DisputeDecision[]
+  proposals         EntityProposal[]
+  entityOwned       Entity[]       @relation("entityOwner")
+  verificationDocs  VerificationDoc[]
+  auditLogs         AuditLog[]     @relation("auditActor")
+  consents          Consent[]
+  privacyRequests   PrivacyRequest[]
+
+  @@index([role])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // public | admin — sessioni separate, TTL diversi
+  kind      String   @default("public")
+  // solo hash SHA-256 del token: il token in chiaro esiste solo nel cookie httpOnly
+  tokenHash String   @unique
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  lastSeenAt DateTime @default(now())
+
+  @@index([userId, kind])
+}
+
+model BackupCode {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash  String   @unique
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model EmailVerifyToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+model Category {
+  id         String  @id // slug: immobile, zona, proprietario…
+  name       String
+  shortName  String
+  description String
+  hexColor   String
+  icon       String
+  isPerson   Boolean @default(false)
+  isMapped   Boolean @default(false)
+  orderIndex Int     @default(0)
+  isActive   Boolean @default(true)
+  isDemo     Boolean @default(false)
+  criteria   Criterion[]
+  versions   CategoryVersion[]
+  entities   Entity[]
+  proposals  EntityProposal[]
+}
+
+model Criterion {
+  id         String  @id @default(cuid())
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  key        String  // chiave usata nel JSON dei punteggi
+  label      String
+  orderIndex Int     @default(0)
+  active     Boolean @default(true)
+
+  @@unique([categoryId, key])
+}
+
+// Snapshot dei criteri: le recensioni conservano la versione usata al momento
+// della pubblicazione, così modifiche amministrative non alterano i punteggi storici.
+model CategoryVersion {
+  id               String   @id @default(cuid())
+  categoryId       String
+  category         Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  version          Int
+  criteriaSnapshot String   // JSON [{key,label}]
+  priceUnitsJson   String?  // JSON [unità ammesse]
+  createdAt        DateTime @default(now())
+  reviews          Review[]
+}
+
+model Zone {
+  id      String  @id // slug città (es. "milano")
+  name    String
+  gpsLat  Float   // centro città reale, WGS84
+  gpsLng  Float
+  radiusM Int     @default(3000) // raggio indicativo dell'area urbana, in metri
+  isDemo  Boolean @default(false)
+  entities Entity[]
+}
+
+model Entity {
+  id              String   @id @default(cuid())
+  categoryId      String
+  category        Category @relation(fields: [categoryId], references: [id])
+  name            String
+  subtitle        String?
+  address         String?
+  zoneId          String?
+  zone            Zone?    @relation(fields: [zoneId], references: [id])
+  // posizione reale WGS84 (solo categorie mappabili: immobili)
+  geoLat          Float?
+  geoLng          Float?
+  initialsOnly    Boolean  @default(false)
+  verifiedBusiness Boolean @default(false)
+  ownerUserId     String?  @unique
+  owner           User?    @relation("entityOwner", fields: [ownerUserId], references: [id])
+  // published | hidden | rejected (validazione applicativa)
+  status          String   @default("published")
+  proposedBy      String   @default("seed")
+  createdAt       DateTime @default(now())
+  isDemo          Boolean  @default(false)
+
+  reviews     Review[]
+  experiences Experience[]
+  disputes    Dispute[]
+
+  @@index([categoryId, status])
+  @@index([zoneId])
+}
+
+model EntityProposal {
+  id            String   @id @default(cuid())
+  categoryId    String
+  category      Category @relation(fields: [categoryId], references: [id])
+  name          String
+  subtitle      String?
+  address       String?
+  zoneId        String?
+  proposedById  String?
+  proposer      User?    @relation(fields: [proposedById], references: [id])
+  contactEmail  String?
+  justification String
+  // received | approved | rejected (validazione applicativa)
+  status        String   @default("received")
+  decisionReason String?
+  decidedById   String?
+  decidedAt     DateTime?
+  createdAt     DateTime @default(now())
+  isDemo        Boolean  @default(false)
+}
+
+model Experience {
+  id          String   @id @default(cuid())
+  entityId    String
+  entity      Entity   @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  kind        String
+  period      String?
+  // business | verification-request | seed
+  origin      String
+  clientEmail String
+  userId      String?  // utente che ha reclamato l'esperienza
+  user        User?    @relation("claimedExperiences", fields: [userId], references: [id])
+  // pending | active | rejected
+  status      String   @default("pending")
+  requestedById String?
+  requester   User?    @relation("requestedExperiences", fields: [requestedById], references: [id])
+  note        String?
+  claimedAt   DateTime?
+  createdAt   DateTime @default(now())
+  isDemo      Boolean  @default(false)
+
+  review  Review?
+  invites Invite[]
+  docs    VerificationDoc[]
+
+  @@index([entityId, status])
+  @@index([userId])
+}
+
+model Invite {
+  id            String   @id @default(cuid())
+  experienceId  String
+  experience    Experience @relation(fields: [experienceId], references: [id], onDelete: Cascade)
+  email         String
+  // SHA-256 del token: il token in chiaro NON viene mai conservato
+  tokenHash     String   @unique
+  quotaOwner    String   // entityId del soggetto che invia (per i limiti)
+  expiresAt     DateTime
+  usedAt        DateTime?
+  revoked       Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  isDemo        Boolean  @default(false)
+
+  @@index([quotaOwner, createdAt])
+}
+
+model VerificationDoc {
+  id           String   @id @default(cuid())
+  experienceId String
+  experience   Experience @relation(fields: [experienceId], references: [id], onDelete: Cascade)
+  storedName   String   // nome interno, area privata non pubblica
+  originalName String
+  mimeType     String
+  sizeBytes    Int
+  sha256       String
+  uploadedById String?
+  uploader     User?    @relation(fields: [uploadedById], references: [id])
+  deletedAt    DateTime? // retention: cancellazione dopo la decisione
+  createdAt    DateTime @default(now())
+}
+
+model Review {
+  id                 String   @id @default(cuid())
+  experienceId       String   @unique
+  experience         Experience @relation(fields: [experienceId], references: [id], onDelete: Cascade)
+  entityId           String
+  entity             Entity   @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  userId             String
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  score              Float
+  criteriaJson       String   // JSON {key: voto}
+  criteriaVersionId  String?
+  criteriaVersion    CategoryVersion? @relation(fields: [criteriaVersionId], references: [id])
+  prosJson           String   // JSON [stringhe]
+  consJson           String
+  priceAmount        Float?
+  priceUnit          String?
+  // richiesto | proposto | concluso (validazione applicativa)
+  priceKind          String?
+  text               String
+  // published | hidden
+  status             String   @default("published")
+  hiddenReason       String?
+  verified           Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime?
+  updateReason       String?
+  isDemo             Boolean  @default(false)
+
+  reports Report[]
+
+  @@index([entityId, status])
+  @@index([userId])
+}
+
+model Report {
+  id            String   @id @default(cuid())
+  // review (unico target nella v1)
+  targetType    String   @default("review")
+  targetId      String
+  review        Review?  @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  reporterUserId String
+  reporter      User     @relation(fields: [reporterUserId], references: [id], onDelete: Cascade)
+  reason        String
+  details       String
+  // received | reviewing | decided | appeal | closed
+  status        String   @default("received")
+  appealBy      String?  // author | reporter
+  appealReason  String?
+  appealAt      DateTime?
+  decision      String?  // keep | hide | restore
+  createdAt     DateTime @default(now())
+  isDemo        Boolean  @default(false)
+
+  decisions ReportDecision[]
+
+  @@index([status])
+}
+
+model ReportDecision {
+  id       String   @id @default(cuid())
+  reportId String
+  report   Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  byId     String
+  by       User     @relation(fields: [byId], references: [id])
+  action   String
+  reason   String
+  at       DateTime @default(now())
+}
+
+model Dispute {
+  id            String   @id @default(cuid())
+  entityId      String
+  entity        Entity   @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  claimantEmail String
+  claim         String
+  // received | reviewing | closed
+  status        String   @default("received")
+  decision      String?  // keep | hide
+  createdAt     DateTime @default(now())
+  isDemo        Boolean  @default(false)
+
+  decisions DisputeDecision[]
+}
+
+model DisputeDecision {
+  id        String   @id @default(cuid())
+  disputeId String
+  dispute   Dispute @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  byId      String
+  by        User     @relation(fields: [byId], references: [id])
+  action    String
+  reason    String
+  at        DateTime @default(now())
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  at         DateTime @default(now())
+  actorId    String?
+  actor      User?    @relation("auditActor", fields: [actorId], references: [id])
+  actorRole  String?
+  action     String
+  targetType String
+  targetId   String?
+  reason     String?
+  isDemo     Boolean  @default(false)
+
+  @@index([at])
+}
+
+model SecurityLog {
+  id       String   @id @default(cuid())
+  at       DateTime @default(now())
+  type     String
+  severity String   @default("info")
+  details  String
+  isDemo   Boolean  @default(false)
+
+  @@index([at])
+}
+
+model Setting {
+  key   String @id
+  value String // JSON
+}
+
+model Consent {
+  id         String   @id @default(cuid())
+  visitorId  String   // cookie tecnico identificativo del browser
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+  technical  Boolean  @default(true)
+  statistics Boolean  @default(false)
+  marketing  Boolean  @default(false)
+  decidedAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model EmailLog {
+  id      String   @id @default(cuid())
+  to      String
+  subject String
+  body    String
+  linksJson String  @default("[]") // JSON [{label,href}]
+  status  String   @default("queued") // sent | queued | failed
+  error   String?
+  at      DateTime @default(now())
+  isDemo  Boolean  @default(false)
+}
+
+model PrivacyRequest {
+  id        String   @id @default(cuid())
+  email     String
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  kind      String   // account-deletion | data-access | …
+  message   String
+  status    String   @default("received")
+  createdAt DateTime @default(now())
+}
+
+model ContactRequest {
+  id        String   @id @default(cuid())
+  email     String
+  kind      String
+  message   String
+  status    String   @default("received")
+  createdAt DateTime @default(now())
+}
