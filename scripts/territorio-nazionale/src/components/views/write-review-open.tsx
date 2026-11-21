@@ -18,6 +18,7 @@ import { ReviewFields, type ReviewFormCore } from "../review-fields";
 import { PhotoInput } from "../photo-input";
 import { LocationPicker, type LatLng } from "../location-picker";
 import { PlaceSearch } from "../place-search";
+import { AddressSearch, type AddressPlace } from "../address-search";
 
 type SelEntity = { id: string; name: string; categoryId: string };
 
@@ -254,15 +255,55 @@ function FindStep({ target, onSelected, onBack }: {
     );
   };
 
+  // conferma di un INDIRIZZO dai suggerimenti del campo indirizzo: riempie
+  // via/civico, città e pin in un colpo solo — l'utente vede esattamente
+  // cosa sta per salvare e lo conferma scegliendo il suggerimento
+  const pickAddress = (p: AddressPlace) => {
+    setGeo({ lat: p.lat, lng: p.lng });
+    if (p.zoneName) {
+      setZone({ name: p.zoneName, province: p.province, region: p.region, lat: p.lat, lng: p.lng });
+    }
+  };
+
+  // conferma di un risultato della ricerca sulla mappa: piazza il pin e
+  // ricava la città. Se il risultato non porta il comune (es. una via di
+  // campagna mappata senza riferimento), lo chiede al reverse geocoder sul
+  // punto scelto: un'azione esplicita dell'utente, come il GPS. Prima di
+  // questa correzione il pin veniva piazzato ma la città restava vuota,
+  // senza spiegazioni: la località trovata non era confermabile.
+  const pickGeoResult = async (g: NonNullable<typeof geoRes>[number]) => {
+    setGeo({ lat: g.lat, lng: g.lng });
+    setGeoRes(null);
+    const street = [g.road, g.houseNumber].filter(Boolean).join(" ");
+    if (street && !address.trim()) setAddress(street);
+    if (zone) return; // città già scelta: il risultato serve solo per il pin
+    if (g.zoneName) {
+      setZone({ name: g.zoneName, province: g.province, region: g.region, lat: g.lat, lng: g.lng });
+      return;
+    }
+    const res = await api<{ found: boolean; address: { zoneName: string | null; province: string | null; region: string | null } | null }>(`/api/public/geocode/reverse?lat=${g.lat}&lng=${g.lng}`);
+    if (res.ok && res.found && res.address?.zoneName) {
+      setZone({ name: res.address.zoneName, province: res.address.province, region: res.address.region, lat: g.lat, lng: g.lng });
+    } else {
+      toast("Posizione segnata sulla mappa: scegli anche la città nel campo “Città, comune o paese”.", "err");
+    }
+  };
+
   const addEntity = async () => {
     setAddErr(null);
     const res = await api<{ entity: { id: string; name: string } }>("/api/entities", {
       body: {
         address: address.trim(),
-        // città già presente → id diretto; nuova località → nome+coordinate
+        // città già presente → id diretto; nuova località → nome+coordinate.
+        // Le coordinate vanno solo se davvero valide (numeri finiti): il
+        // server ha comunque i fallback (zona nota col nome, pin sulla mappa)
         zoneId: zone?.localId,
         zone: zone && !zone.localId
-          ? { name: zone.name, province: zone.province, region: zone.region, lat: zone.lat, lng: zone.lng }
+          ? {
+            name: zone.name, province: zone.province, region: zone.region,
+            lat: Number.isFinite(zone.lat) ? zone.lat : undefined,
+            lng: Number.isFinite(zone.lng) ? zone.lng : undefined,
+          }
           : undefined,
         geo,
       },
@@ -365,7 +406,7 @@ function FindStep({ target, onSelected, onBack }: {
             ) : (
               <form onSubmit={async e => {
                 e.preventDefault();
-                if (address.trim().length < 5 || !zone) { setAddErr("Indica l'indirizzo (almeno 5 caratteri) e la città: qualsiasi comune o paese d'Italia va bene."); return; }
+                if (address.trim().length < 5 || !zone) { setAddErr("Indica l'indirizzo (almeno 5 caratteri) e scegli la città dai suggerimenti del campo “Città, comune o paese”."); return; }
                 await addEntity();
               }}>
                 <div className="field">
@@ -375,11 +416,11 @@ function FindStep({ target, onSelected, onBack }: {
                   </button>
                   <span className="hint">Con il tuo consenso uso il GPS e ricavo <b>via e civico reali</b> dalla cartografia OpenStreetMap (reverse geocoding). Le coordinate vanno al geocoder solo ora, su tua richiesta: poi restano solo nel modulo.</span>
                 </div>
-                <div className="field">
-                  <label htmlFor="ne-address">Indirizzo dell&apos;immobile</label>
-                  <input id="ne-address" required placeholder="Es. Via dei Mille 15" value={address} onChange={e => setAddress(e.target.value)} />
-                  <span className="hint">Come appare su una buca delle lettere: via, numero, eventualmente scala o interno. È un dato pubblico per natura.</span>
-                </div>
+                <AddressSearch id="ne-address" label="Indirizzo dell&apos;immobile"
+                  placeholder="Es. Via dei Mille 15"
+                  hint="Come appare su una buca delle lettere: via, numero, eventualmente scala o interno. È un dato pubblico per natura. Digita la via: tra i suggerimenti trovi gli indirizzi reali della cartografia OpenStreetMap, e scegliendone uno si compilano anche città e pin."
+                  value={address} onChange={setAddress}
+                  onPick={p => void pickAddress(p)} />
                 <PlaceSearch id="ne-city" localZones={boot?.zones}
                   label="Città, comune o paese"
                   placeholder="Es. Milano, Corte de' Frati, Marciaga…"
@@ -409,17 +450,7 @@ function FindStep({ target, onSelected, onBack }: {
                       <ul className="geo-results">
                         {geoRes.map((g, i) => (
                           <li key={i}>
-                            <button type="button" onClick={() => {
-                              setGeo({ lat: g.lat, lng: g.lng });
-                              setGeoRes(null);
-                              // il risultato porta con sé anche la città e via/civico:
-                              // se i campi sono ancora vuoti, li riempio qui
-                              if (g.zoneName && !zone) {
-                                setZone({ name: g.zoneName, province: g.province, region: g.region, lat: g.lat, lng: g.lng });
-                              }
-                              const street = [g.road, g.houseNumber].filter(Boolean).join(" ");
-                              if (street && !address.trim()) setAddress(street);
-                            }}>{g.label}</button>
+                            <button type="button" onClick={() => { void pickGeoResult(g); }}>{g.label}</button>
                           </li>
                         ))}
                       </ul>

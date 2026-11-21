@@ -52,6 +52,20 @@ export function zoneNameOfAddress(a: NonNullable<NominatimRow["address"]>): stri
   return a.city || a.town || a.village || a.municipality || a.hamlet || null;
 }
 
+// tipi Nominatim che indicano un LUOGO (non una via né un edificio): per
+// questi, se l'indirizzo non porta il comune, il nome del risultato è
+// comunque una località confermabile — es. il risultato "provincia di
+// Milano" ("Milano, Lombardia, Italia") prima lasciava il campo città
+// vuoto senza spiegazioni: era impossibile confermare la località.
+const PLACE_TYPES = new Set([
+  "administrative", "city", "town", "village", "hamlet", "municipality",
+  "county", "island", "suburb", "borough", "quarter",
+]);
+function placeNameFallback(r: NominatimRow): string | null {
+  const t = r.addresstype || r.type || "";
+  return PLACE_TYPES.has(t) && r.name && r.name.trim().length >= 2 ? r.name.trim() : null;
+}
+
 // cache condivisa nel processo: query normalizzata → risultati + timestamp
 const searchCache = new Map<string, { at: number; results: GeocodePlace[] }>();
 const CACHE_TTL_MS = 15 * 60 * 1000;
@@ -77,6 +91,7 @@ function cacheSet(key: string, results: GeocodePlace[]) {
 const KIND_IT: Record<string, string> = {
   administrative: "località", city: "città", town: "città", village: "paese",
   hamlet: "frazione", municipality: "comune", suburb: "quartiere",
+  county: "provincia", region: "regione", state: "regione", island: "isola",
   road: "via", pedestrian: "via", house: "indirizzo", building: "edificio",
   postcode: "cap",
 };
@@ -119,7 +134,9 @@ export async function GET(req: NextRequest) {
           lat: Number(r.lat),
           lng: Number(r.lon),
           kind: KIND_IT[r.addresstype || r.type || ""] || r.addresstype || r.type || "luogo",
-          zoneName: zoneNameOfAddress(a),
+          // comune di riferimento; per i risultati “luogo” senza comune
+          // nell'indirizzo (province, isole…) vale il nome del risultato
+          zoneName: zoneNameOfAddress(a) || placeNameFallback(r),
           province: a.county || null,
           region: a.state || a.region || null,
           road: a.road || null,

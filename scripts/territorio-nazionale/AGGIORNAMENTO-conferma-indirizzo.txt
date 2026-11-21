@@ -1,0 +1,157 @@
+ZoomZoom — Correzione: conferma dell'indirizzo e della località sempre possibile
+================================================================================
+
+Cosa risolve questo aggiornamento
+---------------------------------
+Nel modulo "Aggiungi un immobile da recensire", dopo aver TROVATO la
+località, il tasto "Aggiungi e scrivi la recensione" poteva rispondere
+"La località indicata non risulta in Italia: cerca la città sulla mappa o
+digitane il nome" senza alcun modo di confermare la località scelta.
+Tre difetti concorrevano, tutti corretti qui senza stravolgere nulla:
+
+  1. LA CITTÀ RESTAVA VUOTA, IN SILENZIO. Cercando un posto sulla mappa,
+     alcuni risultati della cartografia ( province, regioni, isole: es.
+     "Milano, Lombardia, Italia") non portano il comune nel loro
+     indirizzo: il pin veniva piazzato ma il campo Città restava vuoto,
+     senza alcun avviso. La località era "trovata" ma non confermabile.
+     → ORA: quei risultati usano il nome del luogo come località
+     ("Milano") e il chip della città compare; se un risultato non porta
+     proprio nessun comune (es. una via di campagna), un reverse geocoding
+     sul punto scelto lo recupera; in ultima istanza un avviso chiaro
+     invita a scegliere la città nel campo apposito.
+
+  2. L'ERRORE NASCONDEVA IL PROBLEMA VERO. La creazione della scheda
+     ("POST /api/entities") fondeva in un unico messaggio "non risulta in
+     Italia" TUTTI gli inciampi possibili: coordinate perse lungo la
+     strada (client vecchi, cache, GPS debole), nome troppo corto e persino
+     errori interni del database (che non c'entrano l'Italia).
+     → ORA: la località viene risolta a gradini — coordinate valide, se
+     mancano si cerca la zona già nota per nome, altrimenti si usano le
+     coordinate del PIN sulla mappa — e solo se proprio non c'è niente da
+     fare arriva un messaggio onesto e utile. Gli errori interni vengono
+     registrati nel log del server (con il motivo vero) e comunicati per
+     ciò che sono, non spacciati per "fuori Italia".
+
+  3. L'INDIRIZZO NON AVEVA SUGGERIMENTI. Come richiesto: il campo
+     "Indirizzo dell'immobile" ora è una casella con AUTO-SUGGERIMENTI:
+     digiti "Via dei Mille 15" e ti propone gli indirizzi reali della
+     cartografia OpenStreetMap (via, civico, comune). Sceglierne uno
+     conferma in un colpo solo INDIRIZZO, CITTÀ e PIN sulla mappa: vedi
+     esattamente cosa stai per salvare.
+
+Nessuna modifica a database, dipendenze o variabili d'ambiente: sono solo
+file da copiare sopra a quelli esistenti (elenco sotto). La struttura del
+modulo, i flussi GPS e la copertura nazionale restano quelli che già
+conosci e che funzionavano.
+
+Come funziona ora, in dettaglio
+--------------------------------
+- AUTO-SUGGERIMENTI INDIRIZZO (NUOVO, src/components/address-search.tsx):
+  debounced 450 ms, minimo 4 caratteri, cache per query: rispetta la
+  policy del geocoder pubblico (Nominatim) come il campo città. Conferma
+  con un clic (o Invio sul primo risultato). La stringa va al geocoder
+  SOLO tramite il proxy del server, come prima.
+- RICERCA SULLA MAPPTA CHE CONFERMA LA CITTÀ (write-review-open.tsx):
+  qualunque risultato si scelga, la città arriva — dal risultato, dal
+  reverse geocoding del punto, o da un avviso esplicito che dice cosa
+  manca. Il pin e l'indirizzo (via/civico, se il risultato li porta) si
+  compilano come prima.
+- RISOLUZIONE ROBUSTA DELLA LOCALITÀ (src/app/api/entities/route.ts):
+     a. zoneId → zona già sul catalogo (se non risolve, si riprova col nome);
+     b. nome + coordinate valide → creazione/dedup come prima;
+     c. coordinate perse → zona già nota per nome (normalizzato, con
+        provincia se arriva);
+     d. altrimenti → coordinate del PIN sulla mappa, se presente e in Italia;
+     e. niente di tutto questo → messaggio chiaro su cosa scegliere, e
+        log lato server del perché (niente più "non risulta in Italia"
+        usato come copri-tutto).
+- GEOCODER PIÙ COERENTE (src/app/api/public/geocode/route.ts): i risultati
+  "luogo" senza comune nell'indirizzo (province, isole, quartieri) portano
+  ora come località il loro nome; le etichette li dichiarano per ciò che
+  sono ("provincia", "regione", "isola"). Il reverse geocoding (GPS) non
+  cambia: continua a dare il COMUNE reale del punto.
+- ERRORI TIPIZZATI (src/lib/server/zones.ts): la creazione zona distingue
+  "nome/coordinate non validi" (input) da "errore interno" (database):
+  il primo si recupera con i fallback, il secondo finisce nel log con il
+  motivo vero e un messaggio onesto all'utente.
+
+Verifica rapida (2 minuti)
+--------------------------
+1) #/recensione → "Un immobile" → "+ Aggiungi un immobile da recensire";
+2) nel campo INDIRIZZO digita una via vera, es. "Via dei Mille 15":
+   tra i suggerimenti scegli quello giusto → indirizzo, città e pin si
+   compilano insieme, il chip verde "Città" appare sotto il campo città;
+3) (come prima) "Usa la mia posizione e trova l'indirizzo" con il consenso
+   del browser compila via, civico e città da solo;
+4) cerca sulla mappa il NOME di una provincia (es. "Milano") e scegli il
+   risultato senza comune ("Milano, Lombardia, Italia"): ORA la città si
+   compila lo stesso — prima restava vuota senza spiegazioni;
+5) "Aggiungi e scrivi la recensione" → passa alla recensione. L'errore
+   "non risulta in Italia" non compare più nemmeno se qualche client
+   perde le coordinate per strada (il server recupera col nome o col pin).
+
+File del pacchetto (tutti da sovrascrivere, più uno nuovo)
+----------------------------------------------------------
+src/components/address-search.tsx         NUOVO — casella indirizzo con
+                                          auto-suggerimenti (via, civico,
+                                          comune dalla cartografia OSM)
+src/components/views/write-review-open.tsx  ricerca mappa che conferma la
+                                          città (anche via reverse geocoding),
+                                          indirizzo con suggerimenti, invio
+                                          robusto delle coordinate
+src/app/api/entities/route.ts             risoluzione località a gradini +
+                                          errori onesti e loggati
+src/app/api/public/geocode/route.ts       risultati "luogo" senza comune:
+                                          il nome del luogo diventa la
+                                          località confermabile
+src/lib/server/zones.ts                   errori tipizzati + ricerca zona
+                                          per nome (fallback)
+
+Invariati rispetto al pacchetto "territorio nazionale" (già copiati in
+precedenza, qui non servono): prisma/schema.prisma (nessuna modifica al
+database), bootstrap, reverse geocoding, place-search, store, globals.css.
+Se preferisci copiare l'intero pacchetto, i file sono comunque inclusi
+nello zip: Copy-Item -Recurse -Force come al solito.
+
+Installazione
+-------------
+1) Ferma il server di sviluppo (Ctrl+C).
+2) Estrai lo zip e copia le cartelle "src" dentro il progetto
+   (C:\Users\Carlo\sito\zoomzoom), mantenendo i percorsi:
+       Copy-Item -Recurse -Force "C:\percorso\estratto\src" "C:\Users\Carlo\sito\zoomzoom\"
+3) Nessun db:push necessario (lo schema non cambia), nessuna variabile
+   d'ambiente nuova, nessuna dipendenza nuova.
+4) Riavvia: bun run dev — e prova la verifica rapida qui sopra.
+5) Deploy Vercel: commit + push dei soli file elencati.
+
+Test automatici (tutti verdi su questa versione)
+------------------------------------------------
+- Suite "territorio nazionale" completa: 19/19 (ricerca geocodificata,
+  reverse geocoding con rifiuto fuori Italia, immobile in località nuova,
+  dedup, attivazione zona + idempotenza, riuso zona nota, recensione su
+  paese nuovo, bootstrap/mappa, rifiuti vari);
+- Nuovi casi dedicati alla correzione: coordinate 0/0 → recupero col nome
+  o col pin; coordinate mancanti su zona nota → risolta per nome;
+  coordinate mancanti su zona NUOVA + pin valido → zona creata col pin;
+  località sconosciuta senza coordinate né pin → messaggio utile (non
+  più "non risulta in Italia"); zona con id inesistente → messaggio utile;
+- Prova end-to-end nel browser: indirizzo con auto-suggerimenti → conferma
+  indirizzo+città+pin in un colpo → pubblicazione scheda OK; ricerca mappa
+  su risultato di provincia → città compilata; GPS → via, civico e città.
+
+Note e limiti onesti
+--------------------
+- Gli auto-suggerimenti dell'indirizzo coprono ciò che la cartografia
+  OpenStreetMap conosce: nelle grandi città quasi tutti i civici, nei
+  paesi piccoli spesso la sola via. Il campo resta sempre modificabile a
+  mano: il suggerimento è una scorciatoia, non un obbligo.
+- Il geocoder pubblico Nominatim resta gratuito con il limite di 1
+  richiesta/secondo: il proxy del server lo rispetta (20 ricerche/minuto
+  per IP, condivise tra ricerca città, indirizzo e reverse; debounce
+  450 ms e cache lato client). Il campo indirizzo entra nello stesso
+  budget: digitando normalmente non si nota; scrivendo 10 query di fila
+  compaiono l'avviso di attesa e i suggerimenti locali.
+- Se in futuro vuoi distinguere "provincia" da "comune" come schede
+  separate (oggi il risultato di provincia punta alla località omonima,
+  es. Milano), la mappa dei tipi è in un unico punto del geocoder
+  (placeNameFallback): si cambia lì.

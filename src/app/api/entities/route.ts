@@ -20,7 +20,7 @@ import { publicEntity } from "@/lib/server/public-data";
 import { auditLog } from "@/lib/server/audit";
 import { guard, readJson, handleError, fail } from "@/lib/server/http";
 import { rateLimit } from "@/lib/server/rate-limit";
-import { ensureZone, ensureZoneEntity, inItalyBounds } from "@/lib/server/zones";
+import { ensureZone, ensureZoneEntity, findZoneByName, inItalyBounds, ZoneNameError, ZonePositionError } from "@/lib/server/zones";
 
 // normalizza un indirizzo per il confronto: maiuscole, accenti e punteggiatura
 // non devono creare schede duplicate dello stesso luogo
@@ -51,36 +51,91 @@ export async function POST(req: Request) {
     const address = String(p.address || "").trim().replace(/\s+/g, " ").slice(0, 160);
     if (address.length < 5) return fail("Indica l'indirizzo dell'immobile (almeno 5 caratteri).");
 
-    // città: zona esistente (zoneId, retrocompatibile) OPPURE qualsiasi
-    // località italiana da ricerca geocodificata o GPS (nome + coordinate)
+    // città: zona esistente (zoneId) OPPURE qualsiasi località italiana da
+    // ricerca geocodificata o GPS (nome + coordinate). La risoluzione è a
+    // gradini, così una località trovata resta confermabile anche se le
+    // coordinate si perdono per strada (client vecchi, cache, GPS debole):
+    //  1. zoneId → zona già sul catalogo (se non risolve, prova col nome);
+    //  2. nome + coordinate valide → ensureZone (crea al volo se manca);
+    //  3. nome + coordinate assenti/non valide → zona già nota col nome,
+    //     altrimenti coordinate del PIN (geo), se presente e in Italia;
+    //  4. niente di tutto questo → messaggio onesto, con log del perché.
     let zone: Awaited<ReturnType<typeof db.zone.findUnique>> | null = null;
     let zoneEntityCreated = false;
+    let zoneCreated = false;
+    const zoneName = p.zone ? String(p.zone.name || "").trim().replace(/\s+/g, " ").slice(0, 80) : "";
     if (p.zoneId) {
       zone = await db.zone.findUnique({ where: { id: String(p.zoneId) } });
-    } else if (p.zone && String(p.zone.name || "").trim().length >= 2) {
-      try {
-        const r = await ensureZone({
-          name: String(p.zone.name),
-          province: p.zone.province || null,
-          region: p.zone.region || null,
-          lat: Number(p.zone.lat),
-          lng: Number(p.zone.lng),
-        }, "user");
-        zone = r.zone;
-        if (r.created) {
-          await auditLog({
-            actorId: user.id, actorRole: user.role,
-            action: "Nuova zona creata dal contributo (copertura nazionale)",
-            targetType: "zone", targetId: zone.id,
-            reason: `${zone.name}${zone.province ? ` (${zone.province})` : ""} — primo immobile: ${address}`,
-            isDemo: user.isDemo,
-          });
+    }
+    if (!zone && zoneName.length >= 2) {
+      const zlat = Number(p.zone?.lat), zlng = Number(p.zone?.lng);
+      const zoneCoordsOk = Number.isFinite(zlat) && Number.isFinite(zlng) && inItalyBounds(zlat, zlng);
+      // coordinate valide → ensureZone (dedup per nome+provincia+distanza)
+      if (zoneCoordsOk) {
+        try {
+          const r = await ensureZone({
+            name: zoneName,
+            province: p.zone!.province || null,
+            region: p.zone!.region || null,
+            lat: zlat,
+            lng: zlng,
+          }, "user");
+          zone = r.zone;
+          zoneCreated = r.created;
+        } catch (e) {
+          if (e instanceof ZoneNameError || e instanceof ZonePositionError) {
+            // input irrecuperabile per la geolocalizzazione: si può ancora
+            // recuperare col nome (punto 3, qui sotto)
+            console.warn("[entities] zona non geolocalizzabile:", e.message, JSON.stringify({ name: zoneName, lat: p.zone?.lat, lng: p.zone?.lng }));
+          } else {
+            // errore interno (database e simili): non mascherarlo da "fuori
+            // Italia" — log dettagliato lato server + messaggio onesto
+            console.error("[entities] errore interno in ensureZone:", e);
+            return fail("Errore interno nel salvataggio della località: riprova tra poco.", 500);
+          }
         }
-      } catch {
-        return fail("La località indicata non risulta in Italia: cerca la città sulla mappa o digitane il nome.");
+      }
+      // coordinate perse/non valide (o scartate): zona già nota col nome,
+      // altrimenti coordinate del pin sulla mappa
+      if (!zone) {
+        const known = await findZoneByName(zoneName, p.zone!.province || null);
+        if (known) {
+          zone = known;
+        } else if (p.geo && Number.isFinite(Number(p.geo.lat)) && Number.isFinite(Number(p.geo.lng))
+          && inItalyBounds(Number(p.geo.lat), Number(p.geo.lng))) {
+          try {
+            const r = await ensureZone({
+              name: zoneName,
+              province: p.zone!.province || null,
+              region: p.zone!.region || null,
+              lat: Number(p.geo.lat),
+              lng: Number(p.geo.lng),
+            }, "user");
+            zone = r.zone;
+            zoneCreated = r.created;
+          } catch (e) {
+            if (e instanceof ZoneNameError || e instanceof ZonePositionError) {
+              console.warn("[entities] zona non geolocalizzabile nemmeno col pin:", e.message, JSON.stringify({ name: zoneName, geo: p.geo }));
+            } else {
+              console.error("[entities] errore interno in ensureZone (da pin):", e);
+              return fail("Errore interno nel salvataggio della località: riprova tra poco.", 500);
+            }
+          }
+        }
+      }
+      if (zone && zoneCreated) {
+        await auditLog({
+          actorId: user.id, actorRole: user.role,
+          action: "Nuova zona creata dal contributo (copertura nazionale)",
+          targetType: "zone", targetId: zone.id,
+          reason: `${zone.name}${zone.province ? ` (${zone.province})` : ""} — primo immobile: ${address}`,
+          isDemo: user.isDemo,
+        });
       }
     }
-    if (!zone) return fail("Seleziona la città in cui si trova l'immobile (qualsiasi comune o paese d'Italia).");
+    if (!zone) {
+      return fail("Seleziona la città in cui si trova l'immobile (qualsiasi comune o paese d'Italia): digitane il nome e scegli un suggerimento, oppure usa la mappa.");
+    }
 
     // ogni zona del catalogo ha la sua scheda recensibile: nasce insieme alla
     // zona (o al primo immobile che la menziona), così il link #/zona/… non

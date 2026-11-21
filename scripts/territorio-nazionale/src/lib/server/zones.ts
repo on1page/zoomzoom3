@@ -9,6 +9,12 @@
 import { db } from "@/lib/db";
 import type { Entity, Zone } from "@prisma/client";
 
+// errori tipizzati di ensureZone: la route li distingue dagli errori
+// interni (DB e simili) per restituire messaggi onesti invece di un generico
+// "non risulta in Italia" che nasconde il vero problema
+export class ZoneNameError extends Error {}
+export class ZonePositionError extends Error {}
+
 // normalizza un toponimo: maiuscole, accenti e punteggiatura non devono
 // creare zone duplicate ("Corte de' Frati" ≡ "corte de frati")
 export function normPlace(s: string): string {
@@ -47,6 +53,28 @@ export type ZoneSpec = {
 export type EnsureZoneResult = { zone: Zone; created: boolean };
 
 /**
+ * Cerca una zona già nota dal solo NOME (fallback quando le coordinate non
+ * sono arrivate o non sono valide: il nome normalizzato + l'eventuale
+ * provincia bastano per riconoscere un posto già sul catalogo). Ritorna
+ * null se non c'è nessuna corrispondenza.
+ */
+export async function findZoneByName(name: string, province?: string | null): Promise<Zone | null> {
+  const norm = normPlace(String(name || ""));
+  if (!norm) return null;
+  const all = await db.zone.findMany();
+  const sameName = all.filter(z => normPlace(z.name) === norm);
+  if (!sameName.length) return null;
+  const provNorm = province ? normPlace(province) : null;
+  if (provNorm) {
+    const byProv = sameName.find(z => z.province && normPlace(z.province) === provNorm);
+    if (byProv) return byProv;
+  }
+  // un solo omonimo: è lui; più omonimi senza provincia: ambiguo, meglio
+  // lasciar decidere a ensureZone con coordinate valide
+  return sameName.length === 1 ? sameName[0] : null;
+}
+
+/**
  * Restituisce la zona corrispondente al posto indicato, creandola se non
  * esiste. Regole di riconoscimento (in ordine):
  *  1. stesso nome normalizzato E distanza ≤ 30 km → stessa zona (il centro
@@ -57,9 +85,9 @@ export type EnsureZoneResult = { zone: Zone; created: boolean };
  */
 export async function ensureZone(spec: ZoneSpec, source = "user"): Promise<EnsureZoneResult> {
   const name = String(spec.name || "").trim().replace(/\s+/g, " ").slice(0, 80);
-  if (name.length < 2) throw new Error("BAD_ZONE_NAME");
+  if (name.length < 2) throw new ZoneNameError("BAD_ZONE_NAME");
   const lat = Number(spec.lat), lng = Number(spec.lng);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !inItalyBounds(lat, lng)) throw new Error("BAD_ZONE_POS");
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !inItalyBounds(lat, lng)) throw new ZonePositionError("BAD_ZONE_POS");
   const province = spec.province ? String(spec.province).trim().slice(0, 60) : null;
   const region = spec.region ? String(spec.region).trim().slice(0, 60) : null;
   const norm = normPlace(name);
