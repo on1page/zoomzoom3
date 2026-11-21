@@ -1,0 +1,180 @@
+ZoomZoom — Sincronizzazione completa del codice (fix errore P2022 "Zone.poly")
+==============================================================================
+
+COSA DICE IL TUO LOG DI VERCEL (diagnosi)
+-----------------------------------------
+L'errore che vedi, ripetuto su ogni chiamata a /api/public/bootstrap, è:
+
+    Error [PrismaClientKnownRequestError]:
+    Invalid `prisma.zone.findMany()` invocation:
+    The column `Zone.poly` does not exist in the current database.
+    code: 'P2022'
+
+Cosa significa, nella direzione GIUSTA (è l'opposto di quanto sembrerebbe):
+
+1) Il DATABASE è GIÀ aggiornato. Le colonne poly, labelX, labelY e geoX/geoY
+   sono state RIMOSSE dall'aggiornamento della mappa reale (sostituite da
+   radiusM e geoLat/geoLng): se il database risponde "non esistono più",
+   vuol dire che la migrazione (bun run db:push) era già stata fatta, e
+   bene. Il database contiene anche i tuoi dati (login demo funzionante,
+   recensioni demo, account con 2FA): NON va toccato.
+
+2) È il CODICE deployato su Vercel a essere VECCHIO. Il client Prisma
+   generato durante la build chiede ancora le colonne del disegno
+   precedente (poly, labelX, labelY): quelle colonne nel repo GitHub sono
+   dello schema PRE-mappa. Le altre query del log (Category, Criterion,
+   Setting) riescono perché quelle tabelle non sono mai cambiate.
+
+In sintesi: il ramo "main" del repository collegato al progetto Vercel
+"zoomzoom-1" contiene una copia del progetto precedente all'aggiornamento
+della mappa (e quindi anche precedente a premium e ai fix successivi).
+Ogni deploy da quel repo produce codice che parla un "dialetto" vecchio
+del database, e il database giustamente rifiuta.
+
+Come sia potuto succedere: le cause tipiche sono un push fatto da una
+copia vecchia della cartella del progetto, un repository (o branch)
+ripristinato a un commit precedente, oppure il progetto Vercel collegato
+a un repository/branch diverso da quello che aggiorni tu. I controlli
+qui sotto (2 minuti, solo browser) ti dicono quale dei tre è stato.
+
+VERIFICA RAPIDA DAL BROWSER (prima di toccare qualunque cosa)
+-------------------------------------------------------------
+a) Su GitHub: apri il repository → file prisma/schema.prisma (branch main)
+   → Ctrl+F cerca "radiusM".
+   - Se NON lo trovi (o trovi "poly"): confermato, il repo ha lo schema
+     vecchio. Questo pacchetto è la soluzione.
+   - Se lo trovi: il repo è aggiornato, salta alla sezione "Se il deploy
+     non parte" in fondo (il problema allora è il collegamento Vercel).
+
+b) Su Vercel: progetto zoomzoom-1 → Settings → Git → guarda "Connected
+   Git Repository": deve essere il repository su cui fai "git push", e
+   il branch di Production deve essere "main".
+
+c) Su Vercel: Deployments → apri il deployment più recente (quello in
+   "Production") → guarda la riga del commit: messaggio, autore e data
+   devono corrispondere al tuo ultimo push. Se vedi un commit vecchio o
+   un messaggio che non riconosci, il progetto sta deployando un repo
+   (o un branch) che non è quello che aggiorni.
+
+RIMEDIO CON QUESTO PACCHETTO (PowerShell)
+-----------------------------------------
+Questo pacchetto contiene il progetto COMPLETO alla versione attuale
+(mappa reale Italia + membership Premium + fix pagina profilo), così il
+repo torna interamente in pari con un solo push, senza domande su quali
+file fossero mancanti.
+
+1) Estrai lo zip in una cartella temporanea, ad esempio C:\temp\zoomzoom-sync
+
+2) Copia tutto dentro la cartella del progetto (sovrascrivendo):
+
+       Copy-Item -Recurse -Force C:\temp\zoomzoom-sync\prisma  C:\Users\Carlo\sito\zoomzoom\
+       Copy-Item -Recurse -Force C:\temp\zoomzoom-sync\scripts C:\Users\Carlo\sito\zoomzoom\
+       Copy-Item -Recurse -Force C:\temp\zoomzoom-sync\src     C:\Users\Carlo\sito\zoomzoom\
+       Copy-Item -Recurse -Force C:\temp\zoomzoom-sync\public  C:\Users\Carlo\sito\zoomzoom\
+
+       Copy-Item -Force C:\temp\zoomzoom-sync\package.json      C:\Users\Carlo\sito\zoomzoom\
+       Copy-Item -Force C:\temp\zoomzoom-sync\bun.lock          C:\Users\Carlo\sito\zoomzoom\
+       Copy-Item -Force C:\temp\zoomzoom-sync\next.config.ts    C:\Users\Carlo\sito\zoomzoom\
+       Copy-Item -Force C:\temp\zoomzoom-sync\tsconfig.json     C:\Users\Carlo\sito\zoomzoom\
+       Copy-Item -Force C:\temp\zoomzoom-sync\tailwind.config.ts C:\Users\Carlo\sito\zoomzoom\
+       Copy-Item -Force C:\temp\zoomzoom-sync\postcss.config.mjs C:\Users\Carlo\sito\zoomzoom\
+       Copy-Item -Force C:\temp\zoomzoom-sync\eslint.config.mjs C:\Users\Carlo\sito\zoomzoom\
+       Copy-Item -Force C:\temp\zoomzoom-sync\components.json   C:\Users\Carlo\sito\zoomzoom\
+       Copy-Item -Force C:\temp\zoomzoom-sync\README.md         C:\Users\Carlo\sito\zoomzoom\
+
+   (Il file .env NON è incluso e NON va toccato: contiene le tue chiavi
+   e non è mai stato parte dei pacchetti.)
+
+3) Verifica in locale che adesso il progetto sia quello giusto:
+
+       cd C:\Users\Carlo\sito\zoomzoom
+       Select-String -Path prisma\schema.prisma -Pattern "radiusM"
+
+   deve trovare: radiusM Int @default(3000)
+
+       Select-String -Path prisma\schema.prisma -Pattern "poly|labelX|geoX"
+
+   NON deve trovare niente.
+
+4) Guarda cosa cambia rispetto al repo:
+
+       git status --short
+
+   Vedrai molti file con M (modificati) e alcuni con A (aggiunti): è la
+   sincronizzazione, tutto previsto. Se prisma/schema.prisma risulta
+   "ignored" o non compare tra i file, forza l'aggiunta con:
+   git add -f prisma/schema.prisma (vedi punto 5 per l'elenco completo).
+
+5) Committa e pusha TUTTO il pacchetto:
+
+       git add prisma/schema.prisma scripts/seed.ts src public package.json bun.lock next.config.ts tsconfig.json tailwind.config.ts postcss.config.mjs eslint.config.mjs components.json README.md
+       git commit -m "sincronizzazione completa: mappa reale Italia + premium + fix profilo (schema radiusM/geoLat)"
+       git push
+
+6) Su Vercel attendi il nuovo deploy (2-4 minuti, stato "Ready").
+
+COSA NON FARE (importante)
+--------------------------
+- NON eseguire "bun run db:push": il database è GIÀ alla versione
+  aggiornata (è l'unica cosa già a posto). Rieseguirlo non farebbe
+  danni, ma non serve a niente.
+- NON rieseguire "bun scripts\seed.ts": i dati demo ci sono già, con i
+  segreti 2FA cifrati con il tuo APP_SECRET (rifarlo resta comunque
+  sicuro, il seed è idempotente, ma è inutile).
+- NON toccare le variabili d'ambiente su Vercel (DATABASE_URL,
+  DIRECT_URL, APP_SECRET, DEMO_MODE restano come sono).
+- NON cancellare né ricreare il progetto Vercel o il database Supabase.
+
+VERIFICA FINALE
+---------------
+1) Apri https://zoomzoom-1.vercel.app : la home deve caricarsi subito,
+   senza il caricamento perpetuo.
+2) Apri la pagina Mappa: devono esserci le 12 città reali (Torino,
+   Milano, Genova, Venezia, Bologna, Firenze, Roma, Napoli, Bari,
+   Reggio Calabria, Palermo, Cagliari) su cartografia OpenStreetMap.
+3) Login demo: utente@esempio.test / ZoomZoom-Demo-2026 → profilo,
+   inviti, impostazioni e scritte Premium devono funzionare.
+4) Da PowerShell puoi controllare l'API che prima falliva:
+
+       Invoke-WebRequest https://zoomzoom-1.vercel.app/api/public/bootstrap -UseBasicParsing | Select-Object StatusCode
+
+   deve rispondere 200. Nel log di Vercel non devono più comparire P2022.
+
+SE IL DEPLOY NON PARTE, O PARTE ANCORA IL CODICE VECCHIO
+--------------------------------------------------------
+- Controlla su GitHub (repo → Commits, branch main) che il commit della
+  sincronizzazione sia arrivato: se non c'è, il push non è andato a buon
+  fine: rileggi l'output di "git push" (errori di autenticazione o
+  permessi sono la causa più comune).
+- Se il commit c'è ma Vercel non ha creato un deployment: Vercel →
+  Settings → Git → verifica che Production Branch sia "main" e che il
+  repository collegato sia il tuo; poi Deployments → ⋯ → Redeploy.
+- Se il deployment parte ma il sito sbaglia ancora: riapri il log di
+  Vercel. Se vedi DI NUOVO "Zone.poly" significa che il deployment sta
+  ancora buildando un commit vecchio: apri il deployment → riga del
+  commit → confrontala con GitHub: il repo collegato al progetto Vercel
+  NON è quello che hai appena pushato (punto b della verifica).
+- Se invece compare un errore DIVERSO (per esempio su PremiumGrant o
+  premiumUntil), scrivimelo: vorrebbe dire che il database è rimasto a
+  una versione intermedia, e si sistema con un comando solo.
+
+COSA CONTIENE QUESTO PACCHETTO
+-----------------------------
+prisma/schema.prisma        schema PostgreSQL (url + directUrl): zone come
+                            città reali (gpsLat/gpsLng/radiusM, niente più
+                            poly/labelX/labelY), Entity con geoLat/geoLng,
+                            modelli Premium (PremiumGrant, premiumUntil)
+scripts/seed.ts             seed completo (12 città reali, account demo,
+                            recensioni, grant premium demo) — idempotente
+src/                        tutta l'applicazione: mappa Leaflet/OpenStreetMap,
+                            membership Premium (recensioni visibili solo ai
+                            premium, grant una tantum, gestione admin),
+                            2FA con QR, back office, fix pagina profilo
+public/                     logo e robots.txt
+package.json + bun.lock     dipendenze complete (incluso leaflet 1.9.4):
+                            evitano il ritorno dell'errore "Can't resolve
+                            'leaflet'"
+next.config.ts, tsconfig.json, tailwind.config.ts, postcss.config.mjs,
+eslint.config.mjs, components.json, README.md   configurazioni e documenti
+
+Nessuna nuova variabile d'ambiente. Nessuna operazione sul database.
