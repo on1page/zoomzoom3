@@ -1,0 +1,223 @@
+ZoomZoom — Aggiornamento: Membership Premium (recensioni riservate a chi contribuisce)
+=====================================================================================
+
+Cosa fa questo aggiornamento
+----------------------------
+Ispirandosi al modello di incentivo di Escort Advisor ("scrivi una recensione
+→ attivi la Membership Premium"), ma adattandolo alla filosofia ZoomZoom:
+
+- AGGREGATI SEMPRE PUBBLICI: media, punteggio per criterio, numero di
+  recensioni, prezzi mediani e classifiche restano visibili a tutti,
+  anonimi compresi. È la "reputazione espressa in valore".
+- TESTI INTEGRALI RISERVATI: il testo delle recensioni (descrizione, punti
+  di forza, criticità, prezzi dichiarati) si legge solo da utenti Premium.
+- IL PREMIUM NON SI COMPRA, SI GUADAGNA: ogni recensione verificata
+  pubblicata assegna N giorni di Premium (default 30, configurabile),
+  accumulabili fino a un tetto (default 365 giorni, configurabile).
+- LE PROPRIE RECENSIONI restano sempre visibili al loro autore.
+- LO STAFF (moderatore e sopra) vede tutto per motivi di moderazione.
+
+Anti-frode: dove questo modello è PIÙ forte di Escort Advisor
+-------------------------------------------------------------
+Il rischio del meccanismo EA è noto: recensioni scritte solo per il
+vantaggio, o inventate. EA dichiara moderazione entro 7 giorni, richiesta
+di link/telefono, rimozione in caso di frode, limiti agli account doppi,
+affidabilità nel ranking. Qui invece:
+
+1. VERIFICA A MONTE, non solo dopo: su ZoomZoom non esistono recensioni
+   anonime improvvisate — ogni recensione richiede un'esperienza ATTIVA,
+   cioè un invito email monouso da un soggetto verificato (con limiti
+   giornalieri) oppure una verifica documentale valutata da un moderatore.
+   Per falsificare una recensione serve prima un invito o un documento
+   falso: molto più costoso di "inventare un racconto".
+2. REVOCA AUTOMATICA E IMMEDIATA DEL VANTAGGIO: quando la moderazione
+   nasconde una recensione (frode, contenuti illeciti), i giorni di Premium
+   ottenuti con QUEL contributo vengono revocati e la scadenza ricalcolata
+   dai contributi rimasti. L'appello accolto ripristina tutto.
+3. NESSUN PREMIO PER IL VOTO: i giorni spettano per il contributo, non per
+   il punteggio: recensire 10 o 2 cambia nulla.
+4. UNA RECENSIONE PER ESPERIENZA (vincolo atomico già esistente): non si
+   moltiplicano i contributi sulla stessa esperienza.
+5. TETTO DI ACCUMULO: la scadenza non supera mai "adesso + premiumMaxDays":
+  nemmeno una lunga serie di contributi sospetti costruisce un vantaggio
+   illimitato.
+6. TRACCIATURA COMPLETA: ogni concessione e revoca è registrata nel log di
+   moderazione con motivazione; l'amministrazione può anche concedere o
+   revocare manualmente (provvedimenti, collaborazioni).
+7. Limiti dichiarati (li scriviamo anche nella pagina pubblica #/premium):
+   un account duplicato con email diversa resta teoricamente possibile,
+   come su ogni piattaforma; gli inviti sono legati all'email del cliente
+   reale e i documenti passano revisione umana, quindi la frode ha un costo
+   e lascia tracce, ma non possiamo promettere certezza assoluta.
+
+Dove compare nel sito
+---------------------
+- Schede (#/scheda/...) e zone: chi non ha Premium vede il box "N recensioni
+  riservate" con CTA per accedere/verificare un'esperienza; medie e criteri
+  restano sopra, pubblici. Le proprie recensioni restano visibili.
+- Scrivi recensione (#/scrivi/...): avviso del premio prima di scrivere;
+  alla pubblicazione, conferma con i giorni ottenuti e la data di scadenza.
+- Profilo (#/profilo): card Membership Premium con stato, scadenza e
+  storico concessioni (origine, giorni, revoca motivata).
+- Pagina pubblica #/premium: come funziona, cosa è pubblico, le misure
+  anti-abuso e i limiti dichiarati, con onestà (link nel footer e nei box).
+- Back office (#/admin/utenti): colonna Premium con scadenza, pulsanti
+  "Premium +" (concessione con giorni e motivazione) e "Revoca Premium";
+  in #/admin/impostazioni: giorni per recensione, tetto accumulo e
+  interruttore premiumEnabled (kill switch: se disattivato tutte le
+  recensioni tornano pubbliche come prima, utile in emergenze).
+- GDPR: il Premium è uno stato dell'account (nessun dato di pagamento, mai
+  numeri di telefono); è incluso nell'esportazione dati e cancellato con
+  l'account.
+
+File modificati o nuovi
+-----------------------
+prisma/schema.prisma                       (User.premiumUntil + nuova tabella
+                                            PremiumGrant + relazione Review;
+                                            versione PostgreSQL con url +
+                                            directUrl, identica alla tua)
+src/lib/server/premium.ts                  (NUOVO — tutta la logica: stato,
+                                            assegnazione con tetto, revoca
+                                            mirata, ricalcolo, concessioni)
+src/lib/server/settings.ts                 (nuove impostazioni premiumEnabled,
+                                            premiumDaysPerReview, premiumMaxDays)
+src/lib/server/auth.ts                     (SessionUser con premiumUntil)
+src/lib/server/public-data.ts              (userId interno nel tipo recensione,
+                                            mai serializzato al client)
+src/app/api/public/entity/[id]/route.ts    (GATING: filtra i testi per chi non
+                                            ha accesso; pubblica conteggi e
+                                            stato premium; l'endpoint resta
+                                            l'unica fonte)
+src/app/api/public/bootstrap/route.ts      (flag premiumEnabled, giorni, stato
+                                            premium dell'utente collegato)
+src/app/api/auth/me/route.ts               (stato premium nella sessione)
+src/app/api/reviews/route.ts               (assegnazione premium alla
+                                            pubblicazione + audit log)
+src/app/api/me/overview/route.ts           (stato premium + storico concessioni)
+src/app/api/me/export/route.ts             (premium nell'esportazione, GDPR)
+src/app/api/admin/action/route.ts          (revoca su review.hide e
+                                            report.decide-hide; ripristino su
+                                            review.restore; nuove azioni
+                                            premium.grant e premium.revoke;
+                                            impostazioni premium in settings)
+src/app/api/admin/data/[section]/route.ts  (premiumUntil nella lista utenti)
+src/components/admin/admin.tsx             (UI back office: colonna Premium,
+                                            concessione/revoca, impostazioni)
+src/components/views/entity-zone.tsx       (box "recensioni riservate" su
+                                            scheda e zona)
+src/components/views/review-flows.tsx      (avviso premio + conferma giorni
+                                            alla pubblicazione)
+src/components/views/profile.tsx           (card Membership Premium con
+                                            storico concessioni)
+src/components/views/info-pages.tsx        (NUOVA pagina #/premium; corretto
+                                            import useEffect mancante — bug
+                                            preesistente della casella demo —
+                                            e aggiornato "Cosa non facciamo")
+src/app/page.tsx                           (rotta #/premium)
+src/components/chrome.tsx                  (link "Membership Premium" nel footer)
+src/lib/client/store.tsx                   (tipi client: premium in site,
+                                            settings e utente)
+src/app/globals.css                        (stili box riservato e card premium)
+scripts/seed.ts                            (i recensori demo ottengono i grant
+                                            come da meccanismo: utente@esempio
+                                            .test e i 22 recensori risultano
+                                            Premium attivi per provare subito
+                                            entrambi gli stati)
+README.md                                  (documentazione della funzione)
+
+Nessuna nuova dipendenza. Nessuna variabile d'ambiente nuova.
+
+Sicurezza del gating (il punto importante)
+------------------------------------------
+Il filtro è applicato DAL SERVER in /api/public/entity/[id]: al browser dei
+non-Premium i testi riservati NON arrivano proprio (0 byte), quindi non
+esistono scorciatoie lato client, DevTools compresi. La funzione
+hasPremiumAccess decide in base a: premiumEnabled, ruolo staff, premiumUntil
+> adesso. La scadenza non è memorizzata due volte: premiumUntil è sempre il
+massimo expiresAt dei grant non revocati (ricalcolato a ogni variazione),
+quindi revoca e ripristino sono consistenti per costruzione.
+
+Installazione
+-------------
+1) Ferma il server di sviluppo (Ctrl+C).
+
+2) Copia i file di questo pacchetto dentro la cartella del progetto
+   (C:\Users\Carlo\sito\zoomzoom), mantenendo i percorsi. Da PowerShell,
+   dopo aver estratto lo zip in una cartella temporanea:
+
+       Copy-Item -Recurse -Force "C:\percorso\estratto\prisma" "C:\Users\Carlo\sito\zoomzoom\"
+       Copy-Item -Recurse -Force "C:\percorso\estratto\scripts" "C:\Users\Carlo\sito\zoomzoom\"
+       Copy-Item -Recurse -Force "C:\percorso\estratto\src" "C:\Users\Carlo\sito\zoomzoom\"
+       Copy-Item -Force "C:\percorso\estratto\README.md" "C:\Users\Carlo\sito\zoomzoom\"
+
+   (Copy-Item sovrascrive i file esistenti con lo stesso nome.)
+
+3) Nessuna dipendenza da installare: non serve "bun add".
+
+4) Applica le modifiche al database:
+
+       bun run db:push
+
+   Questa volta la modifica è SOLO ADDITIVA: nuova colonna nullable
+   User.premiumUntil + nuova tabella PremiumGrant (+ relazione su Review).
+   NON perde dati e NON chiede conferme di perdita: i dati esistenti
+   restano tutti; nessuno ha il Premium finché non pubblica recensioni o
+   riceve una concessione.
+
+5) (Consigliato in demo) Rigrenera i dati demo per avere anche i grant:
+
+       bun scripts\seed.ts
+
+   Il seed è idempotente e tocca solo i dati demo: i recensori demo e
+   utente@esempio.test risulteranno Premium attivi (così puoi provare sia
+   lo stato Premium che, da browser in anonimo o con un account nuovo, il
+   box "recensioni riservate"). Se salti questo passaggio tutto funziona
+   lo stesso: semplicemente nessun utente avrà il Premium finché non
+   scrive una recensione (che al primo deploy renderebbe tutte le schede
+   con recensioni "riservate" per tutti: valuta tu, in demo conviene
+   rieseguire il seed).
+
+6) Riavvia e verifica in locale:
+
+       bun run dev
+
+   - da browser in incognito (anonimo): #/scheda/ent_i_rondini mostra le
+     medie e il box "recensioni riservate", nessun testo;
+   - accedi con utente@esempio.test (ZoomZoom-Demo-2026): la stessa scheda
+     mostra tutte le recensioni; #/profilo ha la card Premium con scadenza
+     e storico; #/premium la pagina informativa;
+   - back office #/admin/utenti: colonna Premium e pulsanti Premium + /
+     Revoca Premium (provoca una revoca serve motivazione >= 15 caratteri);
+   - #/admin/impostazioni: giorni per recensione, tetto accumulo e
+     interruttore Membership Premium.
+
+7) Pubblica su Vercel:
+
+       git add prisma/schema.prisma scripts/seed.ts src README.md
+       git commit -m "Membership Premium: recensioni integrali riservate a chi contribuisce"
+       git push
+
+   (Nessun file di dipendenze cambia: package.json e bun.lock restano
+   quelli che hai già committato per la mappa.)
+
+   Nessuna variabile d'ambiente nuova: DATABASE_URL, DIRECT_URL e APP_SECRET
+   restano quelle già configurate.
+
+Note
+----
+- Il kill switch: se mai volessi tornare alla piena visibilità pubblica in
+  emergenza, back office → Impostazioni → deseleziona "Membership Premium
+  attiva" → Salva. Oppure imposta a 0 "Premium: giorni per recensione"
+  (nessuna nuova assegnazione, ma i Premium esistenti restano validi).
+- Il meccanismo EA del "numero di telefono per evitare doppi Premium" qui
+  non c'è VOLONTARIAMENTE: ZoomZoom non raccoglie numeri di telefono
+  (minimizzazione GDPR). L'anti-duplicazione passa da email verificata,
+  inviti legati al cliente reale e revisione umana dei documenti.
+- Se in locale lo stile del box "recensioni riservate" appare senza bordo
+  tratteggiato, è la cache di sviluppo di Next: ferma il server, cancella
+  la cartella .next, riavvia "bun run dev". Su Vercel ogni build parte
+  pulita e il problema non esiste.
+- Verificato nel mirror: ciclo completo anonimo → Premium (pubblicazione
+  recensione) → revoca (moderazione) → ripristino (appello); staff sempre
+  in chiaro; kill switch funzionante; esportazione dati e cancellazione
+  account includono il Premium; mappa, login, 2FA e profilo intatti.
