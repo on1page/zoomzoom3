@@ -1,0 +1,161 @@
+ZoomZoom — Correzione definitiva: "Il software del sito non è aggiornato… (client del database generato da uno schema precedente)"
+====================================================================================
+
+PERCHÉ "bun run db:push" NON BASTAVA (la causa vera, spiegata)
+--------------------------------------------------------------
+Hai eseguito "bun run db:push" e riavviato il server, più volte, e il
+messaggio è tornato identico ogni volta. Non è colpa tua: l'istruzione nel
+vecchio messaggio era incompleta. Ecco il meccanismo, in due righe tecniche
+(spiego subito dopo in parole povere):
+
+  1. Quel messaggio esce quando il CLIENT del database (il pezzo di software
+     che il sito usa per parlare col database) non conosce le colonne della
+     copertura nazionale (province, region, source nella tabella Zone).
+     L'errore avviene DENTRO il client, PRIMA ancora di toccare il database:
+     per questo il database può essere perfettamente aggiornato e l'errore
+     presentarsi lo stesso.
+  2. "bun run db:push" RIGENERA il client partendo dal file
+     prisma/schema.prisma presente nel progetto. Se quel file è una versione
+     precedente (senza le colonne nuove), il client appena rigenerato è
+     vecchio anche lui — e il messaggio si ripresenta identico, per quante
+     volte lo esegui.
+
+In parole povere: è come aggiornare l'elenco degli indirizzi del navigatore
+ricalcolandolo da una rubrica telefonica vecchia: per quante volte lo
+ricalcoli, l'indirizzo nuovo non può comparire finché non cambia la rubrica.
+La "rubrica" è il file prisma/schema.prisma.
+
+Come è potuto succedere: il file aggiornato era dentro il pacchetto
+"territorio nazionale"; i pacchetti successivi (conferma-indirizzo,
+conferma-città) non lo includevano perché non lo cambiavano, e le loro
+istruzioni facevano copiare solo la cartella src. Se in uno di quei passaggi
+il file aggiornato non è arrivato nella cartella del progetto (o non è stato
+pubblicato nel sito pubblico), ecco il blocco alla creazione della recensione.
+
+C'è anche un secondo caso, gemello, con lo stesso identico messaggio: se il
+sito viene avviato in MODALITÀ PRODUZIONE ("bun run start", il file
+server.js dentro .next/standalone), il client del database viene INCORPORATO
+nella build al momento in cui la build viene fatta. In quel caso "bun run
+db:push" aggiorna il client nella cartella del progetto ma NON quello dentro
+la build: il rimedio è rifare "bun run build". Il nuovo script di verifica
+(diamo sotto) distingue i due casi da solo.
+
+LA CORREZIONE (5 minuti, definitiva)
+------------------------------------
+1) Ferma il server di sviluppo (Ctrl+C).
+
+2) Estrai lo zip e copia i file nel progetto (C:\Users\Carlo\sito\zoomzoom),
+   mantenendo i percorsi. Da PowerShell, dopo aver estratto in una cartella
+   temporanea:
+
+       Copy-Item -Recurse -Force "C:\percorso\estratto\prisma" "C:\Users\Carlo\sito\zoomzoom\"
+       Copy-Item -Recurse -Force "C:\percorso\estratto\src" "C:\Users\Carlo\sito\zoomzoom\"
+       Copy-Item -Recurse -Force "C:\percorso\estratto\scripts" "C:\Users\Carlo\sito\zoomzoom\"
+
+   (Copy-Item sovrascrive i file esistenti con lo stesso nome.)
+
+   Il prisma/schema.prisma del pacchetto è la versione POSTGRESQL identica
+   alla tua (url + directUrl): contiene TUTTI i modelli attuali ed è un
+   sovrainsieme di ogni versione precedente — nessuna colonna eliminata,
+   db:push senza perdita di dati.
+
+3) Aggiorna il database e RIGENERA il client (dalla cartella del progetto):
+
+       cd C:\Users\Carlo\sito\zoomzoom
+       bun run db:push
+
+   (Questa volta il comando parte dal file GIUSTO: aggiunge le colonne
+   province/region/source se mancano e genera il client completo.)
+
+4) Se di solito avvii il sito con "bun run dev": riavvialo e hai finito.
+   Se invece lo avvii con "bun run start" (modalità produzione): esegui
+   PRIMA "bun run build", poi "bun run start" — la build deve incorporare
+   il client appena rigenerato.
+
+5) SE IL MESSAGGIO COMPARE ANCHE SUL SITO PUBBLICO (Vercel): là il client
+   nasce dalla BUILD, dai file pubblicati. Pubblica i file del pacchetto:
+
+       git add prisma/schema.prisma src/lib/server/zones.ts scripts/verifica-schema.ts
+       git commit -m "schema aggiornato: client del database allineato alla copertura nazionale"
+       git push
+
+   Vercel ricostruisce il sito e genera il client nuovo. Il db:push del
+   punto 3 ha già aggiornato il database (se locale e produzione usano lo
+   stesso Supabase è fatto; altrimenti ripetilo con le variabili di
+   produzione, come per i pacchetti precedenti).
+
+VERIFICA IMMEDIATA (un comando, prima ancora di aprire il browser)
+------------------------------------------------------------------
+Dalla cartella del progetto:
+
+       bun scripts/verifica-schema.ts
+
+Lo script controlla le quattro cose che devono essere allineate — il FILE
+prisma/schema.prisma, il CLIENT del progetto (node_modules), il CLIENT della
+build di produzione (.next/standalone, se esiste) e le COLONNE REALI della
+tabella Zone nel database — e per ognuna dice se è a posto o che cosa fare,
+con il verdetto finale in italiano. Esempio con tutto a posto:
+
+       1. FILE DI CONFIGURAZIONE DEL DATABASE
+         [ OK ]  prisma/schema.prisma — il model Zone contiene province/region/source
+       2. CLIENT PRIMA (quello che usa "bun run dev")
+         [ OK ]  node_modules/.prisma/client — generato dallo schema aggiornato
+       3. BUILD DI PRODUZIONE (quella che usa "bun run start")
+         [ OK ]  .next/standalone — la build contiene il client aggiornato
+       4. DATABASE (prova reale: lettura Zone con le colonne nuove)
+         [ OK ]  tabella Zone — connessione riuscita e colonne presenti
+
+       ---------- VERDETTO ----------
+       Tutto allineato: file, client e database sono a posto.
+
+Con lo schema vecchio, invece, la stessa prova segnala subito il campo
+mancante ("province") e il rimedio. Ti consiglio di eseguirlo SUBITO, prima
+di copiare i file: ti mostra in un colpo d'occhio quale delle quattro cose
+era rimasta indietro nel tuo ambiente.
+
+Cosa cambia nel codice (un solo file, chirurgico)
+-------------------------------------------------
+- src/lib/server/zones.ts — UNICA modifica funzionale al codice: il
+  messaggio di errore diventa completo e onesto. Ora dice quale campo manca
+  al client (es. "province") e che il rimedio è SOSTITUIRE il file
+  prisma/schema.prisma (non solo rieseguire db:push), con i passi giusti
+  anche per il sito pubblico. Nessuna logica toccata: dedup delle località,
+  creazione zone, gestione doppio invio e validazioni restano identiche.
+- prisma/schema.prisma — la versione aggiornata con tutti i modelli attuali
+  (Zone con province/region/source, e i modelli già presenti: foto, voti,
+  Premium, 2FA…). Sovrainsieme di tutte le versioni precedenti: nessuna
+  colonna eliminata, nessun dato perso.
+- scripts/verifica-schema.ts — NUOVO: diagnostica in un comando (vedi sopra).
+
+Nessuna nuova dipendenza. Nessuna nuova variabile d'ambiente.
+
+Test eseguiti su questa versione (tutti verdi)
+----------------------------------------------
+- RIPRODUZIONE ESATTA DEL TUO ERRORE in ambiente isolato: client generato da
+  uno schema senza province/region/source → alla creazione della località
+  scatta lo stesso identico errore (il client rifiuta il campo "province"
+  prima di toccare il database); sostituito il file e rigenerato → tutto
+  funziona. È la conferma sperimentale della diagnosi.
+- Suite completa "territorio nazionale": 19/19 superati (ricerca geocodificata
+  con provincia/regione, reverse geocoding, immobile in località nuova con
+  zona creata al volo, dedup, attivazione scheda paese + idempotenza, riuso
+  zona nota, recensione sul paese nuovo, bootstrap e mappa, rifiuti vari).
+- Schema PostgreSQL del pacchetto validato formalmente (prisma validate).
+- Script di verifica provato in tutti gli stati: tutto allineato, client
+  vecchio, client della build vecchio.
+
+Se, dopo tutto questo, il messaggio comparisse ancora
+-----------------------------------------------------
+Vorrebbe dire che il server che risponde NON sta usando i file appena
+aggiornati. Le tre possibilità, in ordine di probabilità:
+  1) un vecchio processo del server è ancora attivo (Ctrl+C su TUTTI i
+     terminali che ospitano il server, poi riavvia uno solo, dalla cartella
+     C:\Users\Carlo\sito\zoomzoom);
+  2) stai guardando il SITO PUBBLICO e il deploy non è ancora arrivato
+     (controlla su Vercel che la build nuova sia completata; il commit deve
+     includere prisma/schema.prisma — verifica con "git status --short");
+  3) una copia diversa del progetto sta servendo la pagina.
+In ogni caso: esegui "bun scripts/verifica-schema.ts" nella cartella che
+credi essere quella giusta e mandami l'output completo, insieme alla riga
+"[entities] errore interno in ensureZone" (se presente) dal terminale del
+server: con quelli la diagnosi è immediata.

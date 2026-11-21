@@ -56,26 +56,37 @@ export type EnsureZoneResult = { zone: Zone; created: boolean };
 /* ---------- diagnosi onesta degli errori di salvataggio ---------- */
 
 // Un errore interno in ensureZone NON è colpa dell'utente e quasi sempre ha
-// una causa precisa: client Prisma generato da uno schema vecchio, database
-// senza le colonne delle località nazionali, connessione caduta. Qui viene
-// riconosciuta e tradotta in un messaggio che dice CHE COSA FARE, con un
-// codice utile al log. (Il caso più frequente in locale: il pacchetto
-// "territorio nazionale" copiato senza eseguire db:push — così findMany
-// funziona, ma il create/update con province/region/source esplode.)
+// una causa precisa. Qui viene riconosciuta e tradotta in un messaggio che
+// dice CHE COSA FARE, con un codice utile al log.
+// ATTENZIONE alla differenza tra i due casi più frequenti:
+//  - PrismaClientValidationError = il CLIENT è generato da un file
+//    prisma/schema.prisma VECCHIO (senza province/region/source). Rieseguire
+//    "bun run db:push" NON risolve: il client viene rigenerato dallo stesso
+//    file vecchio. L'unico rimedio è SOSTITUIRE il file prisma/schema.prisma
+//    con quello del pacchetto aggiornato, POI eseguire db:push e riavviare
+//    (e pubblicare il file se il sito è in produzione/Vercel). Succede quando
+//    i pacchetti vengono applicati copiando solo la cartella src/;
+//  - P2022 = il client è aggiornato ma il DATABASE non ha le colonne: qui
+//    basta "bun run db:push" (eseguito dal progetto aggiornato).
 export type ZoneSaveIssue = { code: string; message: string };
 
 export function classifyZoneSaveError(e: unknown): ZoneSaveIssue {
   if (e instanceof Prisma.PrismaClientValidationError) {
+    // Prisma nomina il campo che il client non conosce (es. "Unknown
+    // argument `province`" in create/update, "Unknown field" nelle select):
+    // riportarlo rende la diagnosi immediata
+    const unknown = /Unknown (?:argument|field) `([^`]+)`/.exec(e.message);
+    const campo = unknown ? `: al client del database manca il campo “${unknown[1]}”` : "";
     return {
       code: "DB_CLIENT_VECCHIO",
-      message: "Il software del sito non è aggiornato all'ultima versione (client del database generato da uno schema precedente): l'amministratore deve eseguire “bun run db:push” e riavviare il server, poi riprovare.",
+      message: "Il software del sito non è aggiornato all'ultima versione (il client del database è generato da un file prisma/schema.prisma precedente" + campo + "). L'amministratore deve: 1) copiare nel progetto il file prisma/schema.prisma del pacchetto aggiornato (rieseguire “bun run db:push” senza sostituire il file non risolve); 2) eseguire “bun run db:push”; 3) riavviare il server. Se il messaggio compare sul sito pubblico, il file va anche pubblicato (deploy). Poi riprovare.",
     };
   }
   if (e instanceof Prisma.PrismaClientKnownRequestError) {
     if (e.code === "P2022") {
       return {
         code: "DB_SCHEMA_VECCHIO",
-        message: "Il database del sito non ha ancora le colonne delle nuove località nazionali (provincia, regione, provenienza): l'amministratore deve eseguire “bun run db:push”, poi riprovare.",
+        message: "Il database del sito non ha ancora le colonne delle nuove località nazionali (provincia, regione, provenienza): l'amministratore deve eseguire “bun run db:push” dal progetto aggiornato, poi riprovare.",
       };
     }
     if (e.code && e.code.startsWith("P1")) {
