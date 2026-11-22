@@ -13,10 +13,15 @@
 //                                                       di perizia/valutazione
 //   ConsultantCard                                    sezione professionale
 //                                                       della scheda pubblica
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "@/lib/client/store";
 import { api, fmtDateTime } from "@/lib/client/api";
 import { navigate } from "@/lib/client/router";
+import { normalizeIban, validateIban } from "@/lib/iban";
+import {
+  prepareDocFile, preparePhotoFile, fmtBytes, dataUrlBytes,
+  MAX_FILES, MAX_TOTAL_DOC_BYTES, type PreparedDoc,
+} from "@/lib/client/files";
 import { Alert } from "../ui-kit";
 import { PlaceSearch, type Place } from "../place-search";
 
@@ -25,14 +30,9 @@ import { PlaceSearch, type Place } from "../place-search";
 const fmtEuro = (cents: number | null | undefined) =>
   cents == null ? "—" : (cents / 100).toLocaleString("it-IT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-const readFile = (f: File) => new Promise<string>((res, rej) => {
-  const r = new FileReader();
-  r.onload = () => res(String(r.result));
-  r.onerror = () => rej(r.error);
-  r.readAsDataURL(f);
-});
-
-type DocDraft = { kind: string; name: string; mime: string; data: string };
+const DOC_KIND_LABEL: Record<string, string> = {
+  qualifica: "Qualifica", esperienza: "Esperienza", documento: "Identificazione", altro: "Altro",
+};
 
 const PROFESSIONS = ["Geometra", "Ingegnere", "Tecnico", "Perito", "Consulente Tecnico", "Agente Immobiliare", "Altro"];
 const PERIZIA_KINDS = ["Perizia tecnica", "Valutazione immobiliare", "Altro"];
@@ -44,6 +44,7 @@ type ProfiloConsultant = {
   radiusKm: number; feeCents: number;
   vatNumber: string | null; iban: string | null; phone: string | null;
   status: string; rejectReason: string | null; entityId: string | null;
+  ibanCheck: string | null; ibanCheckedAt: string | null;
   docs: Array<{ id: string; kind: string; originalName: string; sizeBytes: number }>;
   createdAt: string;
 };
@@ -126,11 +127,19 @@ export function ConsulenteView() {
           prof.status === "approved" ? (
             <ConsultantDashboard prof={prof} incoming={me?.incoming || []} onChanged={load} />
           ) : prof.status === "pending" ? (
-            <div className="card">
-              <h2 style={{ marginTop: 0 }}>Domanda in esame</h2>
-              <p className="small">La tua iscrizione come <b>{prof.profession}</b> è stata inviata il {fmtDateTime(prof.createdAt)} ed è <b>in attesa dell&apos;esame dello staff</b>. Riceverai la scheda pubblica nel catalogo all&apos;approvazione. Nel frattempo puoi consultare le tue richieste di perizia dalla <a href="#/consulente-richieste">pagina dedicata</a>.</p>
-              <p className="small muted mb0">Documento caricato: {prof.docs.length} · Zona: {prof.zone.name} · Tariffa indicata: {prof.feeCents > 0 ? `€ ${fmtEuro(prof.feeCents)}` : "su richiesta"}</p>
-            </div>
+            <>
+              <div className="card">
+                <h2 style={{ marginTop: 0 }}>Domanda in esame</h2>
+                <p className="small">La tua iscrizione come <b>{prof.profession}</b> è stata inviata il {fmtDateTime(prof.createdAt)} ed è <b>in attesa dell&apos;esame dello staff</b>. Riceverai la scheda pubblica nel catalogo all&apos;approvazione. Nel frattempo puoi consultare le tue richieste di perizia dalla <a href="#/consulente-richieste">pagina dedicata</a>.</p>
+                <p className="small muted mb0">Documento caricato: {prof.docs.length} · Zona: {prof.zone.name} · Tariffa indicata: {prof.feeCents > 0 ? `€ ${fmtEuro(prof.feeCents)}` : "su richiesta"}</p>
+                <p className="small mb0" style={{ marginTop: 6 }}>
+                  {prof.ibanCheck === "confirmed"
+                    ? <span className="pill pill-green">IBAN verificato</span>
+                    : <><span className="pill pill-amber">IBAN autocertificato</span> <span className="muted">Lo staff controlla l&apos;intestazione del conto prima degli accrediti.</span></>}
+                </p>
+              </div>
+              <DocsManager prof={prof} onChanged={load} />
+            </>
           ) : (
             <div className="card">
               <h2 style={{ marginTop: 0 }}>Domanda non approvata</h2>
@@ -155,44 +164,102 @@ export function ConsulenteView() {
 
 /* ---------- modulo di iscrizione (prima domanda o ri-domanda) ---------- */
 
-function ApplyForm({ onDone }: { onDone: () => void }) {
+/** Riga di un file pronto da inviare: nome, dimensione e rimozione. */
+function DocRow({ d, onRemove }: { d: PreparedDoc; onRemove: () => void }) {
+  return (
+    <div className="row" style={{ alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+      <span className="small" style={{ flex: 1, minWidth: 160, wordBreak: "break-all" }}>{d.name}</span>
+      <span className="small muted">{fmtBytes(d.sizeBytes)}{d.compressed ? " · compressa nel browser" : ""}</span>
+      <button type="button" className="btn btn-ghost btn-sm" onClick={onRemove}>Rimuovi</button>
+    </div>
+  );
+}
+
+function ApplyForm({ onDone, existing = null }: { onDone: () => void; existing?: ProfiloConsultant | null }) {
   const { toast } = useApp();
   const [f, setF] = useState({
-    firstName: "", lastName: "", profession: "", title: "", bio: "",
-    radiusKm: 30, feeEuros: "", vatNumber: "", iban: "", phone: "",
+    firstName: existing?.firstName || "", lastName: existing?.lastName || "",
+    profession: existing?.profession || "", title: existing?.title || "", bio: existing?.bio || "",
+    radiusKm: existing?.radiusKm ?? 30,
+    feeEuros: existing && existing.feeCents > 0 ? String(existing.feeCents / 100) : "",
+    vatNumber: existing?.vatNumber || "", iban: existing?.iban || "", phone: existing?.phone || "",
   });
-  const [zone, setZone] = useState<Place | null>(null);
-  const [photo, setPhoto] = useState<string | null>(null);
-  const [docsQ, setDocsQ] = useState<DocDraft[]>([]);
-  const [docsD, setDocsD] = useState<DocDraft[]>([]);
-  const [docsE, setDocsE] = useState<DocDraft[]>([]);
+  const [zone, setZone] = useState<Place | null>(null);                // nuova zona scelta ora
+  const [zoneId, setZoneId] = useState<string | null>(existing?.zone?.id || null); // zona in archivio
+  const [photo, setPhoto] = useState<string | null>(null);              // nuova foto, compressa nel browser
+  const [docs, setDocs] = useState<PreparedDoc[]>([]);                  // file nuovi pronti da inviare
+  const [keepIds, setKeepIds] = useState<string[]>(existing?.docs?.map(d => d.id) || []);
+  const [ibanDecl, setIbanDecl] = useState(false);
+  const [prepBusy, setPrepBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const pickFiles = async (files: FileList | null, kind: string, set: (d: DocDraft[]) => void, current: DocDraft[]) => {
+  // budget e completezza: stessi criteri del server, verificati PRIMA dell'invio
+  const keptDocs = (existing?.docs || []).filter(d => keepIds.includes(d.id));
+  const totDocBytes = docs.reduce((a, d) => a + d.sizeBytes, 0) + keptDocs.reduce((a, d) => a + d.sizeBytes, 0);
+  const totCount = docs.length + keepIds.length;
+  const overBudget = totDocBytes > MAX_TOTAL_DOC_BYTES || totCount > MAX_FILES;
+  const kinds = new Set([...keptDocs.map(d => d.kind), ...docs.map(d => d.kind)]);
+  const missingDocs = !kinds.has("qualifica")
+    ? "Allega almeno un documento di qualifica (titolo, albo o certificato)."
+    : !kinds.has("documento")
+      ? "Allega almeno un documento d'identificazione."
+      : null;
+
+  // IBAN: controllo dal vivo, identico a quello del server
+  const ibanCheck = f.iban.trim() ? validateIban(f.iban) : null;
+  const ibanOk = ibanCheck?.ok === true;
+  const ibanBad = ibanCheck != null && !ibanCheck.ok && normalizeIban(f.iban).length >= 8;
+
+  const pick = async (files: FileList | null, kind: string) => {
     if (!files || !files.length) return;
-    const drafts: DocDraft[] = [];
-    for (const file of Array.from(files).slice(0, 5)) {
-      if (file.size > 8 * 1024 * 1024) { toast(`"${file.name}" supera gli 8 MB ed è stato scartato.`, "err"); continue; }
-      drafts.push({ kind, name: file.name, mime: file.type || "application/octet-stream", data: await readFile(file) });
+    setPrepBusy(true);
+    let room = MAX_FILES - totCount;
+    const out: PreparedDoc[] = [];
+    for (const file of Array.from(files)) {
+      if (room <= 0) { toast(`Massimo ${MAX_FILES} documenti in totale (nuovi + conservati).`, "err"); break; }
+      const r = await prepareDocFile(file, kind);
+      if (!r.ok) { toast(r.error, "err"); continue; }
+      out.push(r.doc);
+      room--;
     }
-    set([...current, ...drafts].slice(0, 8));
+    setPrepBusy(false);
+    if (out.length) setDocs([...docs, ...out]);
+  };
+
+  const pickPhoto = async (file: File | null | undefined) => {
+    if (!file) return;
+    setPrepBusy(true);
+    const r = await preparePhotoFile(file);
+    setPrepBusy(false);
+    if (!r.ok) { toast(r.error, "err"); return; }
+    setPhoto(r.data);
   };
 
   const submit = async () => {
-    setErr(null); setBusy(true);
+    setErr(null);
+    if (overBudget) { setErr(`Gli allegati superano il limite (max ${MAX_FILES} file e ${fmtBytes(MAX_TOTAL_DOC_BYTES)} in totale): rimuovine qualcuno o sostituisci i PDF con foto, che vengono compresse.`); return; }
+    if (missingDocs) { setErr(missingDocs); return; }
+    if (ibanBad) { setErr(ibanCheck && !ibanCheck.ok ? ibanCheck.error : "IBAN non valido."); return; }
+    if (!ibanDecl) { setErr("Conferma la dichiarazione sull'intestazione dell'IBAN prima di inviare."); return; }
+    setBusy(true);
     const res = await api<{ status: string }>("/api/consulente/apply", {
       body: {
         ...f,
-        photo,
+        photo: photo || undefined,
         zone: zone ? { name: zone.name, province: zone.province, region: zone.region, lat: zone.lat, lng: zone.lng } : undefined,
-        docs: [...docsQ, ...docsD, ...docsE],
+        zoneId: zone ? undefined : zoneId || undefined,
+        docs,
+        keepDocIds: keepIds,
+        ibanSelfDeclared: ibanDecl,
       },
     });
     setBusy(false);
     if (res.ok) {
-      toast("Domanda inviata: lo staff la esaminerà.");
+      toast(existing ? "Nuova domanda inviata: lo staff la esaminerà." : "Domanda inviata: lo staff la esaminerà.");
       onDone();
+    } else if (res.error === "Risposta non valida dal server.") {
+      setErr("Il server non ha risposto in modo leggibile: quasi sempre dipende dal peso degli allegati (max 3 MB in totale). Rimuovine qualcuno e riprova.");
     } else setErr(res.error);
   };
 
@@ -226,11 +293,13 @@ function ApplyForm({ onDone }: { onDone: () => void }) {
         </div>
         <PlaceSearch
           id="cz-zone" label="Zona di esercizio *" hint="La località da cui operi: qualsiasi comune d'Italia. La scheda sarà visibile in questa zona."
-          selected={zone ? zone.name : null}
-          onPick={p => { setZone(p); }}
+          selected={zone ? zone.name : existing?.zone?.name || null}
+          onPick={p => { setZone(p); setZoneId(null); }}
         />
         {zone ? (
-          <p className="small mb2">Zona memorizzata: <b>{zone.name}</b>{zone.province ? ` (${zone.province})` : ""}. <button type="button" className="link" onClick={() => setZone(null)}>Cambia</button></p>
+          <p className="small mb2">Zona scelta: <b>{zone.name}</b>{zone.province ? ` (${zone.province})` : ""}.</p>
+        ) : existing?.zone ? (
+          <p className="small mb2">Zona attuale: <b>{existing.zone.name}</b>{existing.zone.province ? ` (${existing.zone.province})` : ""} (cerca sopra per cambiarla).</p>
         ) : null}
         <div className="row">
           <div className="field" style={{ flex: 1, minWidth: 130 }}>
@@ -252,8 +321,16 @@ function ApplyForm({ onDone }: { onDone: () => void }) {
           <div className="field" style={{ flex: 1, minWidth: 180 }}>
             <label htmlFor="cz-iban">IBAN (accredito compensi) *</label>
             <input id="cz-iban" required placeholder="ITXX..." value={f.iban} onChange={e => setF({ ...f, iban: e.target.value })} />
-            <span className="hint">Visibile solo allo staff: serve per accreditarti i compensi.</span>
+            {ibanOk ? <span className="hint">IBAN valido: struttura e codice di controllo corretti.</span>
+              : ibanBad ? <span className="error-msg" style={{ display: "block" }}>{ibanCheck && !ibanCheck.ok ? ibanCheck.error : ""}</span>
+              : <span className="hint">Visibile solo allo staff: serve per accreditarti i compensi.</span>}
           </div>
+        </div>
+        <div className="field">
+          <label htmlFor="cz-ibandecl" style={{ display: "flex", gap: 8, alignItems: "flex-start", fontWeight: 400 }}>
+            <input id="cz-ibandecl" type="checkbox" checked={ibanDecl} onChange={e => setIbanDecl(e.target.checked)} style={{ marginTop: 4 }} />
+            <span className="small">Dichiaro che il conto corrispondente all&apos;IBAN indicato è intestato a <b>{f.firstName.trim() || "nome"} {f.lastName.trim() || "cognome"}</b> e autorizzo lo staff a verificarne l&apos;intestazione prima degli accrediti.</span>
+          </label>
         </div>
         <div className="field">
           <label htmlFor="cz-phone">Telefono (facoltativo)</label>
@@ -264,43 +341,154 @@ function ApplyForm({ onDone }: { onDone: () => void }) {
           <textarea id="cz-bio" rows={4} placeholder="Es. Geometra dal 2008, specializzato in perizie giudiziarie e valutazioni immobiliari nel milanese…" value={f.bio} onChange={e => setF({ ...f, bio: e.target.value })} />
         </div>
         <div className="field">
-          <label htmlFor="cz-photo">Foto profilo *</label>
-          <input id="cz-photo" type="file" accept="image/*" onChange={async e => {
-            const file = e.target.files?.[0];
-            if (file) setPhoto(await readFile(file));
-          }} />
-          <span className="hint">Ricompressa lato server senza metadati (come le foto delle recensioni).</span>
-          {photo ? <img src={photo} alt="Anteprima della foto profilo" style={{ width: 96, height: 96, objectFit: "cover", borderRadius: 8, marginTop: 8 }} /> : null}
+          <label htmlFor="cz-photo">Foto profilo {existing?.hasPhoto ? "(sostituisci se vuoi)" : "*"}</label>
+          <input id="cz-photo" type="file" accept="image/jpeg,image/png,image/webp" disabled={prepBusy} onChange={e => void pickPhoto(e.target.files?.[0])} />
+          <span className="hint">Ridimensionata e compressa nel browser prima dell&apos;invio; il server la ricompila senza metadati (come le foto delle recensioni).</span>
+          {photo ? (
+            <div className="row mt1" style={{ alignItems: "center", gap: 10 }}>
+              <img src={photo} alt="Anteprima della nuova foto profilo" style={{ width: 96, height: 96, objectFit: "cover", borderRadius: 8 }} />
+              <div>
+                <p className="small mb1"><b>{fmtBytes(dataUrlBytes(photo))}</b> · pronta all&apos;invio</p>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPhoto(null)}>Rimuovi</button>
+              </div>
+            </div>
+          ) : existing?.hasPhoto ? (
+            <div className="row mt1" style={{ alignItems: "center", gap: 10 }}>
+              <img src={`/api/consulente/photo/${existing.id}`} alt="Foto profilo attuale" style={{ width: 96, height: 96, objectFit: "cover", borderRadius: 8 }} />
+              <p className="small muted mb0">Foto attuale: resta in archivio. Scegline una nuova per sostituirla.</p>
+            </div>
+          ) : null}
         </div>
         <fieldset>
-          <legend>Documenti (obbligatori, visibili solo allo staff) *</legend>
+          <legend>Documenti (visibili solo allo staff) *</legend>
+          <p className="small muted" style={{ marginTop: 4 }}>
+            Massimo {MAX_FILES} file, 2 MB ciascuno e {fmtBytes(MAX_TOTAL_DOC_BYTES)} in totale. Le foto vengono compresse
+            automaticamente nel browser; i PDF no — se un PDF è troppo grande, fotografane il contenuto e carica la foto.
+            {" "}Spazio usato: <b style={{ color: overBudget ? "#c02929" : undefined }}>{fmtBytes(totDocBytes)}</b> su {fmtBytes(MAX_TOTAL_DOC_BYTES)}.
+          </p>
+          {existing && existing.docs.length ? (
+            <div className="field">
+              <label>Documenti già in archivio</label>
+              {existing.docs.map(d => (
+                <div key={d.id} className="row" style={{ alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+                  <span className="small" style={{ flex: 1, minWidth: 160, wordBreak: "break-all", textDecoration: keepIds.includes(d.id) ? undefined : "line-through" }}>{d.originalName}</span>
+                  <span className="pill pill-gray">{DOC_KIND_LABEL[d.kind] || d.kind}</span>
+                  <span className="small muted">{fmtBytes(d.sizeBytes)}</span>
+                  {keepIds.includes(d.id) ? (
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setKeepIds(keepIds.filter(x => x !== d.id))}>Rimuovi</button>
+                  ) : (
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setKeepIds([...keepIds, d.id])}>Conserva</button>
+                  )}
+                </div>
+              ))}
+              <span className="hint">La nuova domanda conserva i documenti con il segno di spunta: togli quelli da sostituire e carica i nuovi qui sotto.</span>
+            </div>
+          ) : null}
           <div className="field">
             <label htmlFor="cz-doc-q">Qualifica: titolo, iscrizione all&apos;albo o certificato *</label>
-            <input id="cz-doc-q" type="file" multiple onChange={e => void pickFiles(e.target.files, "qualifica", setDocsQ, docsQ)} />
-            {docsQ.length ? <p className="small muted mb0">{docsQ.map((d, i) => <span key={i} className="pill pill-gray" style={{ marginRight: 6 }}>{d.name}</span>)}</p> : null}
+            <input id="cz-doc-q" type="file" multiple accept="application/pdf,image/jpeg,image/png,image/webp" disabled={prepBusy} onChange={e => void pick(e.target.files, "qualifica")} />
+            {docs.filter(d => d.kind === "qualifica").map((d, i) => <DocRow key={`q${i}`} d={d} onRemove={() => setDocs(docs.filter(x => x !== d))} />)}
           </div>
           <div className="field">
             <label htmlFor="cz-doc-d">Documento d&apos;identificazione *</label>
-            <input id="cz-doc-d" type="file" multiple onChange={e => void pickFiles(e.target.files, "documento", setDocsD, docsD)} />
-            {docsD.length ? <p className="small muted mb0">{docsD.map((d, i) => <span key={i} className="pill pill-gray" style={{ marginRight: 6 }}>{d.name}</span>)}</p> : null}
+            <input id="cz-doc-d" type="file" multiple accept="application/pdf,image/jpeg,image/png,image/webp" disabled={prepBusy} onChange={e => void pick(e.target.files, "documento")} />
+            {docs.filter(d => d.kind === "documento").map((d, i) => <DocRow key={`d${i}`} d={d} onRemove={() => setDocs(docs.filter(x => x !== d))} />)}
           </div>
           <div className="field">
             <label htmlFor="cz-doc-e">Esperienza: curriculum, portfolio, referenze (facoltativo)</label>
-            <input id="cz-doc-e" type="file" multiple onChange={e => void pickFiles(e.target.files, "esperienza", setDocsE, docsE)} />
-            {docsE.length ? <p className="small muted mb0">{docsE.map((d, i) => <span key={i} className="pill pill-gray" style={{ marginRight: 6 }}>{d.name}</span>)}</p> : null}
+            <input id="cz-doc-e" type="file" multiple accept="application/pdf,image/jpeg,image/png,image/webp" disabled={prepBusy} onChange={e => void pick(e.target.files, "esperienza")} />
+            {docs.filter(d => d.kind === "esperienza").map((d, i) => <DocRow key={`e${i}`} d={d} onRemove={() => setDocs(docs.filter(x => x !== d))} />)}
           </div>
         </fieldset>
         {err ? <p className="error-msg" style={{ display: "block" }}>{err}</p> : null}
-        <button className="btn btn-primary" type="submit" disabled={busy}>{busy ? "Invio…" : "Invia la domanda di iscrizione"}</button>
+        <button className="btn btn-primary" type="submit" disabled={busy || prepBusy || overBudget || !!missingDocs || ibanBad || !ibanDecl || (!photo && !existing?.hasPhoto)}>
+          {prepBusy ? "Preparazione dei file…" : busy ? "Invio…" : existing ? "Invia la nuova domanda" : "Invia la domanda di iscrizione"}
+        </button>
       </form>
     </div>
   );
 }
 
-/* ---------- ri-domanda dopo rifiuto: campi nuovamente modificabili ---------- */
+/* ---------- ri-domanda dopo rifiuto: campi ricaricati, documenti conservabili ---------- */
 
 function ReapplyForm({ prof, onDone }: { prof: ProfiloConsultant; onDone: () => void }) {
-  return <ApplyForm key={prof.id} onDone={onDone} />;
+  return <ApplyForm key={prof.id} onDone={onDone} existing={prof} />;
+}
+
+/* ---------- documenti della domanda in esame: sostituisci / aggiungi / elimina ---------- */
+
+function DocsManager({ prof, onChanged }: { prof: ProfiloConsultant; onChanged: () => void }) {
+  const { toast } = useApp();
+  const [busy, setBusy] = useState(false);
+  const [prepBusy, setPrepBusy] = useState(false);
+  const [addKind, setAddKind] = useState("esperienza");
+  const addRef = useRef<HTMLInputElement | null>(null);
+  const replaceRef = useRef<HTMLInputElement | null>(null);
+  const replaceTarget = useRef<string | null>(null);
+
+  const send = async (method: "PATCH" | "DELETE", body: Record<string, unknown>) => {
+    setBusy(true);
+    const res = await api("/api/consulente/docs", { method, body });
+    setBusy(false);
+    if (res.ok) { toast("Documenti aggiornati."); onChanged(); }
+    else toast(res.error, "err");
+  };
+
+  const prep = async (file: File | null | undefined, kind: string): Promise<PreparedDoc | null> => {
+    if (!file) return null;
+    setPrepBusy(true);
+    const r = await prepareDocFile(file, kind);
+    setPrepBusy(false);
+    if (!r.ok) { toast(r.error, "err"); return null; }
+    return r.doc;
+  };
+
+  const busyAll = busy || prepBusy;
+
+  return (
+    <div className="card mb2">
+      <h3 style={{ marginTop: 0 }}>Documenti della domanda</h3>
+      <p className="small muted">
+        Finché la domanda è in esame puoi <b>sostituire, aggiungere o eliminare</b> i documenti: lo staff esaminerà
+        sempre l&apos;ultima versione. Massimo {MAX_FILES} file, 2 MB ciascuno, {fmtBytes(MAX_TOTAL_DOC_BYTES)} in totale
+        (le foto vengono compresse automaticamente nel browser).
+      </p>
+      {prof.docs.map(d => (
+        <div key={d.id} className="row" style={{ alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+          <a href={`/api/consulente/doc/${d.id}`} className="small" style={{ flex: 1, minWidth: 160, wordBreak: "break-all" }}>{d.originalName}</a>
+          <span className="pill pill-gray">{DOC_KIND_LABEL[d.kind] || d.kind}</span>
+          <span className="small muted">{fmtBytes(d.sizeBytes)}</span>
+          <button type="button" className="btn btn-ghost btn-sm" disabled={busyAll} onClick={() => { replaceTarget.current = d.id; replaceRef.current?.click(); }}>Sostituisci</button>
+          <button type="button" className="btn btn-ghost btn-sm" disabled={busyAll} onClick={() => void send("DELETE", { docId: d.id })}>Rimuovi</button>
+        </div>
+      ))}
+      <div className="row" style={{ alignItems: "flex-end", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+        <div className="field mb0" style={{ minWidth: 180 }}>
+          <label htmlFor="dm-kind">Tipo del documento nuovo</label>
+          <select id="dm-kind" value={addKind} onChange={e => setAddKind(e.target.value)}>
+            <option value="qualifica">Qualifica</option>
+            <option value="documento">Identificazione</option>
+            <option value="esperienza">Esperienza</option>
+            <option value="altro">Altro</option>
+          </select>
+        </div>
+        <button type="button" className="btn btn-primary" disabled={busyAll} onClick={() => addRef.current?.click()}>
+          {prepBusy ? "Preparazione…" : "Aggiungi documento"}
+        </button>
+      </div>
+      <input ref={addRef} type="file" accept="application/pdf,image/jpeg,image/png,image/webp" hidden onChange={async e => {
+        const d = await prep(e.target.files?.[0], addKind);
+        if (e.target) e.target.value = "";
+        if (d) await send("PATCH", { kind: d.kind, name: d.name, data: d.data });
+      }} />
+      <input ref={replaceRef} type="file" accept="application/pdf,image/jpeg,image/png,image/webp" hidden onChange={async e => {
+        const docId = replaceTarget.current;
+        const d = await prep(e.target.files?.[0], "qualifica");
+        if (e.target) e.target.value = "";
+        if (docId && d) await send("PATCH", { docId, name: d.name, data: d.data });
+      }} />
+    </div>
+  );
 }
 
 /* ---------- dashboard del consulente approvato ---------- */

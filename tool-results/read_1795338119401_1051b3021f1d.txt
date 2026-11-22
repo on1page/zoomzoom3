@@ -1,0 +1,631 @@
+     1→"use client";
+     2→// ZoomZoom — Consulente Tecnico: viste dedicate.
+     3→//   ConsulenteView          (#/consulente)            presentazione, domanda
+     4→//                                                       di iscrizione (con
+     5→//                                                       2FA obbligatoria),
+     6→//                                                       stato, dashboard del
+     7→//                                                       consulente approvato
+     8→//   ConsulenteRequestsView  (#/consulente-richieste)  richieste inviate
+     9→//                                                       (stato, pagamento,
+    10→//                                                       scarico del PDF)
+    11→//   ConsulenteRequestFormView (#/consulente-richiesta?to=<scheda>)
+    12→//                                                       modulo di richiesta
+    13→//                                                       di perizia/valutazione
+    14→//   ConsultantCard                                    sezione professionale
+    15→//                                                       della scheda pubblica
+    16→import { useCallback, useEffect, useState } from "react";
+    17→import { useApp } from "@/lib/client/store";
+    18→import { api, fmtDateTime } from "@/lib/client/api";
+    19→import { navigate } from "@/lib/client/router";
+    20→import { Alert } from "../ui-kit";
+    21→import { PlaceSearch, type Place } from "../place-search";
+    22→
+    23→/* ---------- helper ---------- */
+    24→
+    25→const fmtEuro = (cents: number | null | undefined) =>
+    26→  cents == null ? "—" : (cents / 100).toLocaleString("it-IT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    27→
+    28→const readFile = (f: File) => new Promise<string>((res, rej) => {
+    29→  const r = new FileReader();
+    30→  r.onload = () => res(String(r.result));
+    31→  r.onerror = () => rej(r.error);
+    32→  r.readAsDataURL(f);
+    33→});
+    34→
+    35→type DocDraft = { kind: string; name: string; mime: string; data: string };
+    36→
+    37→const PROFESSIONS = ["Geometra", "Ingegnere", "Tecnico", "Perito", "Consulente Tecnico", "Agente Immobiliare", "Altro"];
+    38→const PERIZIA_KINDS = ["Perizia tecnica", "Valutazione immobiliare", "Altro"];
+    39→
+    40→type ProfiloConsultant = {
+    41→  id: string; firstName: string; lastName: string; hasPhoto: boolean;
+    42→  profession: string; title: string; bio: string | null;
+    43→  zone: { id: string; name: string; province: string | null; region: string | null };
+    44→  radiusKm: number; feeCents: number;
+    45→  vatNumber: string | null; iban: string | null; phone: string | null;
+    46→  status: string; rejectReason: string | null; entityId: string | null;
+    47→  docs: Array<{ id: string; kind: string; originalName: string; sizeBytes: number }>;
+    48→  createdAt: string;
+    49→};
+    50→
+    51→export type Richiesta = {
+    52→  id: string; kind: string; address: string; description: string;
+    53→  status: string; feeCents: number | null; rejectReason: string | null;
+    54→  reportTitle: string | null; deliveredAt: string | null; paidAt: string | null;
+    55→  payoutCents: number | null; commissionCents: number | null;
+    56→  createdAt: string;
+    57→  counterpart: { nickname?: string; name?: string; profession?: string };
+    58→  canDeliver?: boolean; canAccept?: boolean; canReject?: boolean; canCancel?: boolean;
+    59→};
+    60→
+    61→const STATUS_LABEL: Record<string, string> = {
+    62→  requested: "In attesa di risposta",
+    63→  accepted: "Accettata — in attesa di pagamento",
+    64→  rejected: "Rifiutata",
+    65→  paid: "Pagamento registrato — relazione in corso",
+    66→  delivered: "Relazione consegnata",
+    67→  closed: "Conclusa e accreditata",
+    68→  cancelled: "Annullata",
+    69→};
+    70→
+    71→function StatusPill({ status }: { status: string }) {
+    72→  const cls: Record<string, string> = {
+    73→    requested: "pill pill-gray", accepted: "pill pill-amber", rejected: "pill pill-red",
+    74→    paid: "pill pill-blue", delivered: "pill pill-green", closed: "pill pill-green",
+    75→    cancelled: "pill pill-gray",
+    76→  };
+    77→  return <span className={cls[status] || "pill pill-gray"}>{STATUS_LABEL[status] || status}</span>;
+    78→}
+    79→
+    80→/* ================================================================
+    81→   Vista principale: presentazione / iscrizione / dashboard
+    82→   ================================================================ */
+    83→
+    84→export function ConsulenteView() {
+    85→  const { boot, user, toast } = useApp();
+    86→  const [me, setMe] = useState<{ profile: ProfiloConsultant | null; incoming: Richiesta[]; outgoing: Richiesta[] } | null>(null);
+    87→  const [loading, setLoading] = useState(true);
+    88→
+    89→  const load = useCallback(async () => {
+    90→    if (!user) { setLoading(false); return; }
+    91→    const res = await api<{ profile: ProfiloConsultant | null; incoming: Richiesta[]; outgoing: Richiesta[] }>("/api/consulente/me");
+    92→    if (res.ok) setMe({ profile: res.profile, incoming: res.incoming || [], outgoing: res.outgoing || [] });
+    93→    setLoading(false);
+    94→  }, [user]);
+    95→  useEffect(() => { void load(); }, [load]);
+    96→
+    97→  if (!boot) return <div className="container section"><p className="muted">Caricamento…</p></div>;
+    98→
+    99→  const prof = me?.profile ?? null;
+   100→
+   101→  return (
+   102→    <>
+   103→      <div className="container section" style={{ maxWidth: 860 }}>
+   104→        <h1>Consulenti tecnici</h1>
+   105→        <Alert kind="info">
+   106→          Una figura professionale dedicata: <b>geometri, ingegneri, periti, tecnici e agenti immobiliari</b> iscritti con
+   107→          approvazione dello staff e accesso protetto da <b>verifica in due passaggi (2FA)</b>. Chi cerca una casa può
+   108→          chiedere una <b>perizia tecnica</b> o una <b>valutazione immobiliare indipendente</b>, ricevendola come relazione
+   109→          scritta scaricabile in PDF, dietro il pagamento della tariffa del consulente.
+   110→        </Alert>
+   111→
+   112→        {!user ? (
+   113→          <div className="card">
+   114→            <h2 style={{ marginTop: 0 }}>Come funziona</h2>
+   115→            <ol className="small" style={{ paddingLeft: 20 }}>
+   116→              <li>Il consulente si iscrive dal suo account (2FA attiva obbligatoria) con anagrafica, zona di esercizio, raggio d&apos;azione, titolo, documenti di qualifica e identificazione, partita IVA, IBAN e tariffa.</li>
+   117→              <li>Lo staff esamina la domanda e, se idonea, approva: la scheda professionale entra nel catalogo.</li>
+   118→              <li>Un utente registrato richiede la perizia dalla scheda del consulente; il consulente accetta confermando la tariffa.</li>
+   119→              <li>L&apos;utente paga la tariffa alla piattaforma; il consulente consegna la relazione in PDF e riceve l&apos;accredito (tariffa meno il 10% che resta alla piattaforma) solo a consegna avvenuta.</li>
+   120→            </ol>
+   121→            <p className="small mb0">Per iniziare <a href="#/accedi">accedi</a> o <a href="#/registrati">registrati</a>; per chiedere una perizia, apri la scheda di un consulente dalla <a href="#/cerca">ricerca</a> o dalla categoria <a href="#/categoria/consulente">Consulenti</a>.</p>
+   122→          </div>
+   123→        ) : loading ? (
+   124→          <p className="muted">Caricamento del tuo profilo consulente…</p>
+   125→        ) : prof ? (
+   126→          prof.status === "approved" ? (
+   127→            <ConsultantDashboard prof={prof} incoming={me?.incoming || []} onChanged={load} />
+   128→          ) : prof.status === "pending" ? (
+   129→            <div className="card">
+   130→              <h2 style={{ marginTop: 0 }}>Domanda in esame</h2>
+   131→              <p className="small">La tua iscrizione come <b>{prof.profession}</b> è stata inviata il {fmtDateTime(prof.createdAt)} ed è <b>in attesa dell&apos;esame dello staff</b>. Riceverai la scheda pubblica nel catalogo all&apos;approvazione. Nel frattempo puoi consultare le tue richieste di perizia dalla <a href="#/consulente-richieste">pagina dedicata</a>.</p>
+   132→              <p className="small muted mb0">Documento caricato: {prof.docs.length} · Zona: {prof.zone.name} · Tariffa indicata: {prof.feeCents > 0 ? `€ ${fmtEuro(prof.feeCents)}` : "su richiesta"}</p>
+   133→            </div>
+   134→          ) : (
+   135→            <div className="card">
+   136→              <h2 style={{ marginTop: 0 }}>Domanda non approvata</h2>
+   137→              <Alert kind="danger">Motivazione dello staff: {prof.rejectReason || "—"}</Alert>
+   138→              <p className="small">Puoi correggere i dati e presentare una nuova domanda: i campi verranno ricontrollati dallo staff.</p>
+   139→              <ReapplyForm prof={prof} onDone={load} />
+   140→            </div>
+   141→          )
+   142→        ) : user.totpEnabled ? (
+   143→          <ApplyForm onDone={load} />
+   144→        ) : (
+   145→          <div className="card">
+   146→            <h2 style={{ marginTop: 0 }}>Prima di iscriverti: attiva la 2FA</h2>
+   147→            <p className="small">L&apos;accesso del Consulente Tecnico è protetto dalla <b>verifica in due passaggi</b>: è obbligatoria già in fase di iscrizione. Attivala dalle impostazioni del tuo profilo (serve un&apos;app di autenticazione sul telefono), poi torna qui.</p>
+   148→            <a className="btn btn-primary" href="#/profilo-impostazioni">Vai alle impostazioni del profilo</a>
+   149→          </div>
+   150→        )}
+   151→      </div>
+   152→    </>
+   153→  );
+   154→}
+   155→
+   156→/* ---------- modulo di iscrizione (prima domanda o ri-domanda) ---------- */
+   157→
+   158→function ApplyForm({ onDone }: { onDone: () => void }) {
+   159→  const { toast } = useApp();
+   160→  const [f, setF] = useState({
+   161→    firstName: "", lastName: "", profession: "", title: "", bio: "",
+   162→    radiusKm: 30, feeEuros: "", vatNumber: "", iban: "", phone: "",
+   163→  });
+   164→  const [zone, setZone] = useState<Place | null>(null);
+   165→  const [photo, setPhoto] = useState<string | null>(null);
+   166→  const [docsQ, setDocsQ] = useState<DocDraft[]>([]);
+   167→  const [docsD, setDocsD] = useState<DocDraft[]>([]);
+   168→  const [docsE, setDocsE] = useState<DocDraft[]>([]);
+   169→  const [err, setErr] = useState<string | null>(null);
+   170→  const [busy, setBusy] = useState(false);
+   171→
+   172→  const pickFiles = async (files: FileList | null, kind: string, set: (d: DocDraft[]) => void, current: DocDraft[]) => {
+   173→    if (!files || !files.length) return;
+   174→    const drafts: DocDraft[] = [];
+   175→    for (const file of Array.from(files).slice(0, 5)) {
+   176→      if (file.size > 8 * 1024 * 1024) { toast(`"${file.name}" supera gli 8 MB ed è stato scartato.`, "err"); continue; }
+   177→      drafts.push({ kind, name: file.name, mime: file.type || "application/octet-stream", data: await readFile(file) });
+   178→    }
+   179→    set([...current, ...drafts].slice(0, 8));
+   180→  };
+   181→
+   182→  const submit = async () => {
+   183→    setErr(null); setBusy(true);
+   184→    const res = await api<{ status: string }>("/api/consulente/apply", {
+   185→      body: {
+   186→        ...f,
+   187→        photo,
+   188→        zone: zone ? { name: zone.name, province: zone.province, region: zone.region, lat: zone.lat, lng: zone.lng } : undefined,
+   189→        docs: [...docsQ, ...docsD, ...docsE],
+   190→      },
+   191→    });
+   192→    setBusy(false);
+   193→    if (res.ok) {
+   194→      toast("Domanda inviata: lo staff la esaminerà.");
+   195→      onDone();
+   196→    } else setErr(res.error);
+   197→  };
+   198→
+   199→  return (
+   200→    <div className="card">
+   201→      <h2 style={{ marginTop: 0 }}>Iscriviti come Consulente Tecnico</h2>
+   202→      <p className="small muted">Tutti i dati indicati con * sono obbligatori. La domanda è esaminata dallo staff: la scheda pubblica nasce solo dopo l&apos;approvazione.</p>
+   203→      <form onSubmit={e => { e.preventDefault(); void submit(); }}>
+   204→        <div className="row">
+   205→          <div className="field" style={{ flex: 1, minWidth: 140 }}>
+   206→            <label htmlFor="cz-first">Nome *</label>
+   207→            <input id="cz-first" required value={f.firstName} onChange={e => setF({ ...f, firstName: e.target.value })} />
+   208→          </div>
+   209→          <div className="field" style={{ flex: 1, minWidth: 140 }}>
+   210→            <label htmlFor="cz-last">Cognome *</label>
+   211→            <input id="cz-last" required value={f.lastName} onChange={e => setF({ ...f, lastName: e.target.value })} />
+   212→          </div>
+   213→        </div>
+   214→        <div className="row">
+   215→          <div className="field" style={{ flex: 1, minWidth: 160 }}>
+   216→            <label htmlFor="cz-prof">Professione *</label>
+   217→            <select id="cz-prof" required value={f.profession} onChange={e => setF({ ...f, profession: e.target.value })}>
+   218→              <option value="">Scegli…</option>
+   219→              {PROFESSIONS.map(p => <option key={p} value={p}>{p}</option>)}
+   220→            </select>
+   221→          </div>
+   222→          <div className="field" style={{ flex: 1, minWidth: 160 }}>
+   223→            <label htmlFor="cz-title">Titolo di studio *</label>
+   224→            <input id="cz-title" required placeholder="Es. Diploma di geometra / Laurea in ingegneria edile" value={f.title} onChange={e => setF({ ...f, title: e.target.value })} />
+   225→          </div>
+   226→        </div>
+   227→        <PlaceSearch
+   228→          id="cz-zone" label="Zona di esercizio *" hint="La località da cui operi: qualsiasi comune d'Italia. La scheda sarà visibile in questa zona."
+   229→          selected={zone ? zone.name : null}
+   230→          onPick={p => { setZone(p); }}
+   231→        />
+   232→        {zone ? (
+   233→          <p className="small mb2">Zona memorizzata: <b>{zone.name}</b>{zone.province ? ` (${zone.province})` : ""}. <button type="button" className="link" onClick={() => setZone(null)}>Cambia</button></p>
+   234→        ) : null}
+   235→        <div className="row">
+   236→          <div className="field" style={{ flex: 1, minWidth: 130 }}>
+   237→            <label htmlFor="cz-radius">Raggio di azione (km) *</label>
+   238→            <input id="cz-radius" type="number" min={5} max={300} required value={f.radiusKm} onChange={e => setF({ ...f, radiusKm: Number(e.target.value) })} />
+   239→            <span className="hint">Tra 5 e 300 km attorno alla zona di esercizio.</span>
+   240→          </div>
+   241→          <div className="field" style={{ flex: 1, minWidth: 130 }}>
+   242→            <label htmlFor="cz-fee">Tariffa richiesta (€)</label>
+   243→            <input id="cz-fee" type="text" inputMode="decimal" placeholder="Es. 300 (vuoto = su richiesta)" value={f.feeEuros} onChange={e => setF({ ...f, feeEuros: e.target.value })} />
+   244→            <span className="hint">La tariffa di riferimento per una perizia: potrai confermarla o aggiornarla a ogni richiesta.</span>
+   245→          </div>
+   246→        </div>
+   247→        <div className="row">
+   248→          <div className="field" style={{ flex: 1, minWidth: 140 }}>
+   249→            <label htmlFor="cz-vat">Partita IVA *</label>
+   250→            <input id="cz-vat" required placeholder="Es. 01234567890" value={f.vatNumber} onChange={e => setF({ ...f, vatNumber: e.target.value })} />
+   251→          </div>
+   252→          <div className="field" style={{ flex: 1, minWidth: 180 }}>
+   253→            <label htmlFor="cz-iban">IBAN (accredito compensi) *</label>
+   254→            <input id="cz-iban" required placeholder="ITXX..." value={f.iban} onChange={e => setF({ ...f, iban: e.target.value })} />
+   255→            <span className="hint">Visibile solo allo staff: serve per accreditarti i compensi.</span>
+   256→          </div>
+   257→        </div>
+   258→        <div className="field">
+   259→          <label htmlFor="cz-phone">Telefono (facoltativo)</label>
+   260→          <input id="cz-phone" value={f.phone} onChange={e => setF({ ...f, phone: e.target.value })} />
+   261→        </div>
+   262→        <div className="field">
+   263→          <label htmlFor="cz-bio">Presentazione ed esperienza</label>
+   264→          <textarea id="cz-bio" rows={4} placeholder="Es. Geometra dal 2008, specializzato in perizie giudiziarie e valutazioni immobiliari nel milanese…" value={f.bio} onChange={e => setF({ ...f, bio: e.target.value })} />
+   265→        </div>
+   266→        <div className="field">
+   267→          <label htmlFor="cz-photo">Foto profilo *</label>
+   268→          <input id="cz-photo" type="file" accept="image/*" onChange={async e => {
+   269→            const file = e.target.files?.[0];
+   270→            if (file) setPhoto(await readFile(file));
+   271→          }} />
+   272→          <span className="hint">Ricompressa lato server senza metadati (come le foto delle recensioni).</span>
+   273→          {photo ? <img src={photo} alt="Anteprima della foto profilo" style={{ width: 96, height: 96, objectFit: "cover", borderRadius: 8, marginTop: 8 }} /> : null}
+   274→        </div>
+   275→        <fieldset>
+   276→          <legend>Documenti (obbligatori, visibili solo allo staff) *</legend>
+   277→          <div className="field">
+   278→            <label htmlFor="cz-doc-q">Qualifica: titolo, iscrizione all&apos;albo o certificato *</label>
+   279→            <input id="cz-doc-q" type="file" multiple onChange={e => void pickFiles(e.target.files, "qualifica", setDocsQ, docsQ)} />
+   280→            {docsQ.length ? <p className="small muted mb0">{docsQ.map((d, i) => <span key={i} className="pill pill-gray" style={{ marginRight: 6 }}>{d.name}</span>)}</p> : null}
+   281→          </div>
+   282→          <div className="field">
+   283→            <label htmlFor="cz-doc-d">Documento d&apos;identificazione *</label>
+   284→            <input id="cz-doc-d" type="file" multiple onChange={e => void pickFiles(e.target.files, "documento", setDocsD, docsD)} />
+   285→            {docsD.length ? <p className="small muted mb0">{docsD.map((d, i) => <span key={i} className="pill pill-gray" style={{ marginRight: 6 }}>{d.name}</span>)}</p> : null}
+   286→          </div>
+   287→          <div className="field">
+   288→            <label htmlFor="cz-doc-e">Esperienza: curriculum, portfolio, referenze (facoltativo)</label>
+   289→            <input id="cz-doc-e" type="file" multiple onChange={e => void pickFiles(e.target.files, "esperienza", setDocsE, docsE)} />
+   290→            {docsE.length ? <p className="small muted mb0">{docsE.map((d, i) => <span key={i} className="pill pill-gray" style={{ marginRight: 6 }}>{d.name}</span>)}</p> : null}
+   291→          </div>
+   292→        </fieldset>
+   293→        {err ? <p className="error-msg" style={{ display: "block" }}>{err}</p> : null}
+   294→        <button className="btn btn-primary" type="submit" disabled={busy}>{busy ? "Invio…" : "Invia la domanda di iscrizione"}</button>
+   295→      </form>
+   296→    </div>
+   297→  );
+   298→}
+   299→
+   300→/* ---------- ri-domanda dopo rifiuto: campi nuovamente modificabili ---------- */
+   301→
+   302→function ReapplyForm({ prof, onDone }: { prof: ProfiloConsultant; onDone: () => void }) {
+   303→  return <ApplyForm key={prof.id} onDone={onDone} />;
+   304→}
+   305→
+   306→/* ---------- dashboard del consulente approvato ---------- */
+   307→
+   308→function ConsultantDashboard({ prof, incoming, onChanged }: { prof: ProfiloConsultant; incoming: Richiesta[]; onChanged: () => void }) {
+   309→  const { toast } = useApp();
+   310→  const [edit, setEdit] = useState({ bio: prof.bio || "", feeEuros: String(prof.feeCents ? prof.feeCents / 100 : ""), radiusKm: prof.radiusKm, phone: prof.phone || "" });
+   311→  const [busy, setBusy] = useState(false);
+   312→
+   313→  const saveEdit = async () => {
+   314→    setBusy(true);
+   315→    const res = await api("/api/consulente/me", {
+   316→      method: "PATCH",
+   317→      body: { bio: edit.bio, feeEuros: edit.feeEuros === "" ? undefined : edit.feeEuros, radiusKm: edit.radiusKm, phone: edit.phone },
+   318→    });
+   319→    setBusy(false);
+   320→    toast(res.ok ? "Profilo aggiornato." : res.error, res.ok ? "ok" : "err");
+   321→    if (res.ok) onChanged();
+   322→  };
+   323→
+   324→  return (
+   325→    <>
+   326→      <div className="card mb2">
+   327→        <div className="row" style={{ alignItems: "flex-start", gap: 16 }}>
+   328→          {prof.hasPhoto ? (
+   329→            <img src={`/api/consulente/photo/${prof.id}`} alt={`Foto profilo di ${prof.firstName} ${prof.lastName}`} style={{ width: 96, height: 96, objectFit: "cover", borderRadius: 12 }} />
+   330→          ) : null}
+   331→          <div style={{ flex: 1 }}>
+   332→            <h2 style={{ margin: 0 }}>{prof.firstName} {prof.lastName} <span className="pill pill-green">Approvato</span></h2>
+   333→            <p className="small mb1" style={{ marginTop: 4 }}>{prof.profession} · {prof.title} · Zona: {prof.zone.name}{prof.zone.province ? ` (${prof.zone.province})` : ""} · raggio {prof.radiusKm} km</p>
+   334→            <p className="small muted mb0">P.IVA {prof.vatNumber} · IBAN in archivio (visibile solo allo staff) · {prof.docs.length} documenti in archivio</p>
+   335→            {prof.entityId ? <p className="small mb0" style={{ marginTop: 6 }}><a href={`#/scheda/${prof.entityId}`}>Apri la tua scheda pubblica nel catalogo →</a></p> : null}
+   336→          </div>
+   337→        </div>
+   338→      </div>
+   339→
+   340→      <div className="card mb2">
+   341→        <h3 style={{ marginTop: 0 }}>Dati modificabili</h3>
+   342→        <p className="small muted">Presentazione, tariffa, raggio e telefono si aggiornano subito. Per nome, professione, zona o documenti serve una nuova domanda approvata.</p>
+   343→        <div className="row">
+   344→          <div className="field mb1" style={{ flex: 1, minWidth: 120 }}>
+   345→            <label htmlFor="cd-fee">Tariffa (€)</label>
+   346→            <input id="cd-fee" value={edit.feeEuros} placeholder="vuoto = su richiesta" onChange={e => setEdit({ ...edit, feeEuros: e.target.value })} />
+   347→          </div>
+   348→          <div className="field mb1" style={{ flex: 1, minWidth: 100 }}>
+   349→            <label htmlFor="cd-radius">Raggio (km)</label>
+   350→            <input id="cd-radius" type="number" min={5} max={300} value={edit.radiusKm} onChange={e => setEdit({ ...edit, radiusKm: Number(e.target.value) })} />
+   351→          </div>
+   352→          <div className="field mb1" style={{ flex: 1, minWidth: 120 }}>
+   353→            <label htmlFor="cd-phone">Telefono</label>
+   354→            <input id="cd-phone" value={edit.phone} onChange={e => setEdit({ ...edit, phone: e.target.value })} />
+   355→          </div>
+   356→        </div>
+   357→        <div className="field">
+   358→          <label htmlFor="cd-bio">Presentazione</label>
+   359→          <textarea id="cd-bio" rows={3} value={edit.bio} onChange={e => setEdit({ ...edit, bio: e.target.value })} />
+   360→        </div>
+   361→        <button className="btn btn-primary" onClick={() => void saveEdit()} disabled={busy}>{busy ? "Salvo…" : "Salva"}</button>
+   362→      </div>
+   363→
+   364→      <h2>Richieste ricevute</h2>
+   365→      {incoming.length ? incoming.map(r => <RequestCard key={r.id} r={r} role="consultant" onChanged={onChanged} />) : (
+   366→        <p className="small muted">Nessuna richiesta al momento: compariranno qui. Gli utenti ti trovano dalla tua scheda nel catalogo.</p>
+   367→      )}
+   368→    </>
+   369→  );
+   370→}
+   371→
+   372→/* ================================================================
+   373→   Richieste di perizia — scheda (ruoli: utente o consulente)
+   374→   ================================================================ */
+   375→
+   376→function RequestCard({ r, role, onChanged, payment }: { r: Richiesta; role: "user" | "consultant"; onChanged: () => void; payment?: { iban: string; instructions: string } }) {
+   377→  const { toast } = useApp();
+   378→  const [busy, setBusy] = useState(false);
+   379→  const [fee, setFee] = useState(r.feeCents != null ? String(r.feeCents / 100) : "");
+   380→  const [rejectReason, setRejectReason] = useState("");
+   381→  const [title, setTitle] = useState(r.reportTitle || "");
+   382→  const [body, setBody] = useState("");
+   383→  const [open, setOpen] = useState<string | null>(null);
+   384→
+   385→  const act = async (action: string, extra: Record<string, unknown> = {}) => {
+   386→    setBusy(true);
+   387→    const res = await api(`/api/consulente/requests/${r.id}/action`, { body: { action, ...extra } });
+   388→    setBusy(false);
+   389→    if (res.ok) { toast("Operazione registrata."); onChanged(); setOpen(null); }
+   390→    else toast(res.error, "err");
+   391→  };
+   392→
+   393→  return (
+   394→    <article className="card mb2">
+   395→      <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+   396→        <h3 style={{ margin: 0 }}>{r.kind} · {r.address}</h3>
+   397→        <StatusPill status={r.status} />
+   398→      </div>
+   399→      <p className="small muted" style={{ marginTop: 6 }}>
+   400→        {role === "consultant" ? <>Da: {r.counterpart.nickname}</> : <>Consulente: {r.counterpart.name} ({r.counterpart.profession})</>}
+   401→        {" · "}{fmtDateTime(r.createdAt)}
+   402→        {r.feeCents != null ? <> · tariffa € {fmtEuro(r.feeCents)}</> : null}
+   403→        {r.status === "delivered" || r.status === "closed" ? <> · tuo accredito € {fmtEuro(r.payoutCents)} (commissione € {fmtEuro(r.commissionCents)})</> : null}
+   404→      </p>
+   405→      <p className="small" style={{ whiteSpace: "pre-wrap" }}>{r.description}</p>
+   406→      {r.rejectReason ? <p className="small muted">Motivo del rifiuto: {r.rejectReason}</p> : null}
+   407→
+   408→      {role === "consultant" && r.canAccept ? (
+   409→        <div className="card card-pad-s mb1">
+   410→          <div className="row" style={{ alignItems: "flex-end" }}>
+   411→            <div className="field mb0" style={{ flex: 1, minWidth: 120 }}>
+   412→              <label htmlFor={`fee-${r.id}`}>Tariffa confermata (€) *</label>
+   413→              <input id={`fee-${r.id}`} value={fee} inputMode="decimal" onChange={e => setFee(e.target.value)} />
+   414→            </div>
+   415→            <button className="btn btn-primary" disabled={busy} onClick={() => void act("accept", { feeEuros: fee })}>Accetti l&apos;incarico</button>
+   416→          </div>
+   417→          {open === "reject" ? (
+   418→            <div className="field mt1">
+   419→              <label htmlFor={`rej-${r.id}`}>Motivo del rifiuto *</label>
+   420→              <textarea id={`rej-${r.id}`} rows={2} value={rejectReason} onChange={e => setRejectReason(e.target.value)} />
+   421→              <div className="row mt1"><button className="btn btn-danger" disabled={busy || rejectReason.trim().length < 5} onClick={() => void act("reject", { reason: rejectReason })}>Conferma rifiuto</button><button className="btn btn-ghost" onClick={() => setOpen(null)}>Annulla</button></div>
+   422→            </div>
+   423→          ) : (
+   424→            <button className="link small" onClick={() => setOpen("reject")} style={{ marginTop: 6 }}>oppure rifiuta con motivazione…</button>
+   425→          )}
+   426→        </div>
+   427→      ) : null}
+   428→
+   429→      {role === "consultant" && r.canDeliver ? (
+   430→        <div className="card card-pad-s mb1">
+   431→          <p className="small mb1"><b>Consegna la relazione.</b> Verrà resa come PDF scaricabile dal richiedente; l&apos;accredito ti verrà riconosciuto alla consegna.</p>
+   432→          <div className="field">
+   433→            <label htmlFor={`rt-${r.id}`}>Titolo della relazione *</label>
+   434→            <input id={`rt-${r.id}`} value={title} onChange={e => setTitle(e.target.value)} placeholder="Es. Relazione di valutazione immobiliare" />
+   435→          </div>
+   436→          <div className="field">
+   437→            <label htmlFor={`rb-${r.id}`}>Testo della relazione * (almeno 300 caratteri)</label>
+   438→            <textarea id={`rb-${r.id}`} rows={8} value={body} onChange={e => setBody(e.target.value)} placeholder={"Struttura suggerita:\n1. Premessa e incarico\n2. Descrizione dell'immobile\n3. Verifiche eseguite\n4. Valutazione / esito\n5. Conclusioni"} />
+   439→          </div>
+   440→          <button className="btn btn-primary" disabled={busy || title.trim().length < 5 || body.trim().length < 300} onClick={() => void act("deliver", { title, body })}>Consegna la relazione</button>
+   441→        </div>
+   442→      ) : null}
+   443→
+   444→      {role === "user" && r.status === "accepted" ? (
+   445→        <div className="card card-pad-s mb1">
+   446→          <p className="small mb1"><b>Pagamento della tariffa (€ {fmtEuro(r.feeCents)}).</b> Il consulente procede alla relazione dopo la registrazione del pagamento da parte della piattaforma.</p>
+   447→          {payment?.iban ? <p className="small">IBAN della piattaforma: <b className="mono">{payment.iban}</b></p> : null}
+   448→          {payment?.instructions ? <p className="small" style={{ whiteSpace: "pre-wrap" }}>{payment.instructions}</p> : (
+   449→            <p className="small muted">Le istruzioni di pagamento (IBAN e causale) sono indicate qui dal gestore della piattaforma; in caso contrario contatta l&apos;amministrazione dal modulo contatti.</p>
+   450→          )}
+   451→          <p className="small muted mb0">Causale consigliata: <span className="mono">perizia {r.id}</span></p>
+   452→        </div>
+   453→      ) : null}
+   454→
+   455→      {r.status === "delivered" || r.status === "closed" ? (
+   456→        r.reportTitle ? <p className="small mb1"><b>Relazione consegnata:</b> {r.reportTitle}</p> : null
+   457→      ) : null}
+   458→
+   459→      <div className="row">
+   460→        {r.status === "delivered" || r.status === "closed" ? (
+   461→          <a className="btn btn-primary btn-sm" href={`/api/consulente/requests/${r.id}/pdf`}>Scarica il PDF</a>
+   462→        ) : null}
+   463→        {role === "user" && r.canCancel ? (
+   464→          <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void act("cancel")}>Annulla la richiesta</button>
+   465→        ) : null}
+   466→      </div>
+   467→    </article>
+   468→  );
+   469→}
+   470→
+   471→/* ================================================================
+   472→   Vista: le mie richieste (utente) + riepilogo (consulente)
+   473→   ================================================================ */
+   474→
+   475→export function ConsulenteRequestsView() {
+   476→  const { user, boot } = useApp();
+   477→  const [me, setMe] = useState<{ profile: ProfiloConsultant | null; incoming: Richiesta[]; outgoing: Richiesta[]; payment: { iban: string; instructions: string } } | null>(null);
+   478→
+   479→  const load = useCallback(async () => {
+   480→    if (!user) return;
+   481→    const res = await api<typeof me>("/api/consulente/me");
+   482→    if (res.ok) setMe(res);
+   483→  }, [user]);
+   484→  useEffect(() => { void load(); }, [load]);
+   485→
+   486→  if (!boot) return <div className="container section"><p className="muted">Caricamento…</p></div>;
+   487→  if (!user) {
+   488→    return (
+   489→      <div className="container section" style={{ maxWidth: 640 }}>
+   490→        <h1>Le mie richieste</h1>
+   491→        <Alert kind="info">Questa area richiede l&apos;accesso. <a href="#/accedi">Accedi</a> o <a href="#/registrati">registrati</a>.</Alert>
+   492→      </div>
+   493→    );
+   494→  }
+   495→  if (!me) return <div className="container section"><p className="muted">Caricamento…</p></div>;
+   496→
+   497→  return (
+   498→    <div className="container section" style={{ maxWidth: 860 }}>
+   499→      <h1>Le mie richieste di perizia</h1>
+   500→      {me.profile?.status === "approved" ? (
+   501→        <p className="small">Sei anche consulente: le richieste che RICEVI sono nella <a href="#/consulente">dashboard del consulente</a>.</p>
+   502→      ) : null}
+   503→      {me.outgoing.length ? me.outgoing.map(r => <RequestCard key={r.id} r={r} role="user" onChanged={load} payment={me.payment} />) : (
+   504→        <p className="small muted">Non hai ancora richiesto nessuna perizia. Trova un consulente dalla categoria <a href="#/categoria/consulente">Consulenti</a> e apri la sua scheda.</p>
+   505→      )}
+   506→    </div>
+   507→  );
+   508→}
+   509→
+   510→/* ================================================================
+   511→   Vista: modulo di richiesta perizia (dalla scheda di un consulente)
+   512→   ================================================================ */
+   513→
+   514→export function ConsulenteRequestFormView({ entityId }: { entityId?: string }) {
+   515→  const { boot, user, toast } = useApp();
+   516→  const [cons, setCons] = useState<{ name: string; profession: string; feeCents: number; zoneName: string } | null>(null);
+   517→  const [notFound, setNotFound] = useState(false);
+   518→  const [f, setF] = useState({ kind: PERIZIA_KINDS[0], address: "", description: "" });
+   519→  const [err, setErr] = useState<string | null>(null);
+   520→  const [busy, setBusy] = useState(false);
+   521→
+   522→  useEffect(() => {
+   523→    if (!entityId || !boot) return;
+   524→    void (async () => {
+   525→      const res = await api<{ entity: { name: string }; consultant: { firstName: string; lastName: string; profession: string; feeCents: number; zoneName: string } | null }>(`/api/public/entity/${entityId}`);
+   526→      if (!res.ok || !res.consultant) { setNotFound(true); return; }
+   527→      setCons({ name: `${res.consultant.firstName} ${res.consultant.lastName}`, profession: res.consultant.profession, feeCents: res.consultant.feeCents, zoneName: res.consultant.zoneName });
+   528→    })();
+   529→  }, [entityId, boot]);
+   530→
+   531→  if (!boot) return <div className="container section"><p className="muted">Caricamento…</p></div>;
+   532→  if (!user) {
+   533→    return (
+   534→      <div className="container section" style={{ maxWidth: 640 }}>
+   535→        <h1>Richiedi una perizia</h1>
+   536→        <Alert kind="info">Serve un account registrato per chiedere una perizia. <a href="#/accedi">Accedi</a> o <a href="#/registrati">registrati</a>.</Alert>
+   537→      </div>
+   538→    );
+   539→  }
+   540→  if (notFound) return <div className="container section"><h1>Consulente non trovato</h1><p className="muted">La scheda indicata non corrisponde a un consulente disponibile. <a href="#/categoria/consulente">Vedi tutti i consulenti</a>.</p></div>;
+   541→  if (!cons) return <div className="container section"><p className="muted">Caricamento della scheda…</p></div>;
+   542→
+   543→  const submit = async () => {
+   544→    setErr(null); setBusy(true);
+   545→    const res = await api<{ requestId: string }>("/api/consulente/requests", {
+   546→      body: { entityId, kind: f.kind, address: f.address, description: f.description },
+   547→    });
+   548→    setBusy(false);
+   549→    if (res.ok) {
+   550→      toast("Richiesta inviata: il consulente la valuterà.");
+   551→      navigate("#/consulente-richieste");
+   552→    } else setErr(res.error);
+   553→  };
+   554→
+   555→  return (
+   556→    <div className="container section" style={{ maxWidth: 680 }}>
+   557→      <h1>Richiedi una perizia</h1>
+   558→      <Alert kind="info">
+   559→        Consulente: <b>{cons.name}</b> ({cons.profession} · {cons.zoneName}).<br />
+   560→        Tariffa indicativa: <b>{cons.feeCents > 0 ? `€ ${fmtEuro(cons.feeCents)}` : "su richiesta"}</b> — verrà confermata dal consulente prima del pagamento. Il testo integrale delle recensioni di questa scheda resta soggetto alle regole Premium.
+   561→      </Alert>
+   562→      <div className="card">
+   563→        <form onSubmit={e => { e.preventDefault(); void submit(); }}>
+   564→          <div className="field">
+   565→            <label htmlFor="rq-kind">Tipo di richiesta *</label>
+   566→            <select id="rq-kind" value={f.kind} onChange={e => setF({ ...f, kind: e.target.value })}>
+   567→              {PERIZIA_KINDS.map(k => <option key={k} value={k}>{k}</option>)}
+   568→            </select>
+   569→            <span className="hint">Perizia tecnica (stato, difetti, conformità) o valutazione immobiliare (valore di mercato).</span>
+   570→          </div>
+   571→          <div className="field">
+   572→            <label htmlFor="rq-addr">Indirizzo dell&apos;immobile *</label>
+   573→            <input id="rq-addr" required minLength={5} placeholder="Es. Via Roma 1, Milano" value={f.address} onChange={e => setF({ ...f, address: e.target.value })} />
+   574→          </div>
+   575→          <div className="field">
+   576→            <label htmlFor="rq-desc">Descrivi la richiesta * (almeno 30 caratteri)</label>
+   577→            <textarea id="rq-desc" required rows={6} minLength={30} placeholder="Es. Vorrei una valutazione indipendente di un appartamento di 80 m2 al terzo piano con cantina, prima di fare un'offerta…" value={f.description} onChange={e => setF({ ...f, description: e.target.value })} />
+   578→            <span className="hint">Niente dati personali di terzi. Il consulente valuterà l&apos;incarico prima che tu paghi.</span>
+   579→          </div>
+   580→          {err ? <p className="error-msg" style={{ display: "block" }}>{err}</p> : null}
+   581→          <button className="btn btn-primary" type="submit" disabled={busy}>{busy ? "Invio…" : "Invia la richiesta"}</button>
+   582→        </form>
+   583→      </div>
+   584→      <p className="small muted mt2">Come prosegue: il consulente accetta (o rifiuta) → paghi la tariffa alla piattaforma → ricevi la relazione in PDF → il consulente riceve l&apos;accredito solo a consegna avvenuta.</p>
+   585→    </div>
+   586→  );
+   587→}
+   588→
+   589→/* ================================================================
+   590→   Sezione professionale per la scheda pubblica del consulente
+   591→   ================================================================ */
+   592→
+   593→export function ConsultantCard({ c, entityId }: { c: NonNullable<PublicCons>; entityId: string }) {
+   594→  const { user } = useApp();
+   595→  return (
+   596→    <section className="card mb2" style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-start" }}>
+   597→      {c.hasPhoto ? (
+   598→        <img src={`/api/consulente/photo/${c.id}`} alt={`Foto profilo di ${c.firstName} ${c.lastName}`} style={{ width: 110, height: 110, objectFit: "cover", borderRadius: 12, flexShrink: 0 }} />
+   599→      ) : null}
+   600→      <div style={{ flex: 1, minWidth: 240 }}>
+   601→        <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 6 }}>
+   602→          <h2 style={{ margin: 0, fontSize: "1.15rem" }}>{c.firstName} {c.lastName}</h2>
+   603→          <span>
+   604→            <span className="pill pill-blue">Approvato dallo staff</span>{" "}
+   605→            <span className="pill pill-gray">Accesso con 2FA</span>
+   606→          </span>
+   607→        </div>
+   608→        <p className="small" style={{ marginTop: 6 }}>
+   609→          <b>{c.profession}</b> · {c.title}<br />
+   610→          Zona di esercizio: <b>{c.zoneName}</b>{c.province ? ` (${c.province})` : ""} · raggio d&apos;azione {c.radiusKm} km<br />
+   611→          Tariffa: <b>{c.feeCents > 0 ? `€ ${fmtEuro(c.feeCents)}` : "su richiesta"}</b> · P.IVA {c.vatNumber}
+   612→        </p>
+   613→        {c.bio ? <p className="small muted" style={{ whiteSpace: "pre-wrap" }}>{c.bio}</p> : null}
+   614→        <div className="row mt1">
+   615→          <button className="btn btn-primary" onClick={() => navigate(user ? `#/consulente-richiesta?to=${entityId}` : "#/accedi")}>
+   616→            Richiedi perizia o valutazione
+   617→          </button>
+   618→          <a className="btn btn-ghost" href="#/consulente-richieste">Le mie richieste</a>
+   619→        </div>
+   620→        <p className="small muted mt1 mb0">Relazione scritta consegnata in PDF, dietro pagamento della tariffa. L&apos;accredito al consulente avviene solo a consegna avvenuta (10% trattenuto dalla piattaforma).</p>
+   621→      </div>
+   622→    </section>
+   623→  );
+   624→}
+   625→
+   626→type PublicCons = {
+   627→  id: string; firstName: string; lastName: string; profession: string; title: string;
+   628→  bio: string | null; zoneName: string; province: string | null; region: string | null;
+   629→  radiusKm: number; feeCents: number; vatNumber: string | null; hasPhoto: boolean; twoFactor: boolean;
+   630→};
+   631→

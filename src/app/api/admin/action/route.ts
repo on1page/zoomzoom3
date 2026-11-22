@@ -369,6 +369,26 @@ export async function POST(req: Request) {
         await auditLog({ actorId: actor.id, actorRole: actor.role, action: "Iscrizione consulente respinta", targetType: "consultantProfile", targetId: prof.id, reason });
         return NextResponse.json({ ok: true });
       }
+      case "consultant.ibanConfirm":
+      case "consultant.ibanMismatch": {
+        // verifica dell'intestazione dell'IBAN: conferma manuale dello staff
+        // (il richiamo al servizio esterno, se configurato, avviene alla
+        // presentazione della domanda)
+        const actor = await requireStaff("admin.entities");
+        const prof = await db.consultantProfile.findUnique({ where: { id: p.id } });
+        if (!prof) return fail("Profilo consulente non trovato.", 404);
+        const next = p.action === "consultant.ibanConfirm" ? "confirmed" : "mismatch";
+        await db.consultantProfile.update({
+          where: { id: prof.id },
+          data: { ibanCheck: next, ibanCheckedAt: new Date() },
+        });
+        await auditLog({
+          actorId: actor.id, actorRole: actor.role,
+          action: next === "confirmed" ? "IBAN consulente verificato" : "Discordanza IBAN consulente segnalata",
+          targetType: "consultantProfile", targetId: prof.id, reason: reason || null,
+        });
+        return NextResponse.json({ ok: true, ibanCheck: next });
+      }
 
       /* ---- contenuti e impostazioni ---- */
       case "contents.update": {

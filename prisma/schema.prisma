@@ -534,6 +534,13 @@ model ConsultantProfile {
   feeCents      Int       @default(0)  // tariffa richiesta (0 = su richiesta)
   vatNumber     String?   // partita IVA
   iban          String?   // coordinate bancarie per l'accredito (visibili solo allo staff)
+  // esito della verifica dell'intestazione dell'IBAN:
+  //   self      = autocertificato dall'iscritto (domanda presentata)
+  //   confirmed = intestazione confermata (servizio di verifica configurato
+  //               via IBAN_VERIFY_URL, oppure conferma manuale dello staff)
+  //   mismatch  = lo staff ha segnalato una discordanza
+  ibanCheck     String?
+  ibanCheckedAt DateTime?
   phone         String?
   // pending | approved | rejected (approvazione dello staff)
   status        String    @default("pending")

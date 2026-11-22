@@ -67,7 +67,7 @@ async function main() {
     title: "Diploma di geometra", bio: "Perizie e valutazioni dal 2008.",
     zone: { name: "Milano", province: "Milano", region: "Lombardia", lat: 45.4642, lng: 9.19 },
     radiusKm: 40, feeEuros: "300", vatNumber: "01234567890",
-    iban: "IT60X0542811101000000123456", phone: "02 123456",
+    iban: "IT60X0542811101000000123456", ibanSelfDeclared: true, phone: "02 123456",
     photo: photoB64,
     docs: [
       { kind: "qualifica", name: "diploma.pdf", mime: "application/pdf", data: docQ },

@@ -1,0 +1,191 @@
+ZoomZoom — CONSULENTI: documenti sotto controllo, IBAN verificato (fix "Risposta non valida dal server")
+====================================================================================
+
+COSA ERA SUCCESSO
+-----------------
+Creando il profilo consulente con i documenti allegati, il sito rispondeva
+"Risposta non valida dal server". Cause, entrambe a valle della dimensione
+degli allegati:
+
+1) La domanda viaggiava in un'unica richiesta JSON con i file incorporati in
+   base64 (che gonfia tutto di un terzo). Con le foto degli smartphone da
+   3-8 MB ciascuna si superava facilmente il limite dell'ambiente di
+   produzione (~4,5 MB per richiesta): la piattaforma tagliava la richiesta
+   RISPONDENDO in un formato che il sito non riconosce, da cui il messaggio
+   criptico. In locale invece l'invio diventava così lento da scadere.
+2) Nessuna compressionepreventiva e nessun modo di togliere o cambiare un
+   file dopo averlo scelto: l'unico modo era ricominciare da capo.
+
+COSA SISTEMA QUESTO AGGIORNAMENTO
+---------------------------------
+LIMITI CHIARI E COMPRESSIONE AUTOMATICA (prima del problema, non dopo)
+- Le FOTO dei documenti e la foto profilo vengono ridimensionate e
+  ricompresse NEL BROWSER prima dell'invio (come già accadeva per le foto
+  delle recensioni): un documento fotografato scende tipicamente sotto
+  100-300 KB. Il file originale non lascia mai il dispositivo.
+- Limiti dichiarati nel modulo e FATTI RISPETTARE sia nel browser sia dal
+  server: massimo 8 file, 2 MB per file, 3 MB in totale. Sotto il tetto
+  dell'ambiente di produzione, quindi la risposta "non valida" non può più
+  verificarsi per il peso.
+- Il modulo mostra lo SPAZIO USATO ("Spazio usato: 245 KB su 3 MB") e
+  l'anteprima con la dimensione di ogni file pronto da inviare.
+- I PDF non sono comprimibili: se uno sfora, il messaggio invita a
+  fotografare il documento e caricare la foto (che viene compressa).
+- Anche una richiesta eccezionalmente pesante riceve ora una risposta
+  comprensibile invece dell'errore generico.
+
+FILE CHE SI MODIFICANO E SI ELIMINANO
+- NEL MODULO: ogni file caricato è una riga con nome, dimensione e tasti
+  "Rimuovi"; la foto profilo ha anteprima, dimensione e "Rimuovi".
+- DOPO L'INVIO (domanda in attesa di esame): nuova sezione "Documenti della
+  domanda" con un tasto "Sostituisci" e uno "Rimuovi" per OGNI documento,
+  più "Aggiungi documento" (si sceglie il tipo: qualifica, identificazione,
+  esperienza, altro). Lo staff esamina sempre l'ultima versione. Non si può
+  eliminare l'ultimo documento di qualifica o di identificazione: la domanda
+  deve restare completa (il tasto lo spiega).
+- DOPO UN RIFIUTO: la ri-domanda parte già COMPILATA con i dati precedenti e
+  mostra i documenti in archivio, ognuno con "Rimuovi"/"Conserva": si
+  sostituisce solo ciò che lo staff ha segnalato, senza ricaricare tutto.
+- Dopo l'approvazione i documenti non si toccano più (serve una nuova
+  domanda): regola invariata, ora dichiarata chiaramente.
+- Sul server ogni file viene verificato anche NEL CONTENUTO REALE (primi
+  byte): un file che dichiara PDF ma è un'altra cosa viene rifiutato.
+
+IBAN: DAVVERO VALIDATO
+- Controllo completo alla moda degli iban ufficiali: struttura, lunghezza
+  esatta per il paese (registro completo, Italia 27 caratteri) e CODICE DI
+  CONTROLLO mod-97: un errore di battitura viene beccato SUBITO, mentre si
+  digita ("Il codice di controllo non corrisponde..."), prima dell'invio.
+- L'IBAN viene salvato normalizzato (senza spazi) e lo staff lo vede
+  formattato.
+
+IBAN: CORRISPONDENZA CON NOME E COGNOME
+Accertare che un conto sia intestato a una persona richiede un servizio
+bancario autorizzato (open banking): non esiste verifica offline, e i
+servizi esistenti (TrueLayer Bank Account Verification, Tink, Klarna
+Kosma, GoCardless; in Italia gli hub open banking tipo Fabrick/CBI) sono a
+contratto. Il sito ora copre l'intero percorso in sicurezza:
+
+1) ISCRITTO: spunta OBBLIGATORIA "Dichiaro che il conto corrispondente
+   all'IBAN è intestato a [nome cognome]" (il nome si legge nella
+   dichiarazione). Senza spunta la domanda non parte.
+2) SERVIZIO AUTOMATICO (facoltativo, per quando vorrai attivarlo): imposta
+   le variabili d'ambiente IBAN_VERIFY_URL e IBAN_VERIFY_TOKEN e il sito
+   interroga il servizio alla presentazione della domanda. Se risponde che
+   l'intestatario è un altro, la domanda viene RIFIUTATA con messaggio
+   chiaro; se conferma, l'IBAN risulta "verificato" già in partenza. Se il
+   servizio manca o non risponde, niente si blocca: vale l'autocertificazione
+   e il punto 3. Nessuna nuova dipendenza: l'integrazione è pronta, basta
+   la chiave.
+3) STAFF: nel back office (Consulenti tecnici) ogni profilo mostra lo stato
+   IBAN — "autocertificato" (ambra), "verificato" (verde), "discorde"
+   (rosso) — con i tasti "Conferma IBAN" e "IBAN discorde": la verifica
+   manuale (es. su documento d'identità e visura) resta agli operatori,
+   che vedono IBAN e intestatario fianco a fianco. Tutto tracciato
+   nell'audit log. Il consulente vede lo stato nella propria area.
+   Consiglio operativo: confermare l'IBAN PRIMA del primo accredito.
+
+TUTTO IL RESTO NON CAMBIA
+- Flusso perizie/pagamenti/consegne 90/10, approvazioni, schede pubbliche,
+  privacy dei documenti (solo consulente e staff): invariati e ri-provati
+  per intero (vedi test sotto).
+
+INSTALLAZIONE (10 minuti)
+-------------------------
+1) Ferma il server di sviluppo (Ctrl+C).
+2) Estrai lo zip e copia TUTTI i file nel progetto mantenendo i percorsi
+   (PowerShell, dopo aver estratto in una cartella temporanea):
+       Copy-Item -Recurse -Force "C:\percorso\estratto\prisma" "C:\Users\Carlo\sito\zoomzoom\"
+       Copy-Item -Recurse -Force "C:\percorso\estratto\src" "C:\Users\Carlo\sito\zoomzoom\"
+       Copy-Item -Recurse -Force "C:\percorso\estratto\scripts" "C:\Users\Carlo\sito\zoomzoom\"
+3) Aggiorna il database (SOLO DUE COLONNE NUOVE su ConsultantProfile,
+   nessun dato toccato):
+       cd C:\Users\Carlo\sito\zoomzoom
+       bun run db:push
+4) Riavvia: bun run dev
+5) SITO PUBBLICO (Vercel): pubblica e attendi il redeploy:
+       git add prisma/schema.prisma src scripts/test-consulente.mjs scripts/test-consulenti-docs.mjs scripts/test-iban.ts
+       git commit -m "Consulenti: limiti e compressione documenti, gestione file, IBAN verificato"
+       git push
+   (il client del database si rigenera da solo in build grazie al
+   postinstall già presente nel package.json).
+   Se il database di produzione è distinto, esegui bun run db:push anche
+   con le variabili di produzione, come per i pacchetti precedenti.
+6) FACOLTATIVO, solo se un giorno attivi il servizio di verifica
+   dell'intestatario: in Vercel → Settings → Environment Variables aggiungi
+   IBAN_VERIFY_URL e IBAN_VERIFY_TOKEN (le istruzioni del fornitore). Senza
+   queste variabili tutto funziona con autocertificazione + verifica staff.
+
+NESSUNA NUOVA DIPENDENZA. Nessuna variabile d'ambiente obbligatoria.
+
+VERIFICA RAPIDA (5 minuti)
+--------------------------
+1) #/consulente da utente con 2FA: nel modulo, IBAN sbagliato di una cifra
+   → appare subito il messaggio sul codice di controllo; IBAN corretto
+   (anche incollato con spazi) → "IBAN valido";
+2) allega una foto qualunque come documento: sotto il nome vedi la
+   dimensione ridotta e la dicitura "compressa nel browser"; i tasti
+   "Rimuovi" tolgono i file scelti; senza la spunta della dichiarazione
+   IBAN l'invio resta bloccato;
+3) invia la domanda (con foto profilo): arriva a "Domanda in esame" con la
+   pill "IBAN autocertificato" e la sezione "Documenti della domanda"
+   (Sostituisci / Rimuovi / Aggiungi documento);
+4) prova a "Rimuovi" sull'unico documento d'identificazione: il sistema
+   rifiuta spiegando perché;
+5) back office → Consulenti tecnici: stato IBAN ambra; "Conferma IBAN" →
+   pill verde (e nella voce del consulente);
+6) per la ri-domanda dopo un rifiuto (se hai un caso reale): il modulo è
+   precompilato e i documenti vecchi si conservano o si tolgono uno a uno.
+
+TEST ESEGUITI SU QUESTA VERSIONE (tutti verdi: 68/68)
+-----------------------------------------------------
+1) Regressione completa del flusso consulente esistente
+   (scripts/test-consulente.mjs, 25 prove): iscrizione con 2FA, blocco
+   senza 2FA, approvazione con scheda pubblica, richiesta di perizia,
+   accettazione con tariffa, pagamento del super amministratore, consegna
+   con ripartizione 270/30 euro, PDF scaricabile multi-pagina, accesso
+   negato agli estranei su PDF e documenti, accredito e chiusura. Tutto
+   come prima: nessuna regressione.
+2) Nuove prove end-to-end (scripts/test-consulenti-docs.mjs, 32):
+   - IBAN: codice di controllo errato, lunghezza sbagliata, paese non
+     previsto e mancata dichiarazione rifiutati con messaggi specifici;
+     IBAN valido con spazi e minuscole accettato e salvato normalizzato;
+   - LIMITI: documento singolo oltre 2 MB rifiutato; documenti oltre 3 MB
+     totali rifiutati; richiesta complessivamente troppo pesante respinta
+     con messaggio comprensibile (non più l'errore criptico); PDF
+     dichiarato ma con contenuto JPEG rifiutato (controllo byte reali);
+   - GESTIONE DOCUMENTI: eliminazione dell'ultimo documento obbligatorio
+     bloccata; aggiunta, sostituzione (con nuovo nome file verificato in
+     scarico) e riclassificazione controllata; file oltre i limiti
+     rifiunti anche qui; un altro utente non può toccare i documenti
+     altrui; dopo l'approvazione i documenti non si modificano più;
+   - BACK OFFICE: stato autocertificato visibile, conferma IBAN dello
+     staff registrata e mostrata;
+   - RI-DOMANDA: dopo il rifiuto, i documenti "conserva" restano con lo
+     stesso identificativo, quelli sostituiti spariscono, i nuovi entrano.
+3) Prova unitaria della validazione IBAN (scripts/test-iban.ts, 11 casi:
+   Italia, Gran Bretagna, Germania, checksum alterati, lunghezze errate,
+   normalizzazione spazi/maiuscole).
+4) Collaudo visivo nel browser dell'intero modulo: validazione IBAN dal
+   vivo, compressione effettiva (JPEG 2200 px ridotto a ~10 KB), righe
+   file con Rimuovi, budget visibile, invio reale fino a "Domanda in
+   esame" con gestione documenti operativa.
+
+NEL PACCHETTO
+-------------
+  prisma/schema.prisma                    2 colonne nuove (ibanCheck,
+                                         ibanCheckedAt su ConsultantProfile)
+  src/lib/iban.ts                         validazione IBAN condivisa (NUOVO)
+  src/lib/client/files.ts                 compressione e limiti lato browser (NUOVO)
+  src/lib/server/consultants.ts           validazioni nuova generazione
+  src/lib/server/iban-verify.ts           hook servizio verifica intestatario (NUOVO)
+  src/app/api/consulente/apply/route.ts   guardia peso + controlli contenuto
+  src/app/api/consulente/docs/route.ts    gestione documenti dopo l'invio (NUOVO)
+  src/app/api/consulente/me/route.ts      stato IBAN nel profilo
+  src/app/api/admin/data/[section]/route.ts   stato IBAN nel back office
+  src/app/api/admin/action/route.ts       azioni Conferma IBAN / IBAN discorde
+  src/components/views/consulente.tsx     modulo rinnovato + gestione documenti
+  src/components/admin/admin.tsx          pill stato IBAN e tasti staff
+  scripts/test-iban.ts                    prova unitaria IBAN (NUOVO)
+  scripts/test-consulente.mjs             regressione (aggiornata alla dichiarazione)
+  scripts/test-consulenti-docs.mjs        prove complete delle novità (NUOVO)

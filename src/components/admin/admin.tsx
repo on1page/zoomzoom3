@@ -644,6 +644,7 @@ function AdminSection({ section, data, onAction, reload }: {
         id: string; name: string; email: string; nickname: string; totpEnabled: boolean;
         profession: string; title: string; bio: string | null; zone: string; province: string | null;
         radiusKm: number; feeCents: number; vatNumber: string | null; iban: string | null; phone: string | null;
+        ibanCheck: string | null; ibanCheckedAt: string | null;
         status: string; rejectReason: string | null; entityId: string | null; hasPhoto: boolean;
         docs: Array<{ id: string; kind: string; originalName: string; sizeBytes: number }>;
         requestsCount: number; createdAt: string;
@@ -651,6 +652,13 @@ function AdminSection({ section, data, onAction, reload }: {
       const pendenti = consulenti.filter(c => c.status === "pending");
       const altri = consulenti.filter(c => c.status !== "pending");
       const fmtE = (c: number) => (c / 100).toLocaleString("it-IT", { minimumFractionDigits: 2 });
+      // stato della verifica dell'intestazione dell'IBAN (autocertificato,
+      // confermato dallo staff o dal servizio esterno, discordanza segnalata)
+      const ibanPill = (c: { ibanCheck: string | null }) =>
+        c.ibanCheck === "confirmed" ? <span className="pill pill-green">IBAN verificato</span>
+        : c.ibanCheck === "mismatch" ? <span className="pill pill-red">IBAN discorde</span>
+        : c.ibanCheck === "self" ? <span className="pill pill-amber">IBAN autocertificato</span>
+        : <span className="pill pill-gray">IBAN da verificare</span>;
       return (
         <>
           <div className="admin-head"><h1>Consulenti tecnici</h1><span className="pill pill-gray">{pendenti.length} domande da esaminare</span></div>
@@ -664,13 +672,17 @@ function AdminSection({ section, data, onAction, reload }: {
                   <tr key={c.id}>
                     <td><b>{c.name}</b><br /><span className="small muted">{c.email}</span><br />
                       {c.totpEnabled ? <span className="pill pill-green">2FA attiva</span> : <span className="pill pill-red">2FA mancante</span>}</td>
-                    <td className="small">{c.profession} · {c.title}<br />Zona: {c.zone}{c.province ? ` (${c.province})` : ""} · raggio {c.radiusKm} km<br />Tariffa: {c.feeCents > 0 ? `€ ${fmtE(c.feeCents)}` : "su richiesta"} · P.IVA {c.vatNumber}<br />IBAN: <span className="mono">{c.iban}</span>{c.phone ? ` · tel. ${c.phone}` : ""}{c.bio ? <><br /><span className="muted">{c.bio.slice(0, 200)}</span></> : null}</td>
+                    <td className="small">{c.profession} · {c.title}<br />Zona: {c.zone}{c.province ? ` (${c.province})` : ""} · raggio {c.radiusKm} km<br />Tariffa: {c.feeCents > 0 ? `€ ${fmtE(c.feeCents)}` : "su richiesta"} · P.IVA {c.vatNumber}<br />IBAN: <span className="mono">{c.iban}</span> {ibanPill(c)}{c.phone ? ` · tel. ${c.phone}` : ""}{c.bio ? <><br /><span className="muted">{c.bio.slice(0, 200)}</span></> : null}</td>
                     <td className="small">{c.docs.map(doc => (
                       <div key={doc.id}><a href={`/api/consulente/doc/${doc.id}`}>{doc.originalName}</a> <span className="muted">({doc.kind})</span></div>
                     ))}</td>
                     <td>
                       <button className="btn btn-primary btn-xs" onClick={() => onAction("consultant.approve", c.id)}>Approva</button>{" "}
                       <button className="btn btn-danger btn-xs" onClick={() => onAction("consultant.reject", c.id)}>Respingi</button>
+                      <div style={{ marginTop: 6 }}>
+                        {c.ibanCheck !== "confirmed" ? <button className="btn btn-ghost btn-xs" onClick={() => onAction("consultant.ibanConfirm", c.id)}>Conferma IBAN</button> : null}{" "}
+                        {c.ibanCheck !== "mismatch" ? <button className="btn btn-ghost btn-xs" onClick={() => onAction("consultant.ibanMismatch", c.id)}>IBAN discorde</button> : null}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -692,6 +704,8 @@ function AdminSection({ section, data, onAction, reload }: {
                     <td>
                       {c.status === "approved" ? <span className="pill pill-green">Approvato</span> : <span className="pill pill-red">Respinto</span>}
                       {c.entityId ? <> <a className="small" href={`#/scheda/${c.entityId}`}>scheda</a></> : null}
+                      <div style={{ marginTop: 6 }}>{ibanPill(c)}</div>
+                      {c.ibanCheck !== "confirmed" ? <button className="btn btn-ghost btn-xs" style={{ marginTop: 6 }} onClick={() => onAction("consultant.ibanConfirm", c.id)}>Conferma IBAN</button> : null}
                     </td>
                   </tr>
                 ))}

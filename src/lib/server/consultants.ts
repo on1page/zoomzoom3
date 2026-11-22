@@ -4,6 +4,7 @@
 // perizia con tariffa confermata dal consulente; pagamento trattenuto dalla
 // piattaforma e accreditato (meno il 10%) solo a relazione consegnata.
 import { db } from "@/lib/db";
+import { normalizeIban, validateIban } from "@/lib/iban";
 
 export const CONSULENTE_PROFESSIONS = [
   "Geometra", "Ingegnere", "Tecnico", "Perito", "Consulente Tecnico",
@@ -16,6 +17,14 @@ export const PERIZIA_KINDS = [
 
 // commissione della piattaforma sul compenso del consulente (%)
 export const COMMISSION_PCT = 10;
+
+// ---- limiti dei documenti (ripetuti identici nel browser:
+// src/lib/client/files.ts — vanno tenute allineate) ----
+export const DOC_KINDS = ["qualifica", "esperienza", "documento", "altro"] as const;
+export const MAX_FILES = 8;                          // documenti totali in archivio
+export const MAX_DOC_BYTES = 2 * 1024 * 1024;        // 2 MB per documento
+export const MAX_TOTAL_DOC_BYTES = 3 * 1024 * 1024;  // 3 MB tutti i documenti insieme
+export const ALLOWED_DOC_MIMES = ["application/pdf", "image/jpeg", "image/png", "image/webp"];
 
 export type ApplyInput = {
   firstName?: string;
@@ -30,8 +39,10 @@ export type ApplyInput = {
   feeEuros?: number | string;
   vatNumber?: string;
   iban?: string;
+  ibanSelfDeclared?: boolean;     // dichiarazione: il conto è intestato all'iscritto
   phone?: string;
   docs?: Array<{ kind?: string; name?: string; mime?: string; data?: string }>;
+  keepDocIds?: string[];          // documenti già in archivio da conservare (rettifica)
 };
 
 export type ApplyIssue = { field?: string; error: string };
@@ -49,11 +60,27 @@ export type ApplyData = {
   iban: string;
   phone: string | null;
   docs: Array<{ kind: string; name: string; mime: string; data: string }>;
+  keepDocIds: string[];
   photo: string | null;
 };
 
-function isIbanLike(s: string): boolean {
-  return /^[A-Z]{2}[0-9A-Z]{13,30}$/i.test(s.replace(/\s+/g, ""));
+/** Decodifica un dataURL base64 (foto e documenti). null se malformato. */
+export function decodeDataUrl(u: string): { mime: string; buf: Buffer } | null {
+  const m = /^data:([^;,]+);base64,([\s\S]+)$/.exec(String(u || ""));
+  if (!m) return null;
+  try {
+    return { mime: m[1], buf: Buffer.from(m[2], "base64") };
+  } catch { return null; }
+}
+
+/** Riconosce il formato REALE di un documento dai primi byte, a prescindere
+ *  da come si dichiara: PDF, JPEG, PNG o WebP. null se sconosciuto. */
+export function sniffDocMime(buf: Buffer): string | null {
+  if (buf.length >= 5 && buf.subarray(0, 5).toString("latin1") === "%PDF-") return "application/pdf";
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
+  if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return "image/png";
+  if (buf.length >= 12 && buf.subarray(0, 4).toString("latin1") === "RIFF" && buf.subarray(8, 12).toString("latin1") === "WEBP") return "image/webp";
+  return null;
 }
 
 function isVatLike(s: string): boolean {
@@ -75,9 +102,13 @@ export function splitFee(feeCents: number): { payoutCents: number; commissionCen
   return { payoutCents: feeCents - commissionCents, commissionCents };
 }
 
+export type ExistingProfile = { id: string; photoData: Uint8Array | null } | null;
+
 /** Validazione della domanda di iscrizione (o ri-domanda dopo un rifiuto).
+ *  `existing` è il profilo già presente (rettifica): se ne ricava se la foto
+ *  è ancora obbligatoria e quali documenti in archivio si possono conservare.
  *  Ritorna i campi pronti per il salvataggio, oppure l'errore. */
-export async function validateApply(p: ApplyInput, requirePhoto: boolean):
+export async function validateApply(p: ApplyInput, existing: ExistingProfile):
   Promise<{ ok: true; data: ApplyData } | { ok: false; issue: ApplyIssue }> {
   const firstName = String(p.firstName || "").trim().replace(/\s+/g, " ").slice(0, 60);
   if (firstName.length < 2) return { ok: false, issue: { field: "firstName", error: "Indica il nome." } };
@@ -137,31 +168,74 @@ export async function validateApply(p: ApplyInput, requirePhoto: boolean):
   if (!isVatLike(vatNumber)) {
     return { ok: false, issue: { field: "vatNumber", error: "Partita IVA non valida (11 cifre per l'Italia)." } };
   }
-  const iban = String(p.iban || "").trim().toUpperCase().replace(/\s+/g, "").slice(0, 40);
-  if (!isIbanLike(iban)) {
-    return { ok: false, issue: { field: "iban", error: "IBAN non valido." } };
+
+  // IBAN: struttura, lunghezza per paese e codice di controllo mod-97
+  // (la corrispondenza con l'intestatario è dichiarata e verificata dallo staff)
+  const iban = normalizeIban(p.iban);
+  const ibanCheck = validateIban(iban);
+  if (!ibanCheck.ok) {
+    return { ok: false, issue: { field: "iban", error: ibanCheck.error } };
+  }
+  if (p.ibanSelfDeclared !== true) {
+    return { ok: false, issue: { field: "ibanSelfDeclared", error: `Dichiarazione obbligatoria: spunta la casella che il conto è intestato a ${firstName} ${lastName}.` } };
   }
   const phone = String(p.phone || "").trim().slice(0, 40) || null;
 
-  // documenti: almeno uno di qualifica e uno d'identificazione
-  const docs = (p.docs || []).map(d => ({
-    kind: ["qualifica", "esperienza", "documento", "altro"].includes(String(d.kind)) ? String(d.kind) : "altro",
+  // documenti NuOVI: formato, numero e dimensioni (i limiti valgono anche
+  // per chi bypassasse il browser: sono ricontrollati qui)
+  const newDocs = (p.docs || []).map(d => ({
+    kind: (DOC_KINDS as readonly string[]).includes(String(d.kind)) ? String(d.kind) : "altro",
     name: String(d.name || "documento").trim().slice(0, 160),
-    mime: String(d.mime || "application/octet-stream").slice(0, 120),
+    mime: String(d.mime || "application/octet-stream").toLowerCase().slice(0, 120),
     data: String(d.data || ""),
   })).filter(d => d.data.length > 0);
-  if (!docs.some(d => d.kind === "qualifica")) {
-    return { ok: false, issue: { field: "docs", error: "Allega almeno un documento di qualifica (titolo, iscrizione all'albo o certificato)." } };
-  }
-  if (!docs.some(d => d.kind === "documento")) {
-    return { ok: false, issue: { field: "docs", error: "Allega almeno un documento d'identificazione." } };
-  }
-  const totBytes = docs.reduce((a, d) => a + d.data.length, 0);
-  if (totBytes > 14 * 1024 * 1024) {
-    return { ok: false, issue: { field: "docs", error: "Documenti troppo grandi: massimo 14 MB in totale." } };
+
+  if (newDocs.length > MAX_FILES) {
+    return { ok: false, issue: { field: "docs", error: `Troppi documenti: massimo ${MAX_FILES} in totale.` } };
   }
 
-  if (requirePhoto && !p.photo) {
+  // documenti GIÀ in archivio che la ri-domanda conserva
+  const existingDocs = existing
+    ? await db.consultantDoc.findMany({ where: { consultantId: existing.id }, select: { id: true, kind: true, sizeBytes: true } })
+    : [];
+  const wanted = new Set((p.keepDocIds || []).map(String));
+  const keepDocs = existingDocs.filter(d => wanted.has(d.id));
+
+  const totCount = keepDocs.length + newDocs.length;
+  if (totCount > MAX_FILES) {
+    return { ok: false, issue: { field: "docs", error: `Troppi documenti: massimo ${MAX_FILES} in totale (nuovi + conservati).` } };
+  }
+
+  let totBytes = keepDocs.reduce((a, d) => a + d.sizeBytes, 0);
+  for (const d of newDocs) {
+    if (!(ALLOWED_DOC_MIMES as string[]).includes(d.mime)) {
+      return { ok: false, issue: { field: "docs", error: `"${d.name}": formato non ammesso (PDF, JPG, PNG o WebP).` } };
+    }
+    const dec = decodeDataUrl(d.data);
+    if (!dec) {
+      return { ok: false, issue: { field: "docs", error: `Il documento "${d.name}" non è leggibile.` } };
+    }
+    if (dec.buf.length > MAX_DOC_BYTES) {
+      return { ok: false, issue: { field: "docs", error: `"${d.name}" supera i 2 MB: comprimilo o sostituiscilo con una foto (le foto vengono compresse automaticamente).` } };
+    }
+    totBytes += dec.buf.length;
+    if (totBytes > MAX_TOTAL_DOC_BYTES) {
+      return { ok: false, issue: { field: "docs", error: "Documenti troppo grandi: massimo 3 MB in totale (nuovi + conservati). Rimuovine qualcuno o sostituisci i PDF con foto compresse." } };
+    }
+  }
+
+  // completezza: almeno una qualifica e un documento d'identificazione
+  // (possono arrivare anche dai documenti conservati)
+  const kinds = new Set([...keepDocs.map(d => d.kind), ...newDocs.map(d => d.kind)]);
+  if (!kinds.has("qualifica")) {
+    return { ok: false, issue: { field: "docs", error: "Allega almeno un documento di qualifica (titolo, iscrizione all'albo o certificato)." } };
+  }
+  if (!kinds.has("documento")) {
+    return { ok: false, issue: { field: "docs", error: "Allega almeno un documento d'identificazione." } };
+  }
+
+  const needPhoto = !(existing && existing.photoData != null);
+  if (needPhoto && !p.photo) {
     return { ok: false, issue: { field: "photo", error: "Carica una foto profilo." } };
   }
 
@@ -170,7 +244,8 @@ export async function validateApply(p: ApplyInput, requirePhoto: boolean):
     data: {
       firstName, lastName, profession, title, bio, zoneId, radiusKm,
       feeCents, vatNumber, iban, phone,
-      docs, photo: p.photo ? String(p.photo) : null,
+      docs: newDocs, keepDocIds: keepDocs.map(d => d.id),
+      photo: p.photo ? String(p.photo) : null,
     },
   };
 }

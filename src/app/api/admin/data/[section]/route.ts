@@ -267,6 +267,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ section: strin
             zone: c.zone.name, province: c.zone.province,
             radiusKm: c.radiusKm, feeCents: c.feeCents,
             vatNumber: c.vatNumber, iban: c.iban, phone: c.phone,
+            ibanCheck: c.ibanCheck, ibanCheckedAt: c.ibanCheckedAt?.toISOString() ?? null,
             status: c.status, rejectReason: c.rejectReason,
             entityId: c.entityId,
             hasPhoto: c.photoData != null,

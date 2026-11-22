@@ -71,6 +71,7 @@ export async function GET() {
         zone: { id: prof.zone.id, name: prof.zone.name, province: prof.zone.province, region: prof.zone.region },
         radiusKm: prof.radiusKm, feeCents: prof.feeCents,
         vatNumber: prof.vatNumber, iban: prof.iban, phone: prof.phone,
+        ibanCheck: prof.ibanCheck, ibanCheckedAt: prof.ibanCheckedAt?.toISOString() ?? null,
         status: prof.status, rejectReason: prof.rejectReason,
         entityId: prof.entityId,
         docs: prof.docs,
