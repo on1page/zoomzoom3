@@ -1,0 +1,228 @@
+ZoomZoom — IDENTITÀ UTENTE E PRIVACY NELLE RECENSIONI (foto profilo, categoria, schede ad hoc)
+=============================================================================================
+
+COSA PORTA QUESTO AGGIORNAMENTO
+-------------------------------
+Tre novità strettamente collegate, come richiesto:
+
+1) ALLA REGISTRAZIONE si può caricare una FOTO PROFILO (facoltativa) e
+   dichiarare tramite COMBO BOX a quale categoria si appartiene:
+   Utente (default) / Proprietario di immobili / Affittuario / Amministratore
+   di condominio / Agenzia immobiliare / Ditta-professionista della casa /
+   Consulente tecnico.
+
+2) SCHEDA AD HOC PER OGNI CATEGORIA: chi dichiara una categoria ottiene
+   subito la propria scheda pubblica del catalogo, GIÀ ATTIVA (pubblicata,
+   ricercabile e recensibile), collegata all'account.
+
+3) PRIVACY NELLE RECENSIONI, ANONIME DI DEFAULT: sulla recensione compare
+   SOLAMENTE LA CATEGORIA di chi l'ha scritta. Pseudonimo e foto profilo
+   compaiono soltanto se l'autore attiva esplicitamente un flag, valido per
+   quella singola recensione.
+
+COME FUNZIONA IN DETTAGLIO
+--------------------------
+LA FOTO PROFILO (due ricompilazioni, zero metadati)
+- Nel BROWSER, prima dell'invio: ridimensionata a massimo 320 px e ricompresa
+  in JPEG su canvas (qualità 85). Il file originale non lascia mai il
+  dispositivo e i metadati EXIF — posizione GPS inclusa — spariscono qui.
+- Sul SERVER, come garanzia: sharp riapplica l'eventuale orientamento EXIF e
+  ricompone comunque il JPEG (lato max 320 px, qualità 82). Formati ammessi:
+  JPEG, PNG, WebP; massimo 1,5 MB prima della ricompilazione.
+- Un'immagine non valida NON fa mai fallire la registrazione: viene ignorata.
+- La foto è pubblica per natura ed è servita da
+  GET /api/public/avatar/<pseudonimo> (JPEG, cache 24 ore, 404 se assente):
+  come chiave si usa lo pseudonimo pubblico, mai l'id utente interno.
+- Per questo lo PSEUDONIMO ORA DEVE ESSERE UNIVOCO anche alla registrazione
+  (era già richiesto dal cambio pseudonimo): è la chiave pubblica
+  dell'identità. Se è già in uso: "Questo nome pubblico è già in uso:
+  scegline un altro."
+
+LA COMBO BOX DELLA CATEGORIA
+- Le opzioni sono le categorie del catalogo che descrivono CHI SEI, valide
+  anche lato server (immobile e zona, ovviamente, non sono ammesse).
+- Se non si sceglie nulla si resta "Utente": si scrivono recensioni e sulle
+  schede compare l'etichetta "Utente".
+
+LA SCHEDA AD HOC (attiva subito, senza passare dallo staff)
+- Persone fisiche (proprietario, affittuario): la scheda nasce con le SOLE
+  INIZIALI dello pseudonimo ("Arianna Verdi" → "A. V.", "Arianna_84" →
+  "A."), come già prassi del catalogo per le persone.
+- Soggetti d'impresa (amministratore, agenzia, ditta, consulente): si può
+  indicare il NOME CON CUI SI È CONOSCIUTI (es. "Immobiliare Rossi", "Studio
+  Tecnico Bianchi"); se vuoto si usa lo pseudonimo.
+- La scheda nasce pubblicata, con sottotitolo "… · scheda attivata dal
+  diretto interessato", tracciata come proposedBy "registration" e collegata
+  all'account (ownerUserId + subjectEntityId).
+- Una scheda per account: cambiando categoria in seguito la scheda NON viene
+  né cancellata né ricreata — cronologia e recensioni restano al loro posto.
+  Se non esiste ancora (utente che dichiara la categoria dopo la
+  registrazione, dal profilo), viene creata in quel momento.
+- Nel menu dell'account compare la voce "La mia scheda pubblica".
+- Nel form di registrazione l'esito è esplicito: la conferma dice
+  'La scheda "Immobiliare Rossi" è già attiva nel catalogo.'
+
+LA PRIVACY NELLE RECENSIONI (regola applicata sul server, non solo grafica)
+- DI DEFAULT la recensione è anonima: compare un cerchio colorato con
+  l'icona della categoria, l'etichetta della categoria ("Affittuario",
+  "Agenzia immobiliare"…) e la pill "Anonima".
+- Il nickname NON VIENE MAI INVIATO AL BROWSER per le recensioni anonime:
+  la serializzazione pubblica lo sostituisce con null prima che la risposta
+  lasci il server. Non è un'illusione ottica: il dato non c'è nel payload.
+- Il flag è OPT-IN, PER SINGOLA RECENSIONE, presente in tutti e tre i moduli:
+  recensione aperta (flusso 4 passi), recensione da esperienza verificata e
+  rettifica di una recensione esistente. Checkbox "Firma anche con
+  pseudonimo e foto (facoltativo: di default compare solo la tua categoria)"
+  e contatore "Anonima" / "Con firma" durante la scrittura.
+- Flag attivo: foto profilo tonda + pseudonimo (le iniziali restano sotto la
+  foto come riserva se l'immagine non carica).
+- La CATEGORIA mostrata è uno SNAPSHOT salvato alla pubblicazione
+  (Review.authorCategory): se l'autore cambia categoria in seguito, le
+  recensioni già scritte non vengono riscritte.
+- Chi legge vede sempre le proprie recensioni contrassegnate dalla pill
+  "La tua" (riconoscibilità per l'autore, senza esporre nulla agli altri).
+- Il flag è rettificabile insieme al testo, entro la finestra di rettifica.
+
+PROFILO → IMPOSTAZIONI → "IDENTITÀ PUBBLICA" (dopo la registrazione)
+- Foto profilo: carica, cambia, rimuovi (aggiornamento immediato, cache
+  aggirata con ?v=).
+- Categoria di appartenenza: stessa combo della registrazione.
+- Nome sulla scheda (solo soggetti d'impresa, usato solo se la scheda non
+  esiste ancora) + link "vedi la tua scheda".
+- Tutto con audit log e rate limiting (15 aggiornamenti/ora).
+
+UTENTI E RECENSIONI GIÀ ESISTENTI
+- Nessun dato viene toccato: le nuove colonne sono nullable o con default.
+- Chi non dichiara categoria resta "Utente"; le recensioni già pubblicate
+  senza snapshot mostrano "Utente" come etichetta dell'autore.
+
+DATABASE (prisma/schema.prisma — 4 colonne nuove, migrazione non distruttiva)
+- User.categoryId  String?   categoria di appartenenza dichiarata
+- User.avatarData  Bytes?    foto profilo JPEG ricompilata
+- Review.authorCategory String?  snapshot della categoria alla pubblicazione
+- Review.showIdentity Boolean @default(false)  il flag opt-in per recensione
+- Nessuna nuova dipendenza: sharp è già tra le dependencies del progetto.
+
+SEED DEMO AGGIORNATO (facoltativo)
+- Gli utenti demo dichiarano la categoria (Arianna_84 affittuario, Il Portico
+  Immobiliare agenzia, i recensori demo affittuario/proprietario) e le
+  recensioni demo salvano authorCategory; circa una su cinque è firmata
+  (showIdentity), così nelle pagine demo si vedono subito entrambe le forme.
+- Il re-seed sovrascrive i dati demo: solo se il catalogo demo serve da
+  vetrina. scripts/inspect-seed-blockers.ts (con --fix) rimuove eventuali
+  artefatti di collaudo che bloccano il re-seeding;
+  scripts/cleanup-e2e-accounts.ts rimuove gli account di collaudo dei test.
+
+TEST ESEGUITI SU QUESTA VERSIONE (tutti verdi: 18/18)
+-----------------------------------------------------
+scripts/test-identita-privacy.mjs, con il dev server attivo:
+- registrazione con categoria "agenzia" + nome scheda + foto JPEG reale:
+  utente salvato con categoria e foto (ricompilata: 322 byte), scheda ad hoc
+  creata, PUBBLICATA, della categoria giusta e tracciata come attivata dal
+  diretto interessato;
+- login e scrittura di DUE recensioni: una senza flag (default anonima) e
+  una con flag attivo; la regola "una recensione per scheda per utente"
+  respinge il doppio invio con 409 come previsto;
+- verifica del payload pubblico: recensione anonima → author null E
+  avatarUrl null (il nickname non lascia il server), categoria visibile;
+  recensione firmata → nickname e URL della foto esposti;
+- verifica anche da OSPITE senza sessione (teaser): nessun nickname di
+  recensioni anonime nel payload;
+- endpoint avatar: 200 image/jpeg per chi ha la foto, 404 altrimenti;
+- dal profilo: rimozione foto + cambio categoria (agenzia → proprietario) e
+  snapshot invariato sulle recensioni già pubblicate;
+- pulizia completa dei dati di collaudo a fine test.
+- TypeScript: gli errori del progetto sono identici a prima (17, tutti
+  pre-esistenti in aree non toccate da questo aggiornamento); ESLint pulito
+  su tutti i file del pacchetto.
+
+NEL PACCHETTO
+-------------
+  prisma/schema.prisma                        4 colonne nuove (User, Review)
+  src/lib/server/user-identity.ts             categorie ammesse, compilazione
+                                             foto, iniziali, scheda ad hoc (NUOVO)
+  src/components/avatar-input.tsx             selettore foto con ricompilazione
+                                             nel browser (NUOVO)
+  src/app/api/public/avatar/[nickname]/route.ts  foto profilo pubblica (NUOVO)
+  src/app/api/me/profile/route.ts             identità dal profilo (NUOVO)
+  src/app/api/auth/register/route.ts          registrazione: foto, categoria,
+                                             univocità pseudonimo, scheda
+  src/app/api/reviews/route.ts                snapshot categoria + flag showIdentity
+  src/app/api/reviews/[id]/route.ts           flag rettificabile
+  src/app/api/public/entity/[id]/route.ts     esposizione con privacy (author,
+                                             authorCategory, showIdentity, mine,
+                                             avatarUrl)
+  src/app/api/public/bootstrap/route.ts       categoria e presenza foto nell'utente
+  src/lib/server/public-data.ts               il nickname esce SOLO con il flag
+  src/lib/server/auth.ts                      sessione: categoria e avatar
+  src/lib/client/store.tsx                    tipi aggiornati
+  src/components/views/auth.tsx               form di registrazione (foto, combo,
+                                             nome scheda)
+  src/components/views/entity-zone.tsx        identità dell'autore sulle recensioni
+  src/components/views/review-flows.tsx       flag nella recensione verificata e
+                                             nella rettifica
+  src/components/views/write-review-open.tsx  flag nel flusso aperto + contatore
+                                             Anonima/Con firma
+  src/components/views/profile.tsx            sezione "Identità pubblica"
+  src/components/chrome.tsx                   avatar e "La mia scheda pubblica"
+                                             nel menu account
+  src/app/globals.css                         stili avatar (picker, anteprima,
+                                             iniziali di riserva)
+  scripts/seed.ts                             demo con categorie e firme
+  scripts/test-identita-privacy.mjs           collaudo 18/18 (NUOVO)
+  scripts/cleanup-e2e-accounts.ts             pulizia account di collaudo (NUOVO)
+  scripts/inspect-seed-blockers.ts            diagnostica re-seeding (NUOVO)
+
+INSTALLAZIONE
+-------------
+1) Copia i file di questo pacchetto dentro la cartella del progetto
+   (C:\Users\Carlo\sito\zoomzoom), mantenendo i percorsi. Da PowerShell,
+   dopo aver estratto lo zip in una cartella temporanea:
+
+       Copy-Item -Recurse -Force "C:\percorso\estratto\src" "C:\Users\Carlo\sito\zoomzoom\"
+       Copy-Item -Recurse -Force "C:\percorso\estratto\prisma" "C:\Users\Carlo\sito\zoomzoom\"
+       Copy-Item -Recurse -Force "C:\percorso\estratto\scripts" "C:\Users\Carlo\sito\zoomzoom\"
+
+2) Lo schema del database è cambiato (4 colonne nuove, tutte nullable o con
+   default: non cancella né tocca dati esistenti). Dalla cartella del progetto:
+
+       bun run db:push
+
+3) Nessuna dipendenza nuova da installare (sharp è già tra le dependencies).
+
+4) Facoltativo, solo se vuoi il catalogo demo aggiornato con categorie e
+   recensioni firmate (il re-seed sovrascrive i dati demo):
+
+       bun scripts/seed.ts
+
+   (se si lamenta di entità non-demo in zone demo:
+    bun scripts/inspect-seed-blockers.ts --fix)
+
+5) Pubblica:
+
+       cd C:\Users\Carlo\sito\zoomzoom
+       git add -A
+       git commit -m "identita utente: foto profilo, categoria con combo, schede ad hoc e privacy nelle recensioni"
+       git push
+
+IMPORTANTE PER VERCEL
+- Questo aggiornamento NON tocca APP_SECRET: lascia invariata la variabile
+  su Vercel (e il .env locale). Cambiarla renderebbe illeggibili i segreti
+  2FA già cifrati nel database.
+- Il database di produzione deve ricevere le nuove colonne: dopo il deploy,
+  se su Vercel usi Prisma senza migrazioni automatiche, assicurati che lo
+  schema sia stato applicato (in locale "bun run db:push" prima del push,
+  come al punto 2, è il percorso già usato finora).
+
+VERIFICA RAPIDA DOPO IL DEPLOY
+-----------------------------
+1) Registrati con un account nuovo: scegli una foto, categoria "Agenzia
+   immobiliare" e nome scheda "Immobiliare Test": la conferma deve dire che
+   la scheda è già attiva; cercala nella ricerca del catalogo.
+2) Scrivi una recensione SENZA toccare il flag: sulla scheda deve comparire
+   "Agenzia immobiliare" + pill "Anonima", niente pseudonimo né foto.
+3) Rettifica (o scrivi su un'altra scheda) attivando "Firma anche con
+   pseudonimo e foto": devono comparire la foto tonda e lo pseudonimo.
+4) Menu account in alto: avatar (o iniziali) e voce "La mia scheda
+   pubblica"; Profilo → Impostazioni → "Identità pubblica" per cambiare
+   foto e categoria.
