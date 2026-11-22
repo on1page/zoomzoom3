@@ -1,9 +1,12 @@
 "use client";
-// ZoomZoom — auto-suggerimenti per il campo INDIRIZZO della nuova scheda
-// immobile: mentre si digita via e civico, il geocoder nazionale propone gli
-// indirizzi reali della cartografia OpenStreetMap (via, civico, comune).
-// Sceglierne uno conferma in un colpo solo indirizzo, città e pin sulla
-// mappa: niente più "località trovata ma non confermabile".
+// ZoomZoom — auto-suggerimenti per il campo VIA della nuova scheda
+// immobile: mentre si digita la via (o piazza o largo), il geocoder
+// nazionale propone gli indirizzi reali della cartografia OpenStreetMap
+// (via, civico, comune). Sceglierne uno conferma in un colpo solo via,
+// civico, città e pin sulla mappa: niente più "località trovata ma non
+// confermabile". Il campo contiene SOLO la via: il civico scelto va al
+// campo dedicato (via onPick), perché in un civico possono esserci più
+// unità (condomini) e la via resta la base del confronto.
 // Stessa condotta privacy di place-search: la stringa va al geocoder pubblico
 // SOLO tramite il proxy del server, con debounce (450 ms), minimo 4
 // caratteri e cache per query, nel rispetto della policy Nominatim.
@@ -68,10 +71,10 @@ export function AddressSearch({ id, value, onChange, onPick, label, hint, placeh
     <div className="field">
       {label ? <label htmlFor={id}>{label}</label> : null}
       <input id={id} type="search" autoComplete="off" required role="combobox"
-        aria-label={label || "Indirizzo"}
+        aria-label={label || "Via"}
         aria-expanded={open && results.length > 0}
         aria-controls={id ? `${id}-list` : undefined}
-        placeholder={placeholder || "Es. Via dei Mille 15"}
+        placeholder={placeholder || "Es. Via dei Mille"}
         value={value}
         onChange={e => onChange(e.target.value)}
         onKeyDown={e => {
@@ -104,7 +107,9 @@ export function AddressSearch({ id, value, onChange, onPick, label, hint, placeh
   );
 
   function pick(p: AddressPlace) {
-    onChange([p.road, p.houseNumber].filter(Boolean).join(" ") || value);
+    // nel campo resta SOLO la via: il civico va nel suo campo dedicato
+    // (lo porta onPick), così via, civico e interno restano distinti
+    onChange(p.road || [p.road, p.houseNumber].filter(Boolean).join(" ") || value);
     setOpen(false);
     setRemote(null);
     onPick(p);

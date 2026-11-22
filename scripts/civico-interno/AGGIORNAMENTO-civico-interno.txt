@@ -1,0 +1,164 @@
+ZoomZoom — Aggiornamento: numero civico e interno/scala nella scheda immobile
+==============================================================================
+
+Cosa risolve questo aggiornamento
+---------------------------------
+Il flusso di contributo chiedeva un solo campo "indirizzo". Ma in una via,
+un largo, un viale o una piazza ci sono PIÙ edifici (civici diversi, quindi
+schede diverse) e nello STESSO civico possono esserci più unità abitative,
+come nei condomini (interno, scala…). Finora due appartamenti dello stesso
+palermo finivano sulla stessa scheda, e il dedup impediva di creare la
+seconda: chi viveva al 15/A interno 7 non poteva recensire la sua unità.
+
+Ora l'indirizzo è STRUTTURATO in tre parti, come richiesto:
+
+  address       la via, piazza o largo          ("Via dei Mille")
+  streetNumber  il numero civico                ("15", "15/A", "12bis")
+  unit          l'interno o scala, facoltativo  ("interno 4", "scala B")
+
+La discriminante della scheda immobile diventa VIA + CIVICO + INTERNO nella
+stessa città: stesso indirizzo ma interno diverso = scheda DIVERSA, ognuna
+con le sue recensioni. Il testo resta minimo e tutto a badge, come nel
+resto del flusso.
+
+Passo 3 "Controlla la scheda" ora mostra le righe:
+  Città · Via · Civico · Interno/scala · Posizione
+Il civico è necessario (badge ambra "Necessario" finché manca); l'interno è
+facoltativo con tooltip che spiega i condomini ("lascia vuoto per l'edificio
+intero"). Il badge "Manca:" elenca città · via · civico.
+
+Il "condominio" si vede PRIMA di creare (nuova API building)
+-------------------------------------------------------------
+Alla conferma, prima di creare la scheda, il client chiede a
+GET /api/public/building?zona=&via=&civico= le schede pubbliche già
+presenti allo STESSO indirizzo (qualsiasi interno). Se ce ne sono, appare
+il blocco "Stesso indirizzo":
+
+  A Via dei Mille 15 ci sono già 2 schede:
+    · Via dei Mille 15 — Edificio intero · senza interno  [Senza interno]
+    · Via dei Mille 15, interno 4 — interno 4             [Stesso interno]
+
+Ogni scheda ha il suo badge: "Stesso interno" (verde: il tuo interno
+coincide, riusala), "Interno simile" (ambra: i termini coincidono in parte,
+es. "interno 4" vs "scala B interno 4" — controlla prima di creare),
+"Unità diversa" o "Senza interno" (grigie). Sotto: "Il mio interno (…)
+è un altro — crea la scheda" oppure "Recensisco l'edificio — crea la
+scheda". Funziona anche senza pin sulla mappa; l'ordine dei controlli alla
+conferma è: schede vicine entro 50 m (se c'è il pin) → schede dello stesso
+civico → creazione/dedup.
+
+Retrocompatibilità
+------------------
+  • Schede STORICHE (civico dentro address, es. "Via dei Mille 15"):
+    il confronto continua a funzionare — via+civico richiesti vengono
+    riuniti in una stringa sola e confrontati con l'indirizzo storico
+    (tollerando maiuscole, accenti, punteggiatura e il suffisso "città"
+    delle schede d'epoca).
+  • Client VECCHI che mandano l'indirizzo scritto di fila: la API stacca
+    il civico dalla coda ("Via dei Mille 15" → via "Via dei Mille" +
+    civico "15"). Le vie senza civico ("Via 4 Novembre") restano intere.
+  • Toleranza di scrittura: "15/A" ≡ "15A", "12 bis" ≡ "12bis" (civico);
+    "interno 4" ≡ "4 interno" ≡ "int. 4" e "scala B interno 4" ≡
+    "interno 4 scala B" (interno: abbreviazioni espanse + ordine parole
+    indifferente).
+
+Modello dati
+------------
+Entity guadagna due colonne (aggiunte con prisma db push, dati esistenti
+intatti): streetNumber (civico) e unit (interno/scala), entrambe nullable
+— null sulle schede storiche. Il nome della scheda porta l'interno a
+vedere: "Via dei Mille 15, interno 4". address ora contiene SOLO la via
+nelle nuove schede; il display composto (via + civico) viene ricomposto
+dove serve.
+
+File modificati
+---------------
+  prisma/schema.prisma
+      Entity + streetNumber, unit (con commento sulla discriminante).
+  src/lib/address-norm.ts   NUOVO (modulo puro, client+server)
+      normAddress, normCivico, normUnit, splitStreetCivico, sameBuilding,
+      dispAddress — le regole di confronto sono UNA sola, ovunque.
+  src/app/api/entities/route.ts
+      Input strutturato (address=via, streetNumber, unit) con split
+      retrocompatibile; dedup via+civico+interno (409 con existingId solo
+      a parità di interno); name composto con interno; audit con interno.
+  src/app/api/public/building/route.ts   NUOVA
+      Schede pubbliche allo stesso via+civico (zona, via, civico): solo
+      dati pubblici, max 8, prima l'edificio poi le unità in ordine.
+  src/components/views/write-review-open.tsx
+      Draft con civico e unit; autofill separato da ricerca mappa e GPS
+      (road → via, houseNumber → civico); righe Via/Civico/Interno-scala
+      nel passo 3 con badge Necessario/Facoltativo; blocco "Stesso
+      indirizzo" con riuso; città scelta sulla mappa risolta nel catalogo
+      (localId) per abilitare il controllo building; badge passo 1
+      "Via + civico + interno" e "Condomini".
+  src/components/address-search.tsx
+      Il campo suggerisce gli indirizzi come prima, ma al pick nel campo
+      resta SOLO la via: il civico va nel suo campo dedicato.
+  src/lib/server/public-data.ts
+      PublicEntity espone streetNumber e unit.
+  src/app/api/public/search/route.ts
+      Riga di ricerca con streetNumber (display composto lato client).
+  src/app/api/public/nearby/route.ts
+      address composto via+civico (dispAddress).
+  src/components/views/entity-zone.tsx
+      Sottotitolo della scheda: indirizzo composto col civico.
+  src/components/ui-kit.tsx
+      EntityCard: indirizzo composto col civico.
+  scripts/test-civico-interno.mjs   NUOVO
+      Test runtime T1–T9 del dedup e della API building (vedi sotto).
+  scripts/seed-civico-ui.mjs   NUOVO
+      Semina 2 schede allo stesso civico per la verifica UI.
+
+Regole invariate
+----------------
+Una recensione per scheda per utente (409 + offerta di rettifica), testo
+>= 100 caratteri, max 3 foto, prezzo facoltativo, honeypot, rate limit e
+budget giornaliero, una scheda per indirizzo nella stessa città (ORA per
+via+civico+interno), posizione in Italia, privacy (coordinate al geocoder
+pubblico solo su azione esplicita). Il server resta l'autorità: la UI
+propone il riuso, il 409 del server è la rete di sicurezza finale.
+
+Verifica di prova (API, utente verificato — TUTTI SUPERATI)
+-------------------------------------------------------------
+  T1 crea via+civico+interno        → scheda "Via dei Test Civico 15, interno 4"
+  T2 ricrea lo stesso interno       → 409 existingId (dedup)
+  T3 stesso civico, interno diverso → nuova scheda
+  T4 stesso civico, senza interno   → nuova scheda (edificio)
+  T5 civico diverso (15/A)          → nuova scheda
+  T6 building al civico 15          → 3 righe (edificio, interno 4, scala B)
+  T7 retrocompat "Via … 15" di fila → 409 (match con la scheda edificio)
+  T8 "4 interno" ≡ "interno 4"      → 409 (tolleranza ordine parole)
+  T9 interno 5                      → nuova scheda
+  (pulizia: le schede di test vengono rimosse a fine esecuzione)
+
+Verifica di prova (browser, utente verificato)
+----------------------------------------------
+  1. Ricerca "Via dei Mille 15 Milano" → risultato mappa (Melzo) → passo 3
+     autofillato: Città Melzo · Via "Via dei Mille" · Civico "15" (separati!)
+     · Interno/scala vuoto con badge "Facoltativo" · Pin sulla mappa.
+  2. Città cambiata in Alassio (dal catalogo) + interno "interno 4" →
+     conferma → blocco "Stesso indirizzo": edificio [Senza interno] e
+     "interno 4" [Stesso interno]; click → passo 4 con badge
+     "Scheda esistente".
+  3. Stesso percorso con interno "scala B" → edificio [Senza interno],
+     "interno 4" [Unità diversa] → "Il mio interno (scala B) è un altro —
+     crea la scheda" → passo 4 con badge "Nuova scheda" su
+     "Via dei Mille 15, scala B".
+  4. Scheda pubblica: titolo "Via dei Mille 15, interno 4", sottotitolo
+     "Immobili · Via dei Mille 15 · Alassio".
+  (le schede di test sono state rimosse; openReviewsPerDay ripristinato)
+
+Note tecniche per il deploy
+---------------------------
+  • Applicare lo schema: bun run db:push (colonne additive, nessuna
+    perdita di dati) — già eseguito sul database di sviluppo.
+  • La API building legge per zona: per città appena create al volo il
+    controllo scatta dalla seconda scheda in poi (la prima crea la zona);
+    nessun impatto sui flussi esistenti.
+
+Lavori collegati rimasti
+------------------------
+  • C4: recensione in attesa pubblicata insieme alla scheda approvata.
+  • Ricerca interna "via + civico + città" di fila (comportamento
+    preesistente della API di ricerca, non toccato qui).

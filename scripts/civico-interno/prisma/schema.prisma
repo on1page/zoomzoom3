@@ -1,0 +1,624 @@
+// ZoomZoom — schema del database (Prisma + SQLite)
+// Nota: SQLite non supporta array o enum nativi: i valori enumerati sono
+// validati a livello applicativo (src/lib/validation.ts) e i JSON sono serializzati.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  emailVerified   Boolean   @default(false)
+  // scrypt: salt + hash, formato "scrypt$N$r$p$salt$hash" — MAI testo in chiaro
+  passwordHash    String?
+  nickname        String
+  // user | moderator | admin | superadmin (validazione applicativa)
+  role            String    @default("user")
+  subjectEntityId String?
+  totpSecretEnc   String? // cifrato AES-256-GCM con APP_SECRET
+  pendingTotpSecretEnc String? // 2FA in fase di attivazione (cifrato)
+  totpEnabled     Boolean   @default(false)
+  // primo accesso con 2FA riuscito: prima di questa data (e solo dopo la
+  // verifica della password) il login può mostrare una sola volta il QR
+  // di registrazione dell'app di autenticazione
+  firstTotpLoginAt DateTime?
+  // Membership Premium: attiva finché premiumUntil > adesso. Deriva dai
+  // PremiumGrant (una tantum per recensione pubblicata) o da concessioni
+  // amministrative; ricalcolata a ogni variazione dei grant.
+  premiumUntil     DateTime?
+  disabled        Boolean   @default(false)
+  failedLogins    Int       @default(0)
+  lockedUntil     DateTime?
+  googleSub       String?   @unique // soggetto Google OAuth (se usato)
+  createdAt       DateTime  @default(now())
+  isDemo          Boolean   @default(false)
+
+  sessions          Session[]
+  backupCodes       BackupCode[]
+  emailVerifyTokens EmailVerifyToken[]
+  reviews           Review[]
+  experiences       Experience[]   @relation("claimedExperiences")
+  requestedExps     Experience[]   @relation("requestedExperiences")
+  reports           Report[]
+  reportDecisions   ReportDecision[]
+  disputeDecisions  DisputeDecision[]
+  proposals         EntityProposal[]
+  entityOwned       Entity[]       @relation("entityOwner")
+  verificationDocs  VerificationDoc[]
+  auditLogs         AuditLog[]     @relation("auditActor")
+  consents          Consent[]
+  privacyRequests   PrivacyRequest[]
+  premiumGrants     PremiumGrant[]
+  reviewVotes       ReviewVote[]
+  // Consulente Tecnico: profilo professionale (uno per utente, se iscritto)
+  consultantProfile ConsultantProfile?
+  perizieRequested  PeriziaRequest[] @relation("periziaRequester")
+
+  @@index([role])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // public | admin — sessioni separate, TTL diversi
+  kind      String   @default("public")
+  // solo hash SHA-256 del token: il token in chiaro esiste solo nel cookie httpOnly
+  tokenHash String   @unique
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  lastSeenAt DateTime @default(now())
+
+  @@index([userId, kind])
+}
+
+model BackupCode {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash  String   @unique
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model EmailVerifyToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+model Category {
+  id         String  @id // slug: immobile, zona, proprietario…
+  name       String
+  shortName  String
+  description String
+  hexColor   String
+  icon       String
+  isPerson   Boolean @default(false)
+  isMapped   Boolean @default(false)
+  orderIndex Int     @default(0)
+  isActive   Boolean @default(true)
+  isDemo     Boolean @default(false)
+  criteria   Criterion[]
+  versions   CategoryVersion[]
+  entities   Entity[]
+  proposals  EntityProposal[]
+}
+
+model Criterion {
+  id         String  @id @default(cuid())
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  key        String  // chiave usata nel JSON dei punteggi
+  label      String
+  orderIndex Int     @default(0)
+  active     Boolean @default(true)
+
+  @@unique([categoryId, key])
+}
+
+// Snapshot dei criteri: le recensioni conservano la versione usata al momento
+// della pubblicazione, così modifiche amministrative non alterano i punteggi storici.
+model CategoryVersion {
+  id               String   @id @default(cuid())
+  categoryId       String
+  category         Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  version          Int
+  criteriaSnapshot String   // JSON [{key,label}]
+  priceUnitsJson   String?  // JSON [unità ammesse]
+  createdAt        DateTime @default(now())
+  reviews          Review[]
+}
+
+model Zone {
+  id      String  @id // slug città (es. "milano")
+  name    String
+  // provincia e regione (per le zone create dalla geocodifica: qualsiasi
+  // comune o paese d'Italia può entrare nel catalogo, non solo quelle in seed)
+  province String?
+  region   String?
+  // seed | user | geocode — da dove nasce la zona
+  source   String  @default("seed")
+  gpsLat  Float   // centro città reale, WGS84
+  gpsLng  Float
+  radiusM Int     @default(3000) // raggio indicativo dell'area urbana, in metri
+  isDemo  Boolean @default(false)
+  entities Entity[]
+  // Consulenti con zona di esercizio qui e perizie richieste in questa zona
+  consultantProfiles ConsultantProfile[]
+  perizie            PeriziaRequest[]
+}
+
+model Entity {
+  id              String   @id @default(cuid())
+  categoryId      String
+  category        Category @relation(fields: [categoryId], references: [id])
+  name            String
+  subtitle        String?
+  address         String?
+  // IMMOBILI — indirizzo strutturato: address è la via/piazza/largo,
+  // streetNumber il civico ("15", "15/A"), unit l'interno o scala che
+  // distingue le unità di uno stesso condominio ("interno 4", "scala B").
+  // La discriminante della scheda è via + civico + interno nella stessa città.
+  // Retrocompatibilità: null sulle schede storiche, dove il civico è già
+  // incluso in address (es. "Via dei Mille 15").
+  streetNumber    String?
+  unit            String?
+  zoneId          String?
+  zone            Zone?    @relation(fields: [zoneId], references: [id])
+  // posizione reale WGS84 (solo categorie mappabili: immobili)
+  geoLat          Float?
+  geoLng          Float?
+  initialsOnly    Boolean  @default(false)
+  verifiedBusiness Boolean @default(false)
+  ownerUserId     String?  @unique
+  owner           User?    @relation("entityOwner", fields: [ownerUserId], references: [id])
+  // published | hidden | rejected (validazione applicativa)
+  status          String   @default("published")
+  proposedBy      String   @default("seed")
+  createdAt       DateTime @default(now())
+  isDemo          Boolean  @default(false)
+
+  reviews     Review[]
+  experiences Experience[]
+  disputes    Dispute[]
+
+  @@index([categoryId, status])
+  @@index([zoneId])
+}
+
+model EntityProposal {
+  id            String   @id @default(cuid())
+  categoryId    String
+  category      Category @relation(fields: [categoryId], references: [id])
+  name          String
+  subtitle      String?
+  address       String?
+  zoneId        String?
+  proposedById  String?
+  proposer      User?    @relation(fields: [proposedById], references: [id])
+  contactEmail  String?
+  justification String
+  // received | approved | rejected (validazione applicativa)
+  status        String   @default("received")
+  decisionReason String?
+  decidedById   String?
+  decidedAt     DateTime?
+  createdAt     DateTime @default(now())
+  isDemo        Boolean  @default(false)
+}
+
+model Experience {
+  id          String   @id @default(cuid())
+  entityId    String
+  entity      Entity   @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  kind        String
+  period      String?
+  // business | verification-request | self (dichiarata dall'utente) | seed
+  origin      String
+  clientEmail String
+  userId      String?  // utente che ha reclamato l'esperienza
+  user        User?    @relation("claimedExperiences", fields: [userId], references: [id])
+  // pending | active | rejected
+  status      String   @default("pending")
+  requestedById String?
+  requester   User?    @relation("requestedExperiences", fields: [requestedById], references: [id])
+  note        String?
+  claimedAt   DateTime?
+  createdAt   DateTime @default(now())
+  isDemo      Boolean  @default(false)
+
+  review  Review?
+  invites Invite[]
+  docs    VerificationDoc[]
+
+  @@index([entityId, status])
+  @@index([userId])
+}
+
+model Invite {
+  id            String   @id @default(cuid())
+  experienceId  String
+  experience    Experience @relation(fields: [experienceId], references: [id], onDelete: Cascade)
+  email         String
+  // SHA-256 del token: il token in chiaro NON viene mai conservato
+  tokenHash     String   @unique
+  quotaOwner    String   // entityId del soggetto che invia (per i limiti)
+  expiresAt     DateTime
+  usedAt        DateTime?
+  revoked       Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  isDemo        Boolean  @default(false)
+
+  @@index([quotaOwner, createdAt])
+}
+
+model VerificationDoc {
+  id           String   @id @default(cuid())
+  experienceId String
+  experience   Experience @relation(fields: [experienceId], references: [id], onDelete: Cascade)
+  storedName   String   // nome interno, area privata non pubblica
+  originalName String
+  mimeType     String
+  sizeBytes    Int
+  sha256       String
+  uploadedById String?
+  uploader     User?    @relation(fields: [uploadedById], references: [id])
+  deletedAt    DateTime? // retention: cancellazione dopo la decisione
+  createdAt    DateTime @default(now())
+}
+
+model Review {
+  id                 String   @id @default(cuid())
+  experienceId       String   @unique
+  experience         Experience @relation(fields: [experienceId], references: [id], onDelete: Cascade)
+  entityId           String
+  entity             Entity   @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  userId             String
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  score              Float
+  criteriaJson       String   // JSON {key: voto}
+  criteriaVersionId  String?
+  criteriaVersion    CategoryVersion? @relation(fields: [criteriaVersionId], references: [id])
+  prosJson           String   // JSON [stringhe]
+  consJson           String
+  priceAmount        Float?
+  priceUnit          String?
+  // richiesto | proposto | concluso (validazione applicativa)
+  priceKind          String?
+  text               String
+  // published | hidden
+  status             String   @default("published")
+  hiddenReason       String?
+  verified           Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime?
+  updateReason       String?
+  isDemo             Boolean  @default(false)
+
+  reports Report[]
+  // contributo che ha generato il Premium (se la recensione viene nascosta
+  // per frode, il grant si revoca e il Premium si ricalcola)
+  premiumGrant PremiumGrant?
+  photos ReviewPhoto[]
+  votes  ReviewVote[]
+
+  @@index([entityId, status])
+  @@index([userId])
+}
+
+// Membership Premium: ogni grant è un periodo di giorni assegnato a un utente.
+// Origin: "review" (recensione verificata pubblicata) | "admin" (concessione
+// manuale) | "seed" (dati dimostrativi). premiumUntil = max(expiresAt) dei
+// grant non revocati: nessuno stato separato da mantenere sincronizzato.
+model PremiumGrant {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // un contributo può generare un solo grant (revoca mirata in moderazione)
+  reviewId      String?   @unique
+  review        Review?   @relation(fields: [reviewId], references: [id])
+  days          Int
+  origin        String    @default("review")
+  grantedAt     DateTime  @default(now())
+  expiresAt     DateTime
+  revokedAt     DateTime?
+  revokedReason String?
+
+  @@index([userId])
+}
+
+// Foto allegate a una recensione (contributo aperto). L'immagine viene
+// ricompilata lato server in JPEG: i metadati (EXIF, GPS incluso) vengono
+// rimossi prima della conservazione. L'accesso alle foto è riservato ai
+// Premium e a chi ha a sua volta contribuito con almeno una foto.
+model ReviewPhoto {
+  id        String   @id @default(cuid())
+  reviewId  String
+  review    Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  data      Bytes    // JPEG senza metadati
+  width     Int
+  height    Int
+  bytes     Int
+  createdAt DateTime @default(now())
+  isDemo    Boolean  @default(false)
+
+  @@index([reviewId])
+}
+
+// Voto di utilità sulla recensione (effetto community): riservato agli
+// utenti Premium, uno per utente e per recensione, mai sulla propria.
+// value = 1 (pollice su: conferma) | -1 (pollice giù: non confermata).
+model ReviewVote {
+  id        String   @id @default(cuid())
+  reviewId  String
+  review    Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  value     Int
+  createdAt DateTime @default(now())
+
+  @@unique([reviewId, userId])
+  @@index([reviewId])
+}
+
+model Report {
+  id            String   @id @default(cuid())
+  // review (unico target nella v1)
+  targetType    String   @default("review")
+  targetId      String
+  review        Review?  @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  reporterUserId String
+  reporter      User     @relation(fields: [reporterUserId], references: [id], onDelete: Cascade)
+  reason        String
+  details       String
+  // received | reviewing | decided | appeal | closed
+  status        String   @default("received")
+  appealBy      String?  // author | reporter
+  appealReason  String?
+  appealAt      DateTime?
+  decision      String?  // keep | hide | restore
+  createdAt     DateTime @default(now())
+  isDemo        Boolean  @default(false)
+
+  decisions ReportDecision[]
+
+  @@index([status])
+}
+
+model ReportDecision {
+  id       String   @id @default(cuid())
+  reportId String
+  report   Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  byId     String
+  by       User     @relation(fields: [byId], references: [id])
+  action   String
+  reason   String
+  at       DateTime @default(now())
+}
+
+model Dispute {
+  id            String   @id @default(cuid())
+  entityId      String
+  entity        Entity   @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  claimantEmail String
+  claim         String
+  // received | reviewing | closed
+  status        String   @default("received")
+  decision      String?  // keep | hide
+  createdAt     DateTime @default(now())
+  isDemo        Boolean  @default(false)
+
+  decisions DisputeDecision[]
+}
+
+model DisputeDecision {
+  id        String   @id @default(cuid())
+  disputeId String
+  dispute   Dispute @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  byId      String
+  by        User     @relation(fields: [byId], references: [id])
+  action    String
+  reason    String
+  at        DateTime @default(now())
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  at         DateTime @default(now())
+  actorId    String?
+  actor      User?    @relation("auditActor", fields: [actorId], references: [id])
+  actorRole  String?
+  action     String
+  targetType String
+  targetId   String?
+  reason     String?
+  isDemo     Boolean  @default(false)
+
+  @@index([at])
+}
+
+model SecurityLog {
+  id       String   @id @default(cuid())
+  at       DateTime @default(now())
+  type     String
+  severity String   @default("info")
+  details  String
+  isDemo   Boolean  @default(false)
+
+  @@index([at])
+}
+
+model Setting {
+  key   String @id
+  value String // JSON
+}
+
+model Consent {
+  id         String   @id @default(cuid())
+  visitorId  String   // cookie tecnico identificativo del browser
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+  technical  Boolean  @default(true)
+  statistics Boolean  @default(false)
+  marketing  Boolean  @default(false)
+  decidedAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model EmailLog {
+  id      String   @id @default(cuid())
+  to      String
+  subject String
+  body    String
+  linksJson String  @default("[]") // JSON [{label,href}]
+  status  String   @default("queued") // sent | queued | failed
+  error   String?
+  at      DateTime @default(now())
+  isDemo  Boolean  @default(false)
+}
+
+model PrivacyRequest {
+  id        String   @id @default(cuid())
+  email     String
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  kind      String   // account-deletion | data-access | …
+  message   String
+  status    String   @default("received")
+  createdAt DateTime @default(now())
+}
+
+model ContactRequest {
+  id        String   @id @default(cuid())
+  email     String
+  kind      String
+  message   String
+  status    String   @default("received")
+  createdAt DateTime @default(now())
+}
+
+/* ============================================================
+   CONSULENTE TECNICO — figura professionale iscritta con appro-
+   vazione dello staff e accesso protetto da 2FA. La scheda
+   pubblica nel catalogo (categoria "consulente") è collegata da
+   entityId; i documenti di qualifica sono in ConsultantDoc; le
+   richieste di perizie/valutazioni con pagamento in escrow
+   (90% consulente / 10% piattaforma, accreditato solo a relazione
+   consegnata) sono in PeriziaRequest.
+   ============================================================ */
+
+model ConsultantProfile {
+  id            String    @id @default(cuid())
+  userId        String    @unique
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // scheda pubblica nel catalogo (category "consulente"), creata
+  // all'approvazione dello staff
+  entityId      String?   @unique
+  // anagrafica professionale (visibile sulla scheda pubblica)
+  firstName     String
+  lastName      String
+  photoData     Bytes?    // foto profilo JPEG ricompilata lato server (senza EXIF)
+  // Geometra | Ingegnere | Tecnico | Perito | Consulente Tecnico |
+  // Agente Immobiliare | Altro (validazione applicativa)
+  profession    String
+  title         String    // titolo di studio
+  bio           String?   // presentazione ed esperienza
+  zoneId        String    // zona di esercizio
+  zone          Zone      @relation(fields: [zoneId], references: [id])
+  radiusKm      Int       @default(30) // raggio di azione in km
+  feeCents      Int       @default(0)  // tariffa richiesta (0 = su richiesta)
+  vatNumber     String?   // partita IVA
+  iban          String?   // coordinate bancarie per l'accredito (visibili solo allo staff)
+  // esito della verifica dell'intestazione dell'IBAN:
+  //   self      = autocertificato dall'iscritto (domanda presentata)
+  //   confirmed = intestazione confermata (servizio di verifica configurato
+  //               via IBAN_VERIFY_URL, oppure conferma manuale dello staff)
+  //   mismatch  = lo staff ha segnalato una discordanza
+  ibanCheck     String?
+  ibanCheckedAt DateTime?
+  phone         String?
+  // pending | approved | rejected (approvazione dello staff)
+  status        String    @default("pending")
+  rejectReason  String?
+  reviewedById  String?
+  reviewedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  docs     ConsultantDoc[]
+  requests PeriziaRequest[] @relation("periziaConsultant")
+
+  @@index([status])
+}
+
+// Documenti caricati dal consulente per l'iscrizione: qualifica,
+// esperienza, documento d'identificazione. Accessibili solo al
+// consulente stesso e allo staff (mai pubblici).
+model ConsultantDoc {
+  id           String    @id @default(cuid())
+  consultantId String
+  consultant   ConsultantProfile @relation(fields: [consultantId], references: [id], onDelete: Cascade)
+  // qualifica | esperienza | documento | altro
+  kind         String
+  originalName String
+  mimeType     String
+  sizeBytes    Int
+  data         Bytes
+  createdAt    DateTime  @default(now())
+
+  @@index([consultantId])
+}
+
+// Richiesta di perizia tecnica o valutazione immobiliare a un
+// consulente approvato. Flusso e stati:
+//   requested → accepted (il consulente conferma la tariffa)
+//            → paid (il super amministratore registra il pagamento
+//               ricevuto dalla piattaforma)
+//            → delivered (relazione consegnata: qui si calcolano
+//               accredito al consulente e commissione piattaforma)
+//            → closed (accredito eseguito dal super amministratore)
+//   uscite anticipate: rejected (consulente), cancelled (richiedente)
+model PeriziaRequest {
+  id          String    @id @default(cuid())
+  requesterId String
+  requester   User      @relation("periziaRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  consultantId String
+  consultant  ConsultantProfile @relation("periziaConsultant", fields: [consultantId], references: [id], onDelete: Cascade)
+  // Perizia tecnica | Valutazione immobiliare | Altro
+  kind        String
+  address     String    // indirizzo dell'immobile oggetto della richiesta
+  zoneId      String?
+  zone        Zone?     @relation(fields: [zoneId], references: [id])
+  description String
+  // requested | accepted | rejected | paid | delivered | closed | cancelled
+  status      String    @default("requested")
+  feeCents    Int?      // tariffa confermata dal consulente all'accettazione
+  rejectReason String?
+  reportTitle String?
+  reportBody  String?   // testo della relazione (reso come PDF scaricabile)
+  deliveredAt DateTime?
+  paidAt      DateTime?
+  paymentRef  String?   // riferimento del pagamento registrato dallo staff
+  // ripartizione calcolata ALLA CONSEGNA: accredito 90% / commissione 10%
+  payoutCents     Int?
+  commissionCents Int?
+  payoutDoneAt    DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([consultantId, status])
+  @@index([requesterId])
+}

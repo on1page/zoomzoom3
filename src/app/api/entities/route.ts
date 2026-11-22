@@ -7,8 +7,11 @@
 // COPERTURA NAZIONALE: la città può essere una qualsiasi località italiana
 // (comune, paese o frazione, dalla ricerca geocodificata o dal reverse
 // geocoding del GPS): se la zona non esiste ancora, viene creata al volo.
+// INDIRIZZO STRUTTURATO: via (address), civico (streetNumber) e interno/scala
+// (unit). In una via ci sono più civici e in un civico più unità (condomini):
+// la discriminante della scheda è via + civico + interno nella stessa città.
 // Anti-abuso: limite giornaliero per utente, dedup dell'indirizzo nella
-// stessa città (una scheda per indirizzo), validazione input.
+// stessa città, validazione input.
 // Le altre categorie NON si creano da qui: le persone passano dalla proposta
 // revisionata dalla moderazione (proponi-soggetto); le zone si attivano con
 // POST /api/zones.
@@ -21,13 +24,7 @@ import { auditLog } from "@/lib/server/audit";
 import { guard, readJson, handleError, fail } from "@/lib/server/http";
 import { rateLimit } from "@/lib/server/rate-limit";
 import { ensureZone, ensureZoneEntity, findZoneByName, inItalyBounds, classifyZoneSaveError, ZoneNameError, ZonePositionError } from "@/lib/server/zones";
-
-// normalizza un indirizzo per il confronto: maiuscole, accenti e punteggiatura
-// non devono creare schede duplicate dello stesso luogo
-function normAddress(s: string): string {
-  return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
-}
+import { normAddress, normUnit, splitStreetCivico, sameBuilding } from "@/lib/address-norm";
 
 export async function POST(req: Request) {
   try {
@@ -43,13 +40,29 @@ export async function POST(req: Request) {
     if (!rl.ok) return fail(`Limite di ${settings.openReviewsPerDay} nuove schede al giorno raggiunto: riprova domani.`, 429);
 
     const p = await readJson<{
-      address?: string;
+      address?: string;        // via, piazza o largo (senza civico)
+      streetNumber?: string;   // civico: "15", "15/A", "12bis"
+      unit?: string;           // interno/scala (facoltativo): "interno 4", "scala B"
       zoneId?: string;
       zone?: { name?: string; province?: string | null; region?: string | null; lat?: number; lng?: number };
       geo?: { lat?: number; lng?: number };
     }>(req);
-    const address = String(p.address || "").trim().replace(/\s+/g, " ").slice(0, 160);
-    if (address.length < 5) return fail("Indica l'indirizzo dell'immobile (almeno 5 caratteri).");
+    // indirizzo strutturato: la via da una parte, il civico dall'altra.
+    // Retrocompatibilità: se il civico non arriva separato (client vecchi),
+    // lo si stacca dalla coda dell'indirizzo scritto di fila.
+    let address = String(p.address || "").trim().replace(/\s+/g, " ").slice(0, 120);
+    let streetNumber = String(p.streetNumber || "").trim().replace(/\s+/g, " ").slice(0, 10);
+    const unit = String(p.unit || "").trim().replace(/\s+/g, " ").slice(0, 40);
+    if (!streetNumber) {
+      const sp = splitStreetCivico(address);
+      address = sp.street;
+      streetNumber = sp.civico;
+    }
+    if (address.length < 3) return fail("Indica la via dell'immobile (almeno 3 caratteri).");
+    if (unit.length === 1) return fail("L'interno/scala è troppo corto: scrivilo per esteso (es. «interno 4»).");
+    // indirizzo completo di display e nome della scheda: con l'interno, il
+    // nome lo porta a vedere («Via dei Mille 15, interno 4»)
+    const fullAddress = [address, streetNumber].filter(Boolean).join(" ");
 
     // città: zona esistente (zoneId) OPPURE qualsiasi località italiana da
     // ricerca geocodificata o GPS (nome + coordinate). La risoluzione è a
@@ -153,17 +166,23 @@ export async function POST(req: Request) {
       geo = { lat: Math.round(lat * 1e6) / 1e6, lng: Math.round(lng * 1e6) / 1e6 };
     }
 
-    // una scheda per indirizzo nella stessa città: se esiste già, si recensisce quella.
-    // Il confronto tollera maiuscole/accenti/punteggiatura e il suffisso "città"
-    // usato nelle schede storiche (es. "Via X 1, Milano" ≡ "Via X 1").
-    const norm = normAddress(address);
-    const zoneNorm = normAddress(zone.name);
-    const matches = (a: string) => a === norm || a === `${norm} ${zoneNorm}`;
+    // una scheda per via + civico + interno nella stessa città: se esiste già,
+    // si recensisce quella. In una via ci sono più civici e in un civico più
+    // unità (condomini): stesso indirizzo ma interno diverso = scheda nuova.
+    // Il confronto tollera maiuscole/accenti/punteggiatura, il suffisso "città"
+    // delle schede storiche e le schede d'epoca col civico dentro address.
+    const target = {
+      street: address,
+      civico: streetNumber,
+      fullNorm: normAddress(fullAddress),
+      zoneNorm: normAddress(zone.name),
+    };
+    const myUnit = normUnit(unit);
     const inZone = await db.entity.findMany({
       where: { zoneId: zone.id, categoryId: "immobile", status: "published" },
-      select: { id: true, name: true, address: true },
+      select: { id: true, name: true, address: true, streetNumber: true, unit: true },
     });
-    const dup = inZone.find(e => matches(normAddress(e.address || e.name)));
+    const dup = inZone.find(e => sameBuilding(e, target) && normUnit(e.unit || "") === myUnit);
     if (dup) {
       return fail("Questo immobile risulta già presente: puoi recensire la scheda esistente.", 409, { existingId: dup.id });
     }
@@ -171,9 +190,11 @@ export async function POST(req: Request) {
     const ent = await db.entity.create({
       data: {
         categoryId: "immobile",
-        name: address,
+        name: unit ? `${fullAddress}, ${unit}` : fullAddress,
         subtitle: null,
         address,
+        streetNumber: streetNumber || null,
+        unit: unit || null,
         zoneId: zone.id,
         geoLat: geo ? geo.lat : null,
         geoLng: geo ? geo.lng : null,
@@ -186,7 +207,7 @@ export async function POST(req: Request) {
       actorId: user.id, actorRole: user.role,
       action: "Scheda immobile aggiunta dall'utente (contributo aperto)",
       targetType: "entity", targetId: ent.id,
-      reason: `Indirizzo: ${address}, ${zone.name}${geo ? " con posizione indicata sulla mappa" : ""}.${zoneEntityCreated ? " Scheda zona attivata automaticamente." : ""}`,
+      reason: `Indirizzo: ${fullAddress}${unit ? `, ${unit}` : ""}, ${zone.name}${geo ? " con posizione indicata sulla mappa" : ""}.${zoneEntityCreated ? " Scheda zona attivata automaticamente." : ""}`,
       isDemo: ent.isDemo,
     });
 

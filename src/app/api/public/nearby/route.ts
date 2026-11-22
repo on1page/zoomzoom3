@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { distanceKm } from "@/lib/server/zones";
 import { handleError } from "@/lib/server/http";
+import { dispAddress } from "@/lib/address-norm";
 
 const RADIUS_M = 50;
 
@@ -29,14 +30,14 @@ export async function GET(req: NextRequest) {
         geoLng: { not: null },
         ...(zoneId ? { zoneId } : {}),
       },
-      select: { id: true, name: true, address: true, zoneId: true, geoLat: true, geoLng: true },
+      select: { id: true, name: true, address: true, streetNumber: true, zoneId: true, geoLat: true, geoLng: true },
     });
 
     const rows = ents
       .map(e => ({
         id: e.id,
         name: e.name,
-        address: e.address,
+        address: dispAddress(e.address, e.streetNumber),
         zoneId: e.zoneId,
         distM: Math.round(distanceKm({ lat, lng }, { lat: e.geoLat!, lng: e.geoLng! }) * 1000),
       }))

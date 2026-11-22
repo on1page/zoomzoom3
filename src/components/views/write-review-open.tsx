@@ -1,12 +1,15 @@
 "use client";
-// ZoomZoom — contributo aperto, flusso semplificato a 4 passi (v2):
+// ZoomZoom — contributo aperto, flusso semplificato a 4 passi (v3):
 //   1 Soggetto   — cosa vuoi recensire (immobile · zona · altro soggetto)
 //   2 Luogo      — UN solo campo di ricerca (o il GPS): prima le schede già
 //                  su ZoomZoom, poi i luoghi della cartografia nazionale
 //   3 Scheda     — riepilogo a badge: si corregge solo quello che manca
 //   4 Recensione — un modulo unico con validazione in tempo reale
 // I dati si compilano UNA volta: il luogo trovato in (2) alimenta la scheda
-// di (3), con dedup per indirizzo+città e proposta di riuso entro 50 m.
+// di (3). INDIRIZZO STRUTTURATO: via + civico + interno/scala — in una via
+// ci sono più edifici e in un civico più unità (condomini) — con dedup per
+// via+civico+interno nella stessa città, proposta di riuso entro 50 m e
+// riepilogo delle schede dello stesso civico prima di crearne una nuova.
 // Regole invariate (il server resta l'autorità): una recensione per scheda
 // per utente — con offerta di rettifica —, testo >= 100 caratteri, almeno un
 // aspetto positivo, max 3 foto, prezzo facoltativo, honeypot, budget
@@ -16,6 +19,7 @@ import { Fragment, useCallback, useEffect, useState } from "react";
 import { useApp } from "@/lib/client/store";
 import { api, fmt1 } from "@/lib/client/api";
 import { navigate } from "@/lib/client/router";
+import { normUnit, dispAddress } from "@/lib/address-norm";
 import { Alert, ChipCat, Stars } from "../ui-kit";
 import { CheckSvg, iconSvg } from "../icons";
 import { ReviewFields, type ReviewFormCore } from "../review-fields";
@@ -28,7 +32,7 @@ type Target = "immobile" | "zona" | "altro";
 type SelEntity = { id: string; name: string; categoryId: string };
 
 type SearchRow = {
-  entity: { id: string; name: string; categoryId: string; subtitle: string | null; address: string | null; zoneId: string | null; isDemo: boolean };
+  entity: { id: string; name: string; categoryId: string; subtitle: string | null; address: string | null; streetNumber?: string | null; zoneId: string | null; isDemo: boolean };
   n: number; mean: number | null; sufficient: boolean;
 };
 
@@ -46,10 +50,17 @@ type ZonePick = {
 
 type PubZone = { id: string; name: string; lat: number; lng: number; entityId: string | null };
 
-// dati del luogo che fluiscono dal passo 2 al passo 3 (e alla creazione)
-type Draft = { zone: ZonePick | null; address: string; geo: LatLng | null };
+// dati del luogo che fluiscono dal passo 2 al passo 3 (e alla creazione).
+// Indirizzo strutturato: via (address) + civico + interno/scala, perché in
+// una via ci sono più edifici e in uno stesso civico più unità abitative
+// (condomini): la discriminante della scheda è via + civico + interno.
+type Draft = { zone: ZonePick | null; address: string; civico: string; unit: string; geo: LatLng | null };
 
 type NearbyRow = { id: string; name: string; address: string | null; zoneId: string | null; distM: number };
+
+// scheda già esistente allo stesso indirizzo (via + civico), con il suo
+// interno: è il "condominio" che si vede prima di creare una scheda nuova
+type BuildingRow = { id: string; name: string; address: string; unit: string | null; unitNorm: string };
 
 type FormState = ReviewFormCore & { honesty: boolean; hp: string; kind: string };
 
@@ -62,7 +73,7 @@ export function WriteReviewOpenView({ presetEntityId }: { presetEntityId?: strin
   const { boot, user, toast, refreshBoot } = useApp();
   const [step, setStep] = useState<"target" | "place" | "confirm" | "form">("target");
   const [target, setTarget] = useState<Target | null>(null);
-  const [draft, setDraft] = useState<Draft>({ zone: null, address: "", geo: null });
+  const [draft, setDraft] = useState<Draft>({ zone: null, address: "", civico: "", unit: "", geo: null });
   const [sel, setSel] = useState<SelEntity | null>(null);
   // com'è nata la scheda del passo 4: badge "Nuova scheda" o "Scheda esistente"
   const [schedaNote, setSchedaNote] = useState<{ created: boolean; reused: boolean } | null>(null);
@@ -230,7 +241,8 @@ function TargetStep({ onPick }: { onPick: (t: Target) => void }) {
           <p>Appartamento o casa, in qualsiasi comune d&apos;Italia.</p>
           <div className="zz-badges">
             <span className="pill pill-green" title="Nessun invito necessario: la scheda nasce dall'indirizzo reale.">Subito</span>
-            <span className="pill pill-gray" title="Trovi la scheda oppure la crei dall'indirizzo: una scheda per indirizzo e città.">Da indirizzo</span>
+            <span className="pill pill-gray" title="Trovi la scheda oppure la crei: una scheda per via, civico e interno nella stessa città.">Via + civico + interno</span>
+            <span className="pill pill-gray" title="Nei condomini l'interno o la scala distingue le unità allo stesso civico: ognuna con la sua scheda.">Condomini</span>
           </div>
         </button>
         <button className="card card-click" style={{ textAlign: "left" }} disabled={gated} onClick={() => onPick("zona")}>
@@ -346,11 +358,14 @@ function PlaceStep({ target, onBack, onInternal, onDraft }: {
     }
   };
 
-  // luogo della mappa: indirizzo o città → minibozza che finisce al passo 3
+  // luogo della mappa: indirizzo o città → minibozza che finisce al passo 3.
+  // Via e civico restano SEPARATI: in un civico possono esserci più unità
+  // (condomini) e la via è la base del confronto con le schede esistenti
   const pickGeo = (g: GeoRow) => {
-    const street = [g.road, g.houseNumber].filter(Boolean).join(" ");
     onDraft({
-      address: street,
+      address: g.road || "",
+      civico: g.houseNumber || "",
+      unit: "",
       zone: g.zoneName ? { name: g.zoneName, province: g.province, region: g.region, lat: g.lat, lng: g.lng } : null,
       geo: { lat: g.lat, lng: g.lng },
     });
@@ -370,14 +385,15 @@ function PlaceStep({ target, onBack, onInternal, onDraft }: {
         setGpsStage("idle");
         if (res.ok && res.found && res.address) {
           const a = res.address;
-          const street = [a.road, a.houseNumber].filter(Boolean).join(" ");
           onDraft({
-            address: street,
+            address: a.road || "",
+            civico: a.houseNumber || "",
+            unit: "",
             zone: a.zoneName ? { name: a.zoneName, province: a.province, region: a.region, lat: pt.lat, lng: pt.lng } : null,
             geo: pt,
           });
         } else {
-          onDraft({ address: "", zone: null, geo: pt });
+          onDraft({ address: "", civico: "", unit: "", zone: null, geo: pt });
           toast("Posizione rilevata, indirizzo non mappato: lo compili al passo seguente.", "err");
         }
       },
@@ -471,7 +487,7 @@ function PlaceStep({ target, onBack, onInternal, onDraft }: {
                       <span className="pick-body">
                         <span className="pick-title">{r.entity.name}</span>
                         <span className="pick-sub">
-                          {r.entity.address || r.entity.subtitle || ""}{r.entity.zoneId ? `${r.entity.address || r.entity.subtitle ? " · " : ""}${zoneName(r.entity.zoneId)}` : ""}
+                          {r.entity.address ? dispAddress(r.entity.address, r.entity.streetNumber) || r.entity.subtitle || "" : (r.entity.subtitle || "")}{r.entity.zoneId ? `${(r.entity.address || r.entity.subtitle) ? " · " : ""}${zoneName(r.entity.zoneId)}` : ""}
                         </span>
                       </span>
                       <span className="pick-tags">
@@ -641,18 +657,39 @@ function ConfirmStep({ target, draft, setDraft, onBack, onReady }: {
 }) {
   const { boot, toast } = useApp();
   const [editZone, setEditZone] = useState(!draft.zone);
-  const [editAddr, setEditAddr] = useState(target === "immobile" && draft.address.trim().length < 5);
+  const [editAddr, setEditAddr] = useState(target === "immobile" && draft.address.trim().length < 3);
+  const [editCivico, setEditCivico] = useState(target === "immobile" && !draft.civico.trim());
+  const [editUnit, setEditUnit] = useState(false);
   const [showMap, setShowMap] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [nearby, setNearby] = useState<NearbyRow[] | null>(null);
+  // schede già esistenti allo stesso indirizzo (via + civico): il condominio
+  // si vede PRIMA di crearne una nuova — ogni unità ha la sua scheda
+  const [building, setBuilding] = useState<BuildingRow[] | null>(null);
 
   const isImmobile = target === "immobile";
-  const addrOk = draft.address.trim().length >= 5;
-  const valid = !!draft.zone && (!isImmobile || addrOk);
+  const via = draft.address.trim();
+  const civico = draft.civico.trim();
+  const unit = draft.unit.trim();
 
-  // conferma: proposta di riuso (C6) → creazione/dedup (EXIST/CREATE)
-  const confirm = async (skipProx = false) => {
+  // la città scelta dalla mappa può già esistere nel catalogo: se c'è, il suo
+  // id locale serve al controllo delle schede dello stesso civico (building)
+  useEffect(() => {
+    const name = draft.zone?.name?.toLowerCase();
+    if (!name || draft.zone?.localId || !boot?.zones) return;
+    const known = boot.zones.find(z => z.name.toLowerCase() === name);
+    if (known) setDraft(d => (d.zone && !d.zone.localId ? { ...d, zone: { ...d.zone, localId: known.id } } : d));
+  }, [draft.zone, boot, setDraft]);
+  const addrOk = via.length >= 3;
+  const civicoOk = civico.length >= 1;
+  const valid = !!draft.zone && (!isImmobile || (addrOk && civicoOk));
+  const myUnitNorm = normUnit(unit);
+  const fullAddr = dispAddress(via, civico);
+
+  // conferma: proposta di riuso (C6, pin) → schede dello stesso civico →
+  // creazione/dedup (EXIST/CREATE)
+  const confirm = async (skip: { prox?: boolean; building?: boolean } = {}) => {
     if (busy || !valid) return;
     setErr(null); setBusy(true);
 
@@ -670,16 +707,27 @@ function ConfirmStep({ target, draft, setDraft, onBack, onReady }: {
     }
 
     // immobile — con il pin, prima propongo le schede vicine (entro 50 m)
-    if (draft.geo && !skipProx) {
+    if (draft.geo && !skip.prox) {
       const nr = await api<{ rows: NearbyRow[] }>(`/api/public/nearby?lat=${draft.geo.lat}&lng=${draft.geo.lng}${draft.zone?.localId ? `&zona=${draft.zone.localId}` : ""}`);
       if (nr.ok && nr.rows?.length) { setNearby(nr.rows); setBusy(false); return; }
     }
     setNearby(null);
 
+    // stesso indirizzo (via + civico): le schede del condominio si vedono
+    // prima di crearne una nuova. Il civico discrimina gli edifici nella
+    // via, l'interno le unità nello stesso civico: se una coincide, si usa
+    if (!skip.building && draft.zone?.localId && addrOk) {
+      const br = await api<{ rows: BuildingRow[] }>(`/api/public/building?zona=${encodeURIComponent(draft.zone.localId)}&via=${encodeURIComponent(via)}&civico=${encodeURIComponent(civico)}`);
+      if (br.ok && br.rows?.length) { setBuilding(br.rows); setBusy(false); return; }
+    }
+    setBuilding(null);
+
     const z = draft.zone;
     const res = await api<{ entity: { id: string; name: string } }>("/api/entities", {
       body: {
-        address: draft.address.trim(),
+        address: via,
+        streetNumber: civico,
+        unit: unit || undefined,
         zoneId: z?.localId,
         zone: z && !z.localId
           ? { name: z.name, province: z.province, region: z.region, lat: z.lat, lng: z.lng }
@@ -695,7 +743,7 @@ function ConfirmStep({ target, draft, setDraft, onBack, onReady }: {
     const ex = (res as { existingId?: string }).existingId;
     if (ex) {
       toast("Immobile già presente: uso la scheda esistente.");
-      onReady({ id: ex, name: draft.address.trim(), categoryId: "immobile" }, { created: false, reused: true });
+      onReady({ id: ex, name: unit ? `${fullAddr}, ${unit}` : fullAddr, categoryId: "immobile" }, { created: false, reused: true });
       return;
     }
     setErr(res.error);
@@ -708,7 +756,7 @@ function ConfirmStep({ target, draft, setDraft, onBack, onReady }: {
           <h1 style={{ margin: 0 }}>Controlla la scheda</h1>
           <p className="sub" style={{ margin: "6px 0 0" }}>
             {isImmobile
-              ? <>Serve <span className="pill pill-green">città</span> e <span className="pill pill-green">indirizzo</span>: il resto è facoltativo.</>
+              ? <>Serve <span className="pill pill-green">città</span>, <span className="pill pill-green">via</span> e <span className="pill pill-green">civico</span>: il resto è facoltativo.</>
               : <>Serve la <span className="pill pill-green">località</span>: il resto arriva con la recensione.</>}
           </p>
         </div>
@@ -740,13 +788,13 @@ function ConfirmStep({ target, draft, setDraft, onBack, onReady }: {
             )}
           </div>
 
-          {/* --- indirizzo (solo immobile) --- */}
+          {/* --- via (solo immobile): il civico va nel campo suo --- */}
           {isImmobile ? (
             <div className="zz-fact">
-              <span className="zz-fact-k">Indirizzo</span>
+              <span className="zz-fact-k">Via</span>
               {addrOk && !editAddr ? (
                 <>
-                  <span className="zz-fact-v ok"><CheckSvg size={11} /> {draft.address}</span>
+                  <span className="zz-fact-v ok"><CheckSvg size={11} /> {via}</span>
                   <span className="spacer" />
                   <button type="button" className="btn btn-ghost btn-xs" onClick={() => setEditAddr(true)}>Modifica</button>
                 </>
@@ -754,19 +802,75 @@ function ConfirmStep({ target, draft, setDraft, onBack, onReady }: {
                 <div style={{ flex: 1, minWidth: 220 }}>
                   <AddressSearch
                     id="cf-addr" value={draft.address} onChange={v => setDraft(d => ({ ...d, address: v }))}
-                    placeholder="Via e civico, es. Via dei Mille 15"
+                    placeholder="Via, piazza o largo — es. Via dei Mille"
                     onPick={p => {
                       setDraft(d => ({
                         ...d,
-                        address: [p.road, p.houseNumber].filter(Boolean).join(" ") || d.address,
+                        address: p.road || d.address,
+                        civico: p.houseNumber || d.civico,
                         geo: { lat: p.lat, lng: p.lng },
                         zone: d.zone ?? (p.zoneName ? { name: p.zoneName, province: p.province, region: p.region, lat: p.lat, lng: p.lng } : null),
                       }));
                       setEditAddr(false);
+                      if (p.houseNumber) setEditCivico(false);
                     }}
                   />
                 </div>
               )}
+            </div>
+          ) : null}
+
+          {/* --- civico: distingue gli edifici nella stessa via --- */}
+          {isImmobile ? (
+            <div className="zz-fact">
+              <span className="zz-fact-k">Civico</span>
+              {civicoOk && !editCivico ? (
+                <>
+                  <span className="zz-fact-v ok" title="In una via, piazza o largo possono esserci più edifici: il civico distingue le schede."><CheckSvg size={11} /> {civico}</span>
+                  <span className="spacer" />
+                  <button type="button" className="btn btn-ghost btn-xs" onClick={() => setEditCivico(true)}>Modifica</button>
+                </>
+              ) : (
+                <div style={{ flex: 1, minWidth: 140, maxWidth: 220 }}>
+                  <input
+                    id="cf-civico" type="text" autoComplete="off" autoFocus={!civicoOk}
+                    aria-label="Numero civico" placeholder="Es. 15 o 15/A"
+                    title="Numero civico: distingue gli edifici nella stessa via, piazza o largo."
+                    value={draft.civico}
+                    onChange={e => setDraft(d => ({ ...d, civico: e.target.value.slice(0, 10) }))}
+                    onBlur={() => { if (civicoOk) setEditCivico(false); }}
+                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); if (civicoOk) setEditCivico(false); } }}
+                  />
+                </div>
+              )}
+              {!civicoOk ? <span className="pill pill-amber" title="In una via possono esserci più edifici: il civico distingue le schede.">Necessario</span> : null}
+            </div>
+          ) : null}
+
+          {/* --- interno/scala: le unità di uno stesso civico (condomini) --- */}
+          {isImmobile ? (
+            <div className="zz-fact">
+              <span className="zz-fact-k" title="Condomini e palazzi con più unità: l'interno (o la scala) distingue le schede allo stesso civico.">Interno/scala</span>
+              {unit && !editUnit ? (
+                <>
+                  <span className="zz-fact-v ok"><CheckSvg size={11} /> {unit}</span>
+                  <span className="spacer" />
+                  <button type="button" className="btn btn-ghost btn-xs" onClick={() => setEditUnit(true)}>Modifica</button>
+                </>
+              ) : (
+                <div style={{ flex: 1, minWidth: 200, maxWidth: 320 }}>
+                  <input
+                    id="cf-unit" type="text" autoComplete="off"
+                    aria-label="Interno o scala" placeholder="Es. interno 4, scala B"
+                    title="Solo per civici con più unità (condomini): distingue la tua scheda da quella delle altre unità dello stesso indirizzo."
+                    value={draft.unit}
+                    onChange={e => setDraft(d => ({ ...d, unit: e.target.value.slice(0, 40) }))}
+                    onBlur={() => setEditUnit(false)}
+                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); setEditUnit(false); } }}
+                  />
+                </div>
+              )}
+              <span className="pill pill-gray" title="Lascia vuoto per la scheda dell'edificio: nei condomini l'interno crea una scheda per unità, ognuna con le sue recensioni.">Facoltativo</span>
             </div>
           ) : null}
 
@@ -808,7 +912,49 @@ function ConfirmStep({ target, draft, setDraft, onBack, onReady }: {
               ))}
             </div>
             <div className="row mt2">
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => void confirm(true)}>No, è un&apos;altra scheda — crea la nuova</button>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => void confirm({ prox: true })}>No, è un&apos;altra scheda — crea la nuova</button>
+            </div>
+          </Alert>
+        ) : null}
+
+        {/* stesso indirizzo (via + civico): le schede del condominio. Il
+            civico discrimina gli edifici, l'interno le unità: chi riconosce
+            la sua la usa, chi ha un interno diverso crea la sua scheda */}
+        {building && building.length ? (
+          <Alert kind="info">
+            <p className="mb1">
+              <span className="pill pill-blue" title="Stesso civico: in un condominio ogni unità ha la sua scheda, l'edificio pure.">Stesso indirizzo</span>{" "}
+              A <b>{fullAddr}</b> {building.length === 1 ? "c’è già una scheda" : `ci sono già ${building.length} schede`}:
+            </p>
+            <div className="pick-list">
+              {building.map(b => {
+                const same = !!myUnitNorm && b.unitNorm === myUnitNorm;
+                const toks = (s: string) => new Set(s.split(" ").filter(Boolean));
+                const subset = (a: Set<string>, bb: Set<string>) => { for (const t of a) if (!bb.has(t)) return false; return true; };
+                const similar = !same && !!myUnitNorm && !!b.unitNorm
+                  && (subset(toks(myUnitNorm), toks(b.unitNorm)) || subset(toks(b.unitNorm), toks(myUnitNorm)));
+                return (
+                  <button type="button" key={b.id} className="pick-card" onClick={() => onReady({ id: b.id, name: b.name, categoryId: "immobile" }, { created: false, reused: true })}>
+                    <span className="pick-ico" style={{ background: "#33658A" }}>{iconSvg("immobile", 17)}</span>
+                    <span className="pick-body">
+                      <span className="pick-title">{b.name}</span>
+                      <span className="pick-sub">{b.unit ? b.unit : "Edificio intero · senza interno"}</span>
+                    </span>
+                    <span className="pick-tags">
+                      {same
+                        ? <span className="pill pill-green" title="Il tuo interno coincide con questa scheda: riusala per non creare un doppione.">Stesso interno</span>
+                        : similar
+                          ? <span className="pill pill-amber" title="L'interno somiglia al tuo: controlla bene prima di crearne uno nuovo.">Interno simile</span>
+                          : <span className="pill pill-gray">{b.unit ? "Unità diversa" : "Senza interno"}</span>}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="row mt2">
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => void confirm({ prox: true, building: true })}>
+                {unit ? `Il mio interno (${unit}) è un altro — crea la scheda` : "Recensisco l'edificio — crea la scheda"}
+              </button>
             </div>
           </Alert>
         ) : null}
@@ -817,8 +963,8 @@ function ConfirmStep({ target, draft, setDraft, onBack, onReady }: {
 
         <div className="row" style={{ justifyContent: "flex-end", alignItems: "center", gap: 10 }}>
           {!valid ? (
-            <span className="zz-count todo" title="La città si sceglie dai suggerimenti; l'indirizzo vuole almeno 5 caratteri.">
-              Manca: {!draft.zone ? "città" : ""}{!draft.zone && !addrOk ? " · " : ""}{!addrOk ? "indirizzo" : ""}
+            <span className="zz-count todo" title="La città si sceglie dai suggerimenti; la via vuole almeno 3 caratteri e il civico almeno 1 (es. 15 o 15/A).">
+              Manca: {[!draft.zone ? "città" : "", !addrOk ? "via" : "", !civicoOk ? "civico" : ""].filter(Boolean).join(" · ")}
             </span>
           ) : null}
           <button className="btn btn-primary" disabled={!valid || busy} onClick={() => void confirm()}>

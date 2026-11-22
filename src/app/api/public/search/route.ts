@@ -60,7 +60,8 @@ export async function GET(req: NextRequest) {
       return {
         entity: {
           id: e.id, categoryId: e.categoryId, name: e.name, subtitle: e.subtitle,
-          address: e.address, zoneId: e.zoneId, initialsOnly: e.initialsOnly,
+          address: e.address, streetNumber: e.streetNumber, zoneId: e.zoneId,
+          initialsOnly: e.initialsOnly,
           verifiedBusiness: e.verifiedBusiness, isDemo: e.isDemo,
         },
         n: st.n, mean: st.mean,

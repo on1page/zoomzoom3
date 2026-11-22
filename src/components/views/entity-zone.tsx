@@ -28,7 +28,7 @@ type ReviewItem = {
 
 type EntityPayload = {
   entity: {
-    id: string; categoryId: string; name: string; subtitle: string | null; address: string | null;
+    id: string; categoryId: string; name: string; subtitle: string | null; address: string | null; streetNumber?: string | null; unit?: string | null;
     zoneId: string | null; geo: { lat: number; lng: number } | null; initialsOnly: boolean;
     verifiedBusiness: boolean; isDemo: boolean;
     stats: { n: number; mean: number | null; crit: Record<string, number | null>; sufficient: boolean };
@@ -249,7 +249,7 @@ export function EntityView({ id }: { id: string }) {
             </div>
             <p className="sub" style={{ margin: "6px 0 0" }}>
               <ChipCat cat={cat} />{" "}
-              {ent.address ? <span>· {ent.address}</span> : null}
+              {ent.address ? <span>· {[ent.address, ent.streetNumber].filter(Boolean).join(" ")}</span> : null}
               {ent.categoryId !== "zona" && zoneName ? <> · <a href={`#/zona/ent_z_${ent.zoneId}`}>{zoneName}</a></> : null}
               {ent.subtitle && !ent.address ? <> · {ent.subtitle}</> : null}
             </p>

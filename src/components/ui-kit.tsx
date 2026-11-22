@@ -104,7 +104,7 @@ export function CriteriaBars({ criteria, stats }: { criteria: { key: string; lab
 
 /* ---------- Card entità ---------- */
 export type EntCardData = {
-  entity: { id: string; name: string; categoryId: string; subtitle?: string | null; address?: string | null; zoneId?: string | null; verifiedBusiness?: boolean; isDemo?: boolean };
+  entity: { id: string; name: string; categoryId: string; subtitle?: string | null; address?: string | null; streetNumber?: string | null; zoneId?: string | null; verifiedBusiness?: boolean; isDemo?: boolean };
   n: number; mean: number | null; sufficient: boolean;
   priceStats?: { unit: string; min: number; max: number; median: number; n: number } | null;
   rank?: number;
@@ -124,7 +124,7 @@ export function EntityCard({ data, cat, zoneName }: { data: EntCardData; cat: Ca
       </div>
       <div className="ent-meta">
         <ChipCat cat={cat} href={false} />
-        {entity.address ? <span>{entity.address}</span>
+        {entity.address ? <span>{[entity.address, entity.streetNumber].filter(Boolean).join(" ")}</span>
           : entity.subtitle ? <span>{entity.subtitle}</span>
           : entity.zoneId && zoneName ? <span>{zoneName(entity.zoneId)}</span> : null}
       </div>

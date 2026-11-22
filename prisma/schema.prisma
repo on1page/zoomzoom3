@@ -168,6 +168,14 @@ model Entity {
   name            String
   subtitle        String?
   address         String?
+  // IMMOBILI — indirizzo strutturato: address è la via/piazza/largo,
+  // streetNumber il civico ("15", "15/A"), unit l'interno o scala che
+  // distingue le unità di uno stesso condominio ("interno 4", "scala B").
+  // La discriminante della scheda è via + civico + interno nella stessa città.
+  // Retrocompatibilità: null sulle schede storiche, dove il civico è già
+  // incluso in address (es. "Via dei Mille 15").
+  streetNumber    String?
+  unit            String?
   zoneId          String?
   zone            Zone?    @relation(fields: [zoneId], references: [id])
   // posizione reale WGS84 (solo categorie mappabili: immobili)
