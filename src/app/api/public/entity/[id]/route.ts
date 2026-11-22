@@ -99,6 +99,10 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
       teasers,
       hiddenCount,
       publishedCount: published.length,
+      // contributo semplificato: il client sa subito se l'utente ha già
+      // recensito questa scheda (offerta di rettifica invece del modulo)
+      myReviewCount: user ? published.filter(r => r.userId === user.id).length : 0,
+      myReviewId: user ? (published.find(r => r.userId === user.id)?.id ?? null) : null,
       premium: {
         enabled: settings.premiumEnabled,
         daysPerReview: settings.premiumDaysPerReview,

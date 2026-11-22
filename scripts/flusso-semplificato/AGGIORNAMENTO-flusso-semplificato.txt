@@ -1,0 +1,166 @@
+ZoomZoom — Aggiornamento: contributo semplificato a 4 passi (badge-first)
+=========================================================================
+
+Cosa risolve questo aggiornamento
+---------------------------------
+Il flusso "Scrivi una recensione" chiedeva troppe cose in troppe schermate:
+tre passi separati (categoria → ricerca o indirizzo → modulo), paragrafi
+lunghi dove basta un'etichetta, controlli sparsi, e la validazione arrivava
+SOLO all'invio: la simulazione S01–S12 aveva misurato fino a 26 campi
+compilati e poi buttati via (email non verificata, scheda già recensita,
+dedup dell'indirizzo).
+
+Ora il flusso è quello del diagramma D2-v2, in 4 passi con BADGE al posto
+del testo (i dettagli vivono nei tooltip):
+
+  1 SOGGETTO   — tre card compatte: Immobile · Zona o città · Altro
+                soggetto. Badge: "Subito", "Da indirizzo", "Tutta Italia",
+                "Controllo staff", "Persone: verifica".
+  2 LUOGO      — UN solo campo di ricerca: digiti l'indirizzo, la città o
+                il nome della scheda. Risultati in due sezioni ordinate:
+                prima "Su ZoomZoom — recensibili subito" (le schede del
+                catalogo, con stelle e conteggio: dedup al primo posto),
+                poi "Dalla mappa — per creare la scheda" (cartografia
+                nazionale OpenStreetMap). Alternativa: GPS (immobile e
+                zona), con reverse geocoding che riempie tutto.
+  3 SCHEDA     — riepilogo a righe-badge: Città ✓, Indirizzo ✓, Pin ✓.
+                I dati arrivano autofillati dal passo 2; si corregge SOLO
+                quello che manca (i campi mancanti appaiono come input,
+                i presenti come badge con "Modifica"). Il tasto resta
+                disattivato finché manca qualcosa, con un badge che dice
+                cosa ("Manca: città · indirizzo").
+  4 RECENSIONE — un modulo unico con VALIDAZIONE IN TEMPO REALE (stesse
+                regole del server, che resta l'autorità): badge contatore
+                "Testo 84/100" (ambra) → "Testo 132/100" (verde), "Pro 2",
+                "Foto 1/3", "Dichiarazione". Il pulsante "Pubblica" si
+                attiva solo quando tutti i badge sono verdi.
+
+I dati si compilano UNA volta: il luogo scelto al passo 2 alimenta la
+scheda del passo 3 (città, provincia, indirizzo, pin) e la creazione al
+conferma. Lo stepper in alto (1 Soggetto › 2 Luogo › 3 Scheda ›
+4 Recensione) mostra l'avanzamento; i passi fatti sono cliccabili per
+tornare indietro senza perdere nulla.
+
+Le correzioni della simulazione, ora implementate
+-------------------------------------------------
+  C1  GATE EMAIL SPOSTATO ALL'INIZIO — se l'email non è verificata, il
+      passo 1 lo dice subito con badge "Email da confermare" e le card
+      restano disattivate: nessun campo compilato e poi rifiutato.
+  C2  CAMPO UNICO CHE CERCA OVUNQUE — per immobile e zona cerca insieme
+      le schede interne E i luoghi della mappa; per "altro soggetto"
+      cerca tra tutte le categorie soggetto (agenzie, ditte,
+      amministratori, consulenti, persone).
+  C5  INTERNE PRIMA, MAPPA POI — l'elenco mette al primo posto le schede
+      già su ZoomZoom (con stelle e numero recensioni): il dedup si vede
+      prima di creare doppioni. A campo vuoto (immobile) si aprono subito
+      le schede del catalogo.
+  C6  PROPOSTA DI RIUSO ENTRO 50 METRI — nuova API
+      GET /api/public/nearby?lat=&lng=&zona=: se stai per creare una
+      scheda e a meno di 50 m c'è già un immobile con posizione (es.
+      "Via X 15" vs "Via X 15/A"), il passo 3 propone "Scheda vicina —
+      a 12 m dal tuo pin" con [Usa questa] o [No, è un'altra scheda].
+      Solo dati pubblici (gli immobili con posizione sono già punti
+      della mappa).
+  C7  "HAI GIÀ RECENSITO QUESTA SCHEDA?" — la scheda pubblica ora espone
+      myReviewCount e myReviewId; il passo 4 controlla PRIMA di far
+      compilare e, se la tua recensione c'è già, mostra il blocco
+      "Recensione già scritta" con l'offerta di rettifica motivata
+      (entro i giorni previsti) invece del modulo. Anche il dedup
+      dell'indirizzo (409 del server) finisce nello stesso blocco:
+      mai più 13 campi buttati via.
+  C8  VALIDAZIONE INLINE — i badge del passo 4 applicano in tempo reale
+      le regole del server: testo >= 100 caratteri, almeno un aspetto
+      positivo (una riga per pro), foto <= 3, dichiarazione di onestà,
+      importo tra 1 € e 100.000.000 € se compilato. Il server resta
+      l'autorità finale.
+  C9  DICHIARATA VS VERIFICABILE — nel passo 4 il badge "Dichiarata"
+      spiega (tooltip) e sotto il pulsante resta una riga: pubblichi senza
+      invito, l'esperienza resta dichiarata, verificabile dopo con invito
+      o documenti (link a #/verifica-esperienza).
+  C10 REGOLE INVARIATE — punteggio 0–10 step 0,5, criteri con default 5,
+      prezzo facoltativo, honeypot, budget giornaliero, una recensione
+      per scheda per utente, Premium 30 giorni per contributo pubblicato.
+
+Il ramo "Altro soggetto" (persona, agenzia, ditta…)
+---------------------------------------------------
+  • Soggetto GIÀ sul catalogo: si recensisce subito (USE del diagramma);
+    per le persone fisiche la card porta il badge "Verifica richiesta" e
+    il click apre il blocco "Serve una esperienza verificata" con i link
+    all'invito/verifica documentale.
+  • Soggetto NUOVO: "Non la trovi? Proponila" — categoria, nome e
+    motivazione (min 20 caratteri, con contatore-badge) vanno in
+    revisione allo staff con POST /api/proposals. Esito: badge "In
+    revisione allo staff" e spiegazione: alla approvazione la scheda
+    nasce e potrai scriverle la recensione.
+  • C4 (recensione parcheggiata e pubblicata automaticamente
+    all'approvazione) RESTA DA FARE: richiede Review.status = pending
+    nel backend e la pubblicazione da back office. È l'unico pezzo del
+    diagramma D2-v2 non incluso qui.
+
+Badge-first: cosa è cambiato nel testo
+--------------------------------------
+  • Paragrafi descrittivi delle card → UNA riga + badge con tooltip.
+  • Lo stato di ogni dato (presente/mancante/da confermare) è un badge
+    colorato, non una frase.
+  • Gli esiti intermedi ("aggiunta", "già presente", "attivata") sono
+    badge nel passo 4: "Nuova scheda" (verde) o "Scheda esistente"
+    (blu), accanto a "Dichiarata" e "Premium +30 gg".
+  • I contatori del modulo sono pillcole aggiornate mentre scrivi.
+  • Tutti i vincoli restano leggibili nei tooltip (attributo title) e
+    nei collegamenti alle pagine di regole.
+
+File modificati
+---------------
+  src/components/views/write-review-open.tsx   RISCRITTO: il flusso a 4
+      passi (stepper, campo unico, riepilogo a badge, validazione inline,
+      blocco "già recensita", ramo altro soggetto con proposta).
+  src/app/globals.css   stili del flusso (.zz-stepper, .zz-fact,
+      .zz-count, .pick-card/.pick-list, .pick-target) + due fix:
+      header senza overflow orizzontale su mobile (la CTA resta nel menu
+      burger) e titolo/sottotitolo delle card risultati con ellipsis.
+  src/app/api/public/entity/[id]/route.ts   aggiunti myReviewCount e
+      myReviewId nel payload (per il controllo C7 lato client).
+  src/app/api/public/nearby/route.ts   NUOVA: schede immobile pubbliche
+      con posizione entro 50 m dal punto indicato (C6).
+  src/app/api/public/geocode/route.ts   il tipo "place" ora si traduce
+      "località" (prima restava in inglese nei suggerimenti).
+  src/components/address-search.tsx   label opzionale + aria-label
+      (il campo indirizzo dentro le righe-badge del passo 3).
+
+Cosa NON è cambiato
+-------------------
+Nessuna regola del server: validazioni, anti-abuso (rate limit, budget
+giornaliero, honeypot), dedup per indirizzo+città, creazione zone con
+copertura nazionale, privacy (le coordinate al geocoder pubblico solo su
+azione esplicita: GPS o ricerca). Il vecchio comportamento con
+#/recensione?entity=… (preselezione dalla scheda) è invariato.
+
+Verifica di prova (fatta nel browser, utente verificato)
+--------------------------------------------------------
+  1. Immobile da ricerca testuale: "Via dei Mille 15 Milano" → risultato
+     mappa (Melzo) → passo 3 autofillato (città, indirizzo, pin) →
+     conferma → scheda creata → modulo con badge → pubblicazione e
+     redirect alla scheda. Rifacendo la stessa ricerca: la scheda interna
+     appare al primo posto con stelle e conteggio; al click, blocco
+     "Recensione già scritta" con offerta di rettifica (C7).
+  2. Proposta di riuso (C6): stessa via → conferma → "Scheda vicina a
+     0 m" con [Usa questa] / [No, è un'altra scheda]; il ramo "crea
+     comunque" incappa nel dedup del server (409) e riusa la scheda
+     esistente.
+  3. Zona: "Morterone" → risultato mappa (paese, Lecco) → conferma →
+     scheda attivata ("Nuova scheda") → modulo Zone.
+  4. Altro soggetto: "Immobiliare Aurora" (agenzia) → modulo aperto;
+     persona fisica → blocco "Serve una esperienza verificata"; soggetto
+     nuovo → proposta con contatore → "In revisione allo staff".
+  5. Mobile 390 px: stepper a capo, nessuno sforamento orizzontale
+     (verificato anche l'header, che prima sforava su TUTTE le pagine).
+
+Lavori collegati rimasti
+------------------------
+  • C4: recensione in attesa pubblicata insieme alla scheda approvata
+    (Review.status = pending + azione staff).
+  • La ricerca interna non trova "via + civico + città" scritti di fila
+    se il nome scheda contiene la virgola (es. "Via X 4, Alassio" non
+    matcha "via x 4 alassio"): comportamento preesistente della API di
+    ricerca, non toccato qui; il campo unico lo aggira trovando il
+    luogo sulla mappa.

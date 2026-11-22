@@ -1,39 +1,71 @@
 "use client";
-// ZoomZoom — contributo aperto: "Scrivi una recensione" senza invito.
-// Immobile e zona si recensiscono subito: basta trovare la scheda oppure
-// aggiungerla dall'indirizzo reale (con posizione facoltativa da GPS o mappa).
-// È il cuore della strategia anti "catalogo vuoto": ogni utente porta il
-// primo mattone (l'indirizzo) e il contenuto arriva con la recensione.
-// COPERTURA NAZIONALE: la città non è più un elenco fisso di poche città —
-// si cerca qualsiasi comune, paese o frazione d'Italia (geocodifica
-// OpenStreetMap) oppure si usa il GPS, che riempie via/civico reali con il
-// reverse geocoding. Le persone fisiche restano sulla via invito/verifica.
-import { useCallback, useEffect, useState } from "react";
+// ZoomZoom — contributo aperto, flusso semplificato a 4 passi (v2):
+//   1 Soggetto   — cosa vuoi recensire (immobile · zona · altro soggetto)
+//   2 Luogo      — UN solo campo di ricerca (o il GPS): prima le schede già
+//                  su ZoomZoom, poi i luoghi della cartografia nazionale
+//   3 Scheda     — riepilogo a badge: si corregge solo quello che manca
+//   4 Recensione — un modulo unico con validazione in tempo reale
+// I dati si compilano UNA volta: il luogo trovato in (2) alimenta la scheda
+// di (3), con dedup per indirizzo+città e proposta di riuso entro 50 m.
+// Regole invariate (il server resta l'autorità): una recensione per scheda
+// per utente — con offerta di rettifica —, testo >= 100 caratteri, almeno un
+// aspetto positivo, max 3 foto, prezzo facoltativo, honeypot, budget
+// giornaliero, Premium per contributo pubblicato.
+// Badge-first: etichette brevi, i dettagli vivono nei tooltip (title).
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { useApp } from "@/lib/client/store";
 import { api, fmt1 } from "@/lib/client/api";
 import { navigate } from "@/lib/client/router";
 import { Alert, ChipCat, Stars } from "../ui-kit";
-import { iconSvg } from "../icons";
+import { CheckSvg, iconSvg } from "../icons";
 import { ReviewFields, type ReviewFormCore } from "../review-fields";
 import { PhotoInput } from "../photo-input";
 import { LocationPicker, type LatLng } from "../location-picker";
 import { PlaceSearch } from "../place-search";
-import { AddressSearch, type AddressPlace } from "../address-search";
+import { AddressSearch } from "../address-search";
 
+type Target = "immobile" | "zona" | "altro";
 type SelEntity = { id: string; name: string; categoryId: string };
 
 type SearchRow = {
-  entity: { id: string; name: string; subtitle: string | null; address: string | null; zoneId: string | null; isDemo: boolean };
+  entity: { id: string; name: string; categoryId: string; subtitle: string | null; address: string | null; zoneId: string | null; isDemo: boolean };
   n: number; mean: number | null; sufficient: boolean;
 };
 
+type GeoRow = {
+  label: string; name: string; lat: number; lng: number; kind: string;
+  zoneName: string | null; province: string | null; region: string | null;
+  road?: string | null; houseNumber?: string | null;
+};
+
+// località scelta (qualsiasi comune, paese o frazione d'Italia)
+type ZonePick = {
+  name: string; province: string | null; region: string | null;
+  lat: number; lng: number; localId?: string;
+};
+
+type PubZone = { id: string; name: string; lat: number; lng: number; entityId: string | null };
+
+// dati del luogo che fluiscono dal passo 2 al passo 3 (e alla creazione)
+type Draft = { zone: ZonePick | null; address: string; geo: LatLng | null };
+
+type NearbyRow = { id: string; name: string; address: string | null; zoneId: string | null; distM: number };
+
 type FormState = ReviewFormCore & { honesty: boolean; hp: string; kind: string };
+
+const SUBJECT_CATS = ["proprietario", "affittuario", "amministratore", "agenzia", "ditta", "consulente"];
+
+const countLines = (s: string) =>
+  s.split("\n").map(x => x.replace(/^[-•*]\s*/, "").trim()).filter(Boolean).length;
 
 export function WriteReviewOpenView({ presetEntityId }: { presetEntityId?: string }) {
   const { boot, user, toast, refreshBoot } = useApp();
-  const [step, setStep] = useState<"target" | "find" | "form">("target");
-  const [target, setTarget] = useState<"immobile" | "zona" | null>(null);
+  const [step, setStep] = useState<"target" | "place" | "confirm" | "form">("target");
+  const [target, setTarget] = useState<Target | null>(null);
+  const [draft, setDraft] = useState<Draft>({ zone: null, address: "", geo: null });
   const [sel, setSel] = useState<SelEntity | null>(null);
+  // com'è nata la scheda del passo 4: badge "Nuova scheda" o "Scheda esistente"
+  const [schedaNote, setSchedaNote] = useState<{ created: boolean; reused: boolean } | null>(null);
   const [presetError, setPresetError] = useState<string | null>(null);
 
   // preselezione dalla scheda (#/recensione?entity=…): si accettano solo
@@ -47,7 +79,7 @@ export function WriteReviewOpenView({ presetEntityId }: { presetEntityId?: strin
       if (!cat) { setPresetError("Categoria non disponibile."); return; }
       if (cat.isPerson) { setPresetError("Per recensire una persona serve l'invito del soggetto o la verifica documentale dell'esperienza."); return; }
       setSel({ id: res.entity.id, name: res.entity.name, categoryId: res.entity.categoryId });
-      setTarget(res.entity.categoryId === "zona" ? "zona" : "immobile");
+      setTarget(res.entity.categoryId === "zona" ? "zona" : res.entity.categoryId === "immobile" ? "immobile" : "altro");
       setStep("form");
     })();
   }, [presetEntityId, boot]);
@@ -58,7 +90,7 @@ export function WriteReviewOpenView({ presetEntityId }: { presetEntityId?: strin
     return (
       <div className="container section" style={{ maxWidth: 640 }}>
         <h1>Scrivi una recensione</h1>
-        <Alert kind="info">Per scrivere una recensione serve <a href="#/accedi">accedere</a> o <a href="#/registrati">creare un account</a>: servono un indirizzo email verificato e uno pseudonimo, mai il tuo nome vero. Ogni recensione pubblicata attiva la <b>Membership Premium</b> ({boot.settings.premiumDaysPerReview} giorni).</Alert>
+        <Alert kind="info">Serve <a href="#/accedi">accedere</a> o <a href="#/registrati">creare un account</a> (email verificata e pseudonimo). Ogni recensione pubblicata attiva la <b>Membership Premium</b> ({boot.settings.premiumDaysPerReview} giorni).</Alert>
       </div>
     );
   }
@@ -80,29 +112,54 @@ export function WriteReviewOpenView({ presetEntityId }: { presetEntityId?: strin
       <div className="container section" style={{ maxWidth: 640 }}>
         <Alert kind="warn">
           <h1 style={{ margin: "0 0 8px", fontSize: "1.3rem" }}>Contributo aperto sospeso</h1>
-          Le recensioni aperte sono temporaneamente disattivate dall&apos;amministrazione: per scrivere usa l&apos;invito ricevuto per email oppure la <a href="#/verifica-esperienza">verifica documentale</a>.
+          Le recensioni aperte sono temporaneamente disattivate: usa l&apos;invito ricevuto per email oppure la <a href="#/verifica-esperienza">verifica documentale</a>.
         </Alert>
       </div>
     );
   }
 
+  // stepper: etichette e posizione corrente in base al percorso scelto
+  const labels = target === "altro" ? ["Soggetto", "Ricerca", "Recensione"] : ["Soggetto", "Luogo", "Scheda", "Recensione"];
+  const curIdx = step === "target" ? 0 : step === "place" ? 1 : step === "confirm" ? 2 : target === "altro" ? 2 : 3;
+  const jump = (i: number) => {
+    if (i >= curIdx) return;
+    if (i === 0) setStep("target");
+    else if (i === 1) setStep("place");
+    else if (i === 2 && target !== "altro") setStep("confirm");
+  };
+
   return (
     <>
+      {target && step !== "target" ? (
+        <div className="container" style={{ maxWidth: 860, paddingTop: 22 }}>
+          <Stepper labels={labels} current={curIdx} onJump={jump} />
+        </div>
+      ) : null}
       {step === "target" ? (
-        <TargetStep onPick={t => { setTarget(t); setStep("find"); }} />
-      ) : step === "find" ? (
-        <FindStep
+        <TargetStep onPick={t => { setTarget(t); setStep("place"); }} />
+      ) : step === "place" ? (
+        <PlaceStep
           target={target!}
-          onSelected={(ent) => { setSel(ent); setStep("form"); }}
           onBack={() => { setTarget(null); setStep("target"); }}
+          onInternal={(ent, note) => { setSel(ent); setSchedaNote(note); setStep("form"); }}
+          onDraft={(d) => { setDraft(d); setStep("confirm"); }}
+        />
+      ) : step === "confirm" ? (
+        <ConfirmStep
+          target={target!}
+          draft={draft}
+          setDraft={setDraft}
+          onBack={() => setStep("place")}
+          onReady={(ent, note) => { setSel(ent); setSchedaNote(note); setStep("form"); }}
         />
       ) : sel ? (
-        <OpenReviewForm
+        <ReviewStep
           key={sel.id}
           sel={sel}
-          onBack={() => { setSel(null); setStep("find"); }}
+          schedaNote={schedaNote}
+          onBack={() => { setSel(null); setStep(target === "altro" ? "place" : "place"); }}
           onDone={async (entityId, premiumDays) => {
-            if (premiumDays > 0) toast(`Recensione pubblicata: grazie! Membership Premium attivata per ${premiumDays} giorni.`);
+            if (premiumDays > 0) toast(`Recensione pubblicata: Premium attivo per ${premiumDays} giorni.`);
             else toast("Recensione pubblicata: grazie.");
             await refreshBoot();
             navigate(`#/scheda/${entityId}`);
@@ -113,394 +170,670 @@ export function WriteReviewOpenView({ presetEntityId }: { presetEntityId?: strin
   );
 }
 
+/* ---------- Stepper: 1 Soggetto · 2 Luogo · 3 Scheda · 4 Recensione ---------- */
+function Stepper({ labels, current, onJump }: { labels: string[]; current: number; onJump: (i: number) => void }) {
+  return (
+    <ol className="zz-stepper" aria-label="Avanzamento">
+      {labels.map((l, i) => (
+        <Fragment key={l}>
+          {i > 0 ? <span className="zz-step-arrow" aria-hidden="true">›</span> : null}
+          <li
+            className={`zz-step${i === current ? " on" : i < current ? " done" : ""}`}
+            aria-current={i === current ? "step" : undefined}
+            onClick={i < current ? () => onJump(i) : undefined}
+            onKeyDown={i < current ? (e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onJump(i); } }) : undefined}
+            tabIndex={i < current ? 0 : undefined}
+            title={i < current ? `Torna a: ${l}` : undefined}
+          >
+            <span className="zz-dot">{i < current ? <CheckSvg size={11} /> : i + 1}</span>
+            {l}
+          </li>
+        </Fragment>
+      ))}
+    </ol>
+  );
+}
+
 /* ---------- Passo 1: cosa vuoi recensire ---------- */
-function TargetStep({ onPick }: { onPick: (t: "immobile" | "zona") => void }) {
-  const { boot } = useApp();
+function TargetStep({ onPick }: { onPick: (t: Target) => void }) {
+  const { boot, user } = useApp();
+  // C1 — cancello all'inizio, non dopo il modulo: senza email verificata il
+  // server rifiuterebbe tutto alla fine, sprecando i campi compilati
+  const gated = !user.emailVerified;
   return (
     <div className="container" style={{ maxWidth: 860, paddingTop: 26 }}>
       <div className="section-head">
         <div>
           <h1 style={{ margin: 0 }}>Scrivi una recensione</h1>
-          <p className="sub">Basta un account verificato: per immobili e zone non serve nessun invito. Ogni recensione pubblicata attiva {boot?.settings.premiumDaysPerReview} giorni di Membership Premium.</p>
+          <p className="sub" style={{ margin: "6px 0 0" }}>
+            <span className="pill pill-green" title={`Ogni recensione pubblicata attiva la Membership Premium: lettura integrale delle recensioni di tutte le schede per ${boot?.settings.premiumDaysPerReview} giorni. Il premio è per il contributo, non per il voto.`}>
+              Premium +{boot?.settings.premiumDaysPerReview} gg
+            </span>{" "}
+            <span className="pill pill-gray" title="Racconti un'esperienza personale, sotto pseudonimo. Segnalazioni e moderazione attive.">Pseudonimo</span>
+          </p>
         </div>
       </div>
-      <div className="grid grid-3">
-        <button className="card card-click" style={{ textAlign: "left" }} onClick={() => onPick("immobile")}>
-          <span className="cat-ico" style={{ background: "#33658A", color: "#fff" }}>{iconSvg("immobile", 22)}</span>
-          <h3>Un immobile</h3>
-          <p className="small mb0">Appartamento, casa o singolo indirizzo, in <b>qualsiasi comune o paese d&apos;Italia</b>. Trovalo tra le schede oppure aggiungilo tu dall&apos;indirizzo: la prima recensione può essere la tua.</p>
-          <span className="pill pill-green" style={{ marginTop: 10 }}>Subito, senza invito</span>
+
+      {gated ? (
+        <Alert kind="warn">
+          <span className="pill pill-amber" style={{ marginRight: 8 }}>Email da confermare</span>
+          Conferma l&apos;indirizzo dal <a href="#/profilo">collegamento ricevuto via email</a> prima di scrivere: la recensione si pubblica solo con email verificata.
+        </Alert>
+      ) : null}
+
+      <div className="pick-target" style={{ marginTop: 14 }}>
+        <button className="card card-click" style={{ textAlign: "left" }} disabled={gated} onClick={() => onPick("immobile")}>
+          <h3>
+            <span className="cat-ico" style={{ background: "#33658A", color: "#fff" }}>{iconSvg("immobile", 20)}</span>
+            Un immobile
+          </h3>
+          <p>Appartamento o casa, in qualsiasi comune d&apos;Italia.</p>
+          <div className="zz-badges">
+            <span className="pill pill-green" title="Nessun invito necessario: la scheda nasce dall'indirizzo reale.">Subito</span>
+            <span className="pill pill-gray" title="Trovi la scheda oppure la crei dall'indirizzo: una scheda per indirizzo e città.">Da indirizzo</span>
+          </div>
         </button>
-        <button className="card card-click" style={{ textAlign: "left" }} onClick={() => onPick("zona")}>
-          <span className="cat-ico" style={{ background: "#4E7D5B", color: "#fff" }}>{iconSvg("zona", 22)}</span>
-          <h3>Una città / zona</h3>
-          <p className="small mb0">Dove vivi, lavori o studi: servizi, trasporti, sicurezza percepita, costi. <b>Tutto il territorio nazionale, paesi e frazioni inclusi</b>: se la scheda manca, si attiva al momento.</p>
-          <span className="pill pill-green" style={{ marginTop: 10 }}>Subito, senza invito</span>
+        <button className="card card-click" style={{ textAlign: "left" }} disabled={gated} onClick={() => onPick("zona")}>
+          <h3>
+            <span className="cat-ico" style={{ background: "#4E7D5B", color: "#fff" }}>{iconSvg("zona", 20)}</span>
+            Una zona o città
+          </h3>
+          <p>Dove vivi, lavori o studi: servizi, trasporti, sicurezza.</p>
+          <div className="zz-badges">
+            <span className="pill pill-green">Subito</span>
+            <span className="pill pill-gray" title="Se la scheda manca, si attiva al momento: paesi e frazioni inclusi.">Tutta Italia</span>
+          </div>
         </button>
-        <div className="card" style={{ textAlign: "left", borderStyle: "dashed" }}>
-          <span className="cat-ico" style={{ background: "#6E5E93", color: "#fff" }}>{iconSvg("proprietario", 22)}</span>
-          <h3>Una persona</h3>
-          <p className="small">Proprietari, affittuari e professionisti si recensiscono solo con <b>esperienza verificata</b>: protegge le persone dalle recensioni inventate e dà valore al badge.</p>
-          <a className="btn btn-ghost btn-sm" href="#/verifica-esperienza">Verifica la tua esperienza</a>
-        </div>
+        <button className="card card-click" style={{ textAlign: "left" }} disabled={gated} onClick={() => onPick("altro")}>
+          <h3>
+            <span className="cat-ico" style={{ background: "#6E5E93", color: "#fff" }}>{iconSvg("proprietario", 20)}</span>
+            Altro soggetto
+          </h3>
+          <p>Agenzia, ditta, amministratore, professionista o persona.</p>
+          <div className="zz-badges">
+            <span className="pill pill-amber" title="Le schede esistenti si recensiscono subito; i soggetti nuovi passano dalla revisione dello staff.">Controllo staff</span>
+            <span className="pill pill-gray" title="Le persone fisiche si recensiscono solo con esperienza verificata (invito o documenti).">Persone: verifica</span>
+          </div>
+        </button>
       </div>
     </div>
   );
 }
 
-/* ---------- Passo 2: trova o aggiungi ---------- */
-// località scelta per la nuova scheda: qualsiasi comune, paese o frazione
-// d'Italia (da ricerca geocodificata o dal GPS con indirizzo reale)
-type ZonePick = {
-  name: string;
-  province: string | null;
-  region: string | null;
-  lat: number;
-  lng: number;
-  localId?: string; // id della zona se già presente su ZoomZoom
-};
-
-type PubZone = { id: string; name: string; lat: number; lng: number; entityId: string | null };
-
-function FindStep({ target, onSelected, onBack }: {
-  target: "immobile" | "zona";
-  onSelected: (ent: SelEntity) => void;
+/* ---------- Passo 2: il luogo, un solo campo ---------- */
+function PlaceStep({ target, onBack, onInternal, onDraft }: {
+  target: Target;
   onBack: () => void;
+  onInternal: (ent: SelEntity, note: { created: boolean; reused: boolean }) => void;
+  onDraft: (d: Draft) => void;
 }) {
   const { boot, toast } = useApp();
   const [q, setQ] = useState("");
-  const [rows, setRows] = useState<SearchRow[] | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  // stato "aggiungi immobile"
-  const [adding, setAdding] = useState(false);
-  const [address, setAddress] = useState("");
-  const [zone, setZone] = useState<ZonePick | null>(null);
-  // conferma esplicita della città scelta (tasto “Conferma” accanto a
-  // “Cambia”): la città è già valida dopo la scelta, ma così chi compila
-  // vede CHIARAMENTE che il valore è memorizzato — come per l'indirizzo
-  const [zoneOk, setZoneOk] = useState(false);
-  const [addBusy, setAddBusy] = useState(false);
-  const [geo, setGeo] = useState<LatLng | null>(null);
-  const [geoQ, setGeoQ] = useState("");
-  const [geoRes, setGeoRes] = useState<Array<{ label: string; lat: number; lng: number; zoneName: string | null; province: string | null; region: string | null; road?: string | null; houseNumber?: string | null }> | null>(null);
-  const [geoBusy, setGeoBusy] = useState(false);
+  const [internal, setInternal] = useState<SearchRow[] | null>(null);
+  const [geoRes, setGeoRes] = useState<GeoRow[] | null>(null);
+  const [busyInt, setBusyInt] = useState(false);
+  const [busyGeo, setBusyGeo] = useState(false);
+  const [throttled, setThrottled] = useState(false);
   const [gpsStage, setGpsStage] = useState<"idle" | "gps" | "addr">("idle");
-  const [addErr, setAddErr] = useState<string | null>(null);
-
-  // zona: elenco delle città già sul catalogo (dalla mappa pubblica)
-  const [pubZones, setPubZones] = useState<PubZone[] | null>(null);
   const [zoneBusy, setZoneBusy] = useState(false);
+  const [pubZones, setPubZones] = useState<PubZone[] | null>(null);
+  const [personBlock, setPersonBlock] = useState<SearchRow | null>(null);
 
-  // ogni via che imposta la città passa da qui: la conferma precedente
-  // (eventuale) si azzera finché non si conferma la nuova
-  const applyZone = (z: ZonePick | null) => {
-    setZone(z);
-    setZoneOk(false);
-  };
+  const zoneName = useCallback((id: string | null) => boot?.zones.find(z => z.id === id)?.name || "", [boot]);
 
-  const search = useCallback(async (query: string) => {
-    setBusy(true);
-    const res = await api<{ rows: SearchRow[] }>(`/api/public/search?cat=immobile${query ? `&q=${encodeURIComponent(query)}` : ""}`);
-    setRows(res.ok ? res.rows : []);
-    setBusy(false);
-  }, []);
-
+  // zona: elenco delle città già sul catalogo (con la loro scheda, se attiva)
   useEffect(() => {
-    if (target === "immobile") void search("");
-    else void (async () => {
+    if (target !== "zona") return;
+    void (async () => {
       const res = await api<{ zones: PubZone[] }>("/api/public/map");
       setPubZones(res.ok ? res.zones : []);
     })();
-  }, [target, search]);
+  }, [target]);
 
-  // attiva la scheda recensibile di una città: se esiste già si usa quella,
-  // altrimenti nasce adesso (copertura nazionale, paesi inclusi)
-  const activateZone = async (z: { id?: string; name: string; lat: number; lng: number; province?: string | null; region?: string | null; entityId?: string | null }) => {
-    if (z.entityId) { onSelected({ id: z.entityId, name: z.name, categoryId: "zona" }); return; }
+  // ricerca combinata: schede interne + luoghi della mappa
+  const runSearch = useCallback(async (query: string) => {
+    if (target !== "zona") {
+      setBusyInt(true);
+      const cat = target === "immobile" ? "immobile" : SUBJECT_CATS.join(",");
+      const res = await api<{ rows: SearchRow[] }>(`/api/public/search?cat=${cat}${query ? `&q=${encodeURIComponent(query)}` : ""}`);
+      setInternal(res.ok ? res.rows : []);
+      setBusyInt(false);
+    }
+    if (target !== "altro" && query.length >= 3) {
+      setBusyGeo(true);
+      const res = await api<{ results: GeoRow[]; throttled?: boolean }>(`/api/public/geocode?q=${encodeURIComponent(query)}`);
+      setThrottled(!!(res as { throttled?: boolean }).throttled);
+      setGeoRes(res.ok ? res.results : []);
+      setBusyGeo(false);
+    } else {
+      setGeoRes(null);
+    }
+  }, [target]);
+
+  // ricerca con debounce. A vuoto (immobile) si aprono le schede esistenti:
+  // chi entra trova subito anche il catalogo, non solo la mappa (C5)
+  useEffect(() => {
+    const query = q.trim();
+    if (query.length < 2) {
+      setGeoRes(null); setThrottled(false);
+      if (target === "immobile") void runSearch(""); else setInternal(null);
+      return;
+    }
+    const t = setTimeout(() => { void runSearch(query); }, 420);
+    return () => clearTimeout(t);
+  }, [q, target, runSearch]);
+
+  // scheda interna già presente: la si usa così com'è (USE del diagramma)
+  const pickInternal = (r: SearchRow) => {
+    const cat = boot?.categories.find(c => c.id === r.entity.categoryId);
+    if (cat?.isPerson) { setPersonBlock(r); return; }
+    onInternal({ id: r.entity.id, name: r.entity.name, categoryId: r.entity.categoryId }, { created: false, reused: true });
+  };
+
+  // città già sul catalogo: scheda attiva → si usa; altrimenti si attiva ora
+  const pickZone = async (z: { id?: string; name: string; lat: number; lng: number; entityId?: string | null }) => {
+    if (z.entityId) { onInternal({ id: z.entityId, name: z.name, categoryId: "zona" }, { created: false, reused: true }); return; }
     setZoneBusy(true);
     const res = await api<{ entityId: string; name: string; created: boolean }>("/api/zones", {
-      body: { name: z.name, province: z.province ?? null, region: z.region ?? null, lat: z.lat, lng: z.lng },
+      body: { name: z.name, province: null, region: null, lat: z.lat, lng: z.lng },
     });
     setZoneBusy(false);
     if (res.ok && res.entityId) {
-      toast(res.created ? `Scheda di ${z.name} attivata: ora scrivi la recensione.` : `Scheda di ${z.name} già pronta: ora scrivi la recensione.`);
-      onSelected({ id: res.entityId, name: z.name, categoryId: "zona" });
+      toast(res.created ? `Scheda di ${z.name} attivata.` : `Scheda di ${z.name} già pronta.`);
+      onInternal({ id: res.entityId, name: z.name, categoryId: "zona" }, { created: res.created, reused: !res.created });
     } else {
       toast("Non riesco ad attivare la scheda della città: riprova tra poco.", "err");
     }
   };
 
-  const doGeocode = async () => {
-    if (geoQ.trim().length < 3) return;
-    setGeoBusy(true); setGeoRes(null);
-    const res = await api<{ results: Array<{ label: string; lat: number; lng: number; zoneName: string | null; province: string | null; region: string | null; road?: string | null; houseNumber?: string | null }> }>(`/api/public/geocode?q=${encodeURIComponent(geoQ.trim())}`);
-    setGeoRes(res.ok ? res.results : []);
-    setGeoBusy(false);
+  // luogo della mappa: indirizzo o città → minibozza che finisce al passo 3
+  const pickGeo = (g: GeoRow) => {
+    const street = [g.road, g.houseNumber].filter(Boolean).join(" ");
+    onDraft({
+      address: street,
+      zone: g.zoneName ? { name: g.zoneName, province: g.province, region: g.region, lat: g.lat, lng: g.lng } : null,
+      geo: { lat: g.lat, lng: g.lng },
+    });
   };
 
-  // GPS + reverse geocoding: chi è davanti all'immobile preme un bottone e
-  // il modulo si riempie da solo (indirizzo reale, città, pin). Le coordinate
-  // vanno al geocoder pubblico SOLO in questo momento, su richiesta esplicita.
-  const useGpsAddress = () => {
-    if (!navigator.geolocation) { toast("Questo browser non espone la posizione: usa la ricerca o la mappa.", "err"); return; }
+  // GPS + reverse geocoding: chi è sul posto preme un bottone e il passo 3
+  // si riempie da solo (indirizzo reale, città, pin). Coordinate al geocoder
+  // pubblico SOLO su azione esplicita.
+  const useGps = () => {
+    if (!navigator.geolocation) { toast("Questo browser non espone la posizione: usa la ricerca.", "err"); return; }
     setGpsStage("gps");
     navigator.geolocation.getCurrentPosition(
       async pos => {
         const pt = { lat: Math.round(pos.coords.latitude * 1e6) / 1e6, lng: Math.round(pos.coords.longitude * 1e6) / 1e6 };
-        setGeo(pt);
         setGpsStage("addr");
         const res = await api<{ found: boolean; address: { road: string | null; houseNumber: string | null; zoneName: string | null; province: string | null; region: string | null } | null }>(`/api/public/geocode/reverse?lat=${pt.lat}&lng=${pt.lng}`);
         setGpsStage("idle");
         if (res.ok && res.found && res.address) {
           const a = res.address;
           const street = [a.road, a.houseNumber].filter(Boolean).join(" ");
-          if (street) setAddress(street);
-          if (a.zoneName) applyZone({ name: a.zoneName, province: a.province, region: a.region, lat: pt.lat, lng: pt.lng });
-          toast("Indirizzo riconosciuto: controlla e correggi se serve.");
+          onDraft({
+            address: street,
+            zone: a.zoneName ? { name: a.zoneName, province: a.province, region: a.region, lat: pt.lat, lng: pt.lng } : null,
+            geo: pt,
+          });
         } else {
-          toast("Posizione rilevata, ma l'indirizzo non risulta mappato: inseriscilo a mano (il pin è già a posto).", "err");
+          onDraft({ address: "", zone: null, geo: pt });
+          toast("Posizione rilevata, indirizzo non mappato: lo compili al passo seguente.", "err");
         }
       },
-      () => { setGpsStage("idle"); toast("Posizione non disponibile: consenti l'accesso dal browser oppure cerca a mano.", "err"); },
+      () => { setGpsStage("idle"); toast("Posizione non disponibile: consenti l'accesso oppure cerca a mano.", "err"); },
       { timeout: 9000, maximumAge: 30000, enableHighAccuracy: true },
     );
   };
 
-  // conferma di un INDIRIZZO dai suggerimenti del campo indirizzo: riempie
-  // via/civico, città e pin in un colpo solo — l'utente vede esattamente
-  // cosa sta per salvare e lo conferma scegliendo il suggerimento
-  const pickAddress = (p: AddressPlace) => {
-    setGeo({ lat: p.lat, lng: p.lng });
-    if (p.zoneName) {
-      applyZone({ name: p.zoneName, province: p.province, region: p.region, lat: p.lat, lng: p.lng });
-    }
-  };
+  // per la zona: risultati interni = città già sul catalogo
+  const ql = q.trim().toLowerCase();
+  const zoneRows = target === "zona" && pubZones
+    ? (q.trim().length >= 2 ? pubZones.filter(z => z.name.toLowerCase().includes(ql)) : pubZones).slice(0, 8)
+    : [];
+  const noQuery = q.trim().length < 2;
 
-  // conferma di un risultato della ricerca sulla mappa: piazza il pin e
-  // ricava la città. Se il risultato non porta il comune (es. una via di
-  // campagna mappata senza riferimento), lo chiede al reverse geocoder sul
-  // punto scelto: un'azione esplicita dell'utente, come il GPS. Prima di
-  // questa correzione il pin veniva piazzato ma la città restava vuota,
-  // senza spiegazioni: la località trovata non era confermabile.
-  const pickGeoResult = async (g: NonNullable<typeof geoRes>[number]) => {
-    setGeo({ lat: g.lat, lng: g.lng });
-    setGeoRes(null);
-    const street = [g.road, g.houseNumber].filter(Boolean).join(" ");
-    if (street && !address.trim()) setAddress(street);
-    if (zone) return; // città già scelta: il risultato serve solo per il pin
-    if (g.zoneName) {
-      applyZone({ name: g.zoneName, province: g.province, region: g.region, lat: g.lat, lng: g.lng });
-      return;
-    }
-    const res = await api<{ found: boolean; address: { zoneName: string | null; province: string | null; region: string | null } | null }>(`/api/public/geocode/reverse?lat=${g.lat}&lng=${g.lng}`);
-    if (res.ok && res.found && res.address?.zoneName) {
-      applyZone({ name: res.address.zoneName, province: res.address.province, region: res.address.region, lat: g.lat, lng: g.lng });
-    } else {
-      toast("Posizione segnata sulla mappa: scegli anche la città nel campo “Città, comune o paese”.", "err");
-    }
-  };
-
-  const addEntity = async () => {
-    if (addBusy) return;
-    setAddErr(null);
-    setAddBusy(true);
-    const res = await api<{ entity: { id: string; name: string } }>("/api/entities", {
-      body: {
-        address: address.trim(),
-        // città già presente → id diretto; nuova località → nome+coordinate.
-        // Le coordinate vanno solo se davvero valide (numeri finiti): il
-        // server ha comunque i fallback (zona nota col nome, pin sulla mappa)
-        zoneId: zone?.localId,
-        zone: zone && !zone.localId
-          ? {
-            name: zone.name, province: zone.province, region: zone.region,
-            lat: Number.isFinite(zone.lat) ? zone.lat : undefined,
-            lng: Number.isFinite(zone.lng) ? zone.lng : undefined,
-          }
-          : undefined,
-        geo,
-      },
-    });
-    setAddBusy(false);
-    if (res.ok) {
-      if (res.entity) {
-        toast("Immobile aggiunto: ora scrivi la recensione.");
-        onSelected({ id: res.entity.id, name: res.entity.name, categoryId: "immobile" });
-      }
-      return;
-    }
-    const ex = (res as { existingId?: string }).existingId;
-    if (ex) {
-      toast("Questo immobile è già presente: puoi recensire la scheda esistente.");
-      onSelected({ id: ex, name: address.trim(), categoryId: "immobile" });
-      return;
-    }
-    setAddErr(res.error);
-  };
-
-  const zoneName = (id: string | null) => boot?.zones.find(z => z.id === id)?.name || "";
+  const title = target === "immobile" ? "Dov'è l'immobile?" : target === "zona" ? "Quale zona o città?" : "Chi vuoi recensire?";
+  const hint = target === "immobile"
+    ? "Cerca l'indirizzo (Via dei Mille 15, Milano) o il nome della scheda."
+    : target === "zona"
+      ? "Cerca qualsiasi comune, paese o frazione d'Italia."
+      : "Cerca per nome: agenzie, ditte, amministratori, professionisti, persone.";
 
   return (
-    <div className="container" style={{ maxWidth: 860, paddingTop: 26 }}>
+    <div className="container" style={{ maxWidth: 860, paddingTop: 18 }}>
       <div className="section-head">
         <div>
-          <h1 style={{ margin: 0 }}>{target === "immobile" ? "Quale immobile?" : "Quale città?"}</h1>
-          <p className="sub">{target === "immobile" ? "Cercalo tra le schede esistenti oppure aggiungilo dall'indirizzo: basta quello." : "Una città già attiva, oppure qualsiasi comune o paese d'Italia: la scheda si attiva al momento."}</p>
+          <h1 style={{ margin: 0 }}>{title}</h1>
+          <p className="sub" style={{ margin: "6px 0 0" }}>{hint}</p>
         </div>
-        <button className="btn btn-ghost btn-sm" onClick={onBack}>← Cambia categoria</button>
+        <button className="btn btn-ghost btn-sm" onClick={onBack}>← Cambia soggetto</button>
       </div>
 
-      {target === "zona" ? (
-        <>
-          {pubZones == null ? (
-            <p className="muted">Carico le città…</p>
-          ) : (
-            <div className="grid grid-3">
-              {pubZones.map(z => (
-                <button key={z.id} className="card card-click" style={{ textAlign: "left" }} disabled={zoneBusy}
-                  onClick={() => void activateZone({ id: z.id, name: z.name, lat: z.lat, lng: z.lng, entityId: z.entityId })}>
-                  <h3 style={{ margin: 0 }}>{z.name}</h3>
-                  <span className="small muted">{z.entityId ? "Scheda attiva · servizi, trasporti, sicurezza, costi" : "Sul catalogo · scheda da attivare"}</span>
-                </button>
-              ))}
-            </div>
-          )}
-          <div className="card mt3">
-            <h2 style={{ marginBottom: 4 }}>La tua città non è tra queste?</h2>
-            <p className="small muted" style={{ marginTop: 0 }}>Cerca qualsiasi comune, paese o frazione d&apos;Italia: la scheda nasce ora e resta nel catalogo.</p>
-            <PlaceSearch id="zps-city" localZones={boot?.zones}
-              placeholder="Es. Corte de' Frati, Marciaga, Alassio…"
-              onPick={p => void activateZone({
-                name: p.zoneName || p.name,
-                province: p.province, region: p.region,
-                lat: p.lat, lng: p.lng,
-                entityId: p.localId ? (pubZones?.find(z => z.id === p.localId)?.entityId ?? null) : null,
-              })} />
-            {zoneBusy ? <p className="small muted mb0">Attivo la scheda…</p> : null}
+      {personBlock ? (
+        <Alert kind="warn">
+          <span className="pill pill-amber" style={{ marginRight: 8 }}>Serve esperienza verificata</span>
+          <b>{personBlock.entity.name}</b> è una persona fisica: si recensisce solo con <a href="#/verifica-esperienza">invito del soggetto</a> o <a href="#/verifica-esperienza">verifica documentale</a> — così il badge «verificata» resta affidabile.
+          <div className="row mt2">
+            <a className="btn btn-primary btn-sm" href="#/verifica-esperienza">Verifica la tua esperienza</a>
+            <button className="btn btn-ghost btn-sm" onClick={() => setPersonBlock(null)}>← Altri risultati</button>
           </div>
-        </>
+        </Alert>
       ) : (
         <>
-          <form className="searchbar" role="search" onSubmit={e => { e.preventDefault(); void search(q.trim()); }}>
-            <input type="search" placeholder="Cerca per indirizzo o nome (es. Via del Filatoio)" aria-label="Cerca immobile"
-              value={q} onChange={e => setQ(e.target.value)} />
-            <button className="btn btn-primary" type="submit" disabled={busy}>{busy ? "Cerca…" : "Cerca"}</button>
-            <button type="button" className="btn btn-ghost" onClick={() => { setQ(""); void search(""); }}>Azzera</button>
+          <form className="searchbar" role="search" onSubmit={e => { e.preventDefault(); void runSearch(q.trim()); }}>
+            <input
+              type="search"
+              placeholder={target === "altro" ? "Es. Studio Tecnico Rossi, Impresa Bianchi…" : "Es. Via dei Mille 15, Milano, Alassio…"}
+              aria-label="Cerca luogo o scheda"
+              value={q} onChange={e => setQ(e.target.value)}
+              autoFocus
+            />
+            <button className="btn btn-primary" type="submit" disabled={busyInt || busyGeo}>
+              {busyInt || busyGeo ? "Cerca…" : "Cerca"}
+            </button>
           </form>
 
-          {rows && rows.length > 0 ? (
-            <div className="grid mt2">
-              {rows.slice(0, 12).map(r => (
-                <article className="card card-click" key={r.entity.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-                  <div>
-                    <h3 style={{ margin: "0 0 4px" }}>{r.entity.name}</h3>
-                    <p className="small muted mb0">{r.entity.address || r.entity.subtitle}{r.entity.zoneId ? ` · ${zoneName(r.entity.zoneId)}` : ""}</p>
-                    <p className="small mb0" style={{ marginTop: 4 }}>
-                      {r.n > 0 ? <><Stars score={r.mean} size={13} /> {fmt1(r.mean)}/10 · {r.n} {r.n === 1 ? "recensione" : "recensioni"}</> : <span className="muted">Nessuna recensione: potresti essere il primo</span>}
-                    </p>
-                  </div>
-                  <button className="btn btn-primary btn-sm" onClick={() => onSelected({ id: r.entity.id, name: r.entity.name, categoryId: "immobile" })}>Recensisci</button>
-                </article>
-              ))}
-              {rows.length > 12 ? <p className="small muted">Mostrati i primi 12 su {rows.length}: affina la ricerca per vedere gli altri.</p> : null}
+          {target !== "altro" ? (
+            <div className="row mt2" style={{ gap: 8 }}>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={useGps} disabled={gpsStage !== "idle"}
+                title="Con il tuo consenso uso il GPS e ricavo via e civico reali dalla cartografia OpenStreetMap. Le coordinate vanno al geocoder solo ora, su tua richiesta.">
+                {gpsStage === "gps" ? "Rilevo la posizione…" : gpsStage === "addr" ? "Cerco l'indirizzo…" : "Usa la mia posizione"}
+              </button>
+              <span className="zz-count" title="In alternativa al GPS: al passo seguente puoi piazzare il pin sulla mappa.">
+                {target === "immobile" ? "GPS o pin sulla mappa" : "GPS per la tua città"}
+              </span>
             </div>
-          ) : rows && !rows.length ? (
-            <Alert kind="info">Nessun immobile trovato{q ? ` per “${q}”` : ""}: aggiungilo tu qui sotto e scrivi la prima recensione.</Alert>
           ) : null}
 
-          <div className="section-head mt3">
-            <div>
-              <h2 style={{ marginBottom: 0 }}>Non c&apos;è ancora? Aggiungilo tu</h2>
-              <p className="sub">Inserisci l&apos;indirizzo reale: la scheda nasce subito, in qualsiasi comune o paese d&apos;Italia. Niente catalogo vuoto.</p>
-            </div>
-          </div>
-          <div className="card">
-            {!adding ? (
-              <button className="btn btn-primary" onClick={() => setAdding(true)}>+ Aggiungi un immobile da recensire</button>
-            ) : (
-              <form onSubmit={async e => {
-                e.preventDefault();
-                if (addBusy) return;
-                if (address.trim().length < 5 || !zone) { setAddErr("Indica l'indirizzo (almeno 5 caratteri) e scegli la città dai suggerimenti del campo “Città, comune o paese” (basta digitarne il nome e premere Invio, o sceglierlo dalla lista)."); return; }
-                await addEntity();
-              }}>
-                <div className="field">
-                  <label>Sei davanti all&apos;immobile? Lascia fare al telefono</label>
-                  <button type="button" className="btn btn-ghost" onClick={useGpsAddress} disabled={gpsStage !== "idle"}>
-                    {gpsStage === "gps" ? "Rilevo la posizione…" : gpsStage === "addr" ? "Cerco l'indirizzo reale…" : "Usa la mia posizione e trova l'indirizzo"}
-                  </button>
-                  <span className="hint">Con il tuo consenso uso il GPS e ricavo <b>via e civico reali</b> dalla cartografia OpenStreetMap (reverse geocoding). Le coordinate vanno al geocoder solo ora, su tua richiesta: poi restano solo nel modulo.</span>
+          {/* --- risultati interni: schede già su ZoomZoom --- */}
+          {target === "zona" ? (
+            pubZones == null ? <p className="muted mt2">Carico le città…</p> : zoneRows.length || q.trim().length >= 2 ? (
+              <>
+                <p className="pick-sect">Su ZoomZoom {zoneBusy ? <span className="small muted">· attivo la scheda…</span> : null}</p>
+                <div className="pick-list">
+                  {zoneRows.map(z => (
+                    <ZoneCard key={z.id} name={z.name} active={!!z.entityId} busy={zoneBusy} onClick={() => void pickZone({ id: z.id, name: z.name, lat: z.lat, lng: z.lng, entityId: z.entityId })} />
+                  ))}
+                  {!zoneRows.length ? <p className="small muted mb0">Nessuna città del catalogo corrisponde: la cerchi qui sotto, sulla mappa.</p> : null}
                 </div>
-                <AddressSearch id="ne-address" label="Indirizzo dell&apos;immobile"
-                  placeholder="Es. Via dei Mille 15"
-                  hint="Come appare su una buca delle lettere: via, numero, eventualmente scala o interno. È un dato pubblico per natura. Digita la via: tra i suggerimenti trovi gli indirizzi reali della cartografia OpenStreetMap, e scegliendone uno si compilano anche città e pin."
-                  value={address} onChange={setAddress}
-                  onPick={p => void pickAddress(p)} />
-                <PlaceSearch id="ne-city" localZones={boot?.zones}
-                  label="Città, comune o paese"
-                  placeholder="Es. Milano, Corte de' Frati, Marciaga…"
-                  hint="Qualsiasi località d'Italia: se non è ancora sul catalogo, la aggiungo al momento (nome e coordinate dalla cartografia OpenStreetMap)."
-                  selected={zone ? zone.name : null}
-                  onPick={p => applyZone({
-                    name: p.zoneName || p.name,
-                    province: p.province, region: p.region,
-                    lat: p.lat, lng: p.lng,
-                    localId: p.localId,
-                  })} />
-                {zone ? (
-                  <p className="small" style={{ marginTop: -6, marginBottom: 14 }}>
-                    {zoneOk
-                      ? <span className="pill pill-green">Città confermata</span>
-                      : <span className="pill pill-gray">Città</span>} <b>{zone.name}</b>
-                    {zone.province ? ` · ${zone.province}` : ""}{zone.region && zone.province !== zone.region ? ` (${zone.region})` : ""}
-                    {!zoneOk ? (
-                      <button type="button" className="btn btn-primary btn-xs" style={{ marginLeft: 8 }}
-                        onClick={() => setZoneOk(true)}>Conferma</button>
-                    ) : null}
-                    <button type="button" className="btn btn-ghost btn-xs" style={{ marginLeft: 6 }} onClick={() => applyZone(null)}>Cambia</button>
-                  </p>
-                ) : null}
-                <div className="field">
-                  <label htmlFor="ne-geoq">Posizione sulla mappa <span className="muted">(facoltativa)</span></label>
-                  <div className="row">
-                    <input id="ne-geoq" type="search" style={{ flex: 1 }} placeholder="Cerca l'indirizzo sulla mappa (OpenStreetMap)" value={geoQ}
-                      onChange={e => setGeoQ(e.target.value)} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); void doGeocode(); } }} />
-                    <button type="button" className="btn btn-ghost" onClick={() => void doGeocode()} disabled={geoBusy}>{geoBusy ? "Cerca…" : "Cerca"}</button>
+              </>
+            ) : null
+          ) : internal && internal.length ? (
+            <>
+              <p className="pick-sect">Su ZoomZoom — recensibili subito</p>
+              <div className="pick-list">
+                {internal.map(r => {
+                  const cat = boot?.categories.find(c => c.id === r.entity.categoryId);
+                  return (
+                    <button type="button" key={r.entity.id} className="pick-card" onClick={() => pickInternal(r)}>
+                      <span className="pick-ico" style={{ background: cat?.hexColor || "#33658A" }}>{iconSvg(cat?.icon || "immobile", 17)}</span>
+                      <span className="pick-body">
+                        <span className="pick-title">{r.entity.name}</span>
+                        <span className="pick-sub">
+                          {r.entity.address || r.entity.subtitle || ""}{r.entity.zoneId ? `${r.entity.address || r.entity.subtitle ? " · " : ""}${zoneName(r.entity.zoneId)}` : ""}
+                        </span>
+                      </span>
+                      <span className="pick-tags">
+                        {cat?.isPerson ? <span className="pill pill-amber">Verifica richiesta</span> : null}
+                        {r.n > 0
+                          ? <span className="small" style={{ whiteSpace: "nowrap" }}><Stars score={r.mean} size={12} /> {fmt1(r.mean ?? 0)}/10 · {r.n}</span>
+                          : <span className="pill pill-green">Prima recensione</span>}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          ) : internal && !internal.length && !noQuery ? (
+            <Alert kind="info">
+              Nessuna scheda{q.trim() ? ` per “${q.trim()}”` : ""}: {target === "altro" ? "proponila qui sotto." : "cerca il luogo sulla mappa qui sotto e la scheda nasce con la tua recensione."}
+            </Alert>
+          ) : null}
+
+          {/* --- luoghi della mappa (OpenStreetMap) --- */}
+          {target !== "altro" ? (
+            <>
+              {geoRes && geoRes.length ? (
+                <>
+                  <p className="pick-sect" title="Risultati dalla cartografia nazionale OpenStreetMap: città, vie, indirizzi con civico.">Dalla mappa — per creare la scheda</p>
+                  <div className="pick-list">
+                    {geoRes.slice(0, 6).map((g, i) => {
+                      const street = [g.road, g.houseNumber].filter(Boolean).join(" ");
+                      return (
+                        <button type="button" key={i} className="pick-card" onClick={() => pickGeo(g)}>
+                          <span className="pick-ico" style={{ background: street ? "#33658A" : "#4E7D5B" }}>{iconSvg(street ? "immobile" : "zona", 17)}</span>
+                          <span className="pick-body">
+                            <span className="pick-title">{street || g.zoneName || g.name}</span>
+                            <span className="pick-sub">
+                              {street
+                                ? [g.zoneName, g.province].filter(Boolean).join(" · ")
+                                : `${g.kind}${g.province ? ` · ${g.province}` : ""}`}
+                            </span>
+                          </span>
+                          <span className="pick-tags">
+                            {street ? <span className="pill pill-gray">Indirizzo</span> : <span className="pill pill-gray">Località</span>}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
-                  {geoRes ? (
-                    geoRes.length ? (
-                      <ul className="geo-results">
-                        {geoRes.map((g, i) => (
-                          <li key={i}>
-                            <button type="button" onClick={() => { void pickGeoResult(g); }}>{g.label}</button>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : <span className="hint">Nessun risultato: piazza il pin a mano con un clic sulla mappa (o col GPS).</span>
-                  ) : (
-                    <span className="hint">La stringa cercata passa al geocoder pubblico di OpenStreetMap solo quando premi “Cerca”; il pin manuale e il GPS restano tra te e la mappa.</span>
-                  )}
-                </div>
-                <LocationPicker value={geo} onChange={setGeo}
-                  note="Con la posizione l'immobile compare tra i punti della mappa (zoom città). Senza, resta recensibile e cercabile per indirizzo." />
-                {addErr ? <p className="error-msg" style={{ display: "block" }}>{addErr}</p> : null}
-                <div className="row" style={{ justifyContent: "flex-end" }}>
-                  <button type="button" className="btn btn-ghost" onClick={() => setAdding(false)}>Annulla</button>
-                  <button className="btn btn-primary" type="submit" disabled={addBusy}>{addBusy ? "Aggiungo…" : "Aggiungi e scrivi la recensione"}</button>
-                </div>
-              </form>
-            )}
-          </div>
+                </>
+              ) : geoRes && !geoRes.length && !noQuery ? (
+                <p className="small muted mt2 mb0">{throttled ? "Troppe ricerche di fila: attendi qualche secondo." : "Nessun luogo trovato sulla mappa: controlla il nome o usa il GPS."}</p>
+              ) : null}
+              {noQuery && target === "immobile" ? (
+                <p className="small muted mt2 mb0" title="Gli indirizzi sono dati pubblici per natura: una scheda per indirizzo e città, il dedup è automatico.">
+                  Scegli una scheda esistente oppure un luogo dalla mappa: la scheda nasce subito, se manca.
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <SubjectProposal />
+          )}
         </>
       )}
     </div>
   );
 }
 
-/* ---------- Passo 3: la recensione aperta ---------- */
-function OpenReviewForm({ sel, onBack, onDone }: {
+/* card compatta per una città del catalogo (target zona) */
+function ZoneCard({ name, active, busy, onClick }: { name: string; active: boolean; busy: boolean; onClick: () => void }) {
+  return (
+    <button type="button" className="pick-card" onClick={onClick} disabled={busy}>
+      <span className="pick-ico" style={{ background: "#4E7D5B" }}>{iconSvg("zona", 17)}</span>
+      <span className="pick-body">
+        <span className="pick-title">{name}</span>
+        <span className="pick-sub">{active ? "Scheda attiva · servizi, trasporti, sicurezza, costi" : "Sul catalogo · scheda da attivare"}</span>
+      </span>
+      <span className="pick-tags">
+        {active
+          ? <span className="pill pill-green">Recensibile</span>
+          : <span className="pill pill-amber">Da attivare</span>}
+      </span>
+    </button>
+  );
+}
+
+/* ---------- Altro soggetto: non lo trovi? Proponilo (revisione staff) ---------- */
+function SubjectProposal() {
+  const { boot, toast } = useApp();
+  const [open, setOpen] = useState(false);
+  const [catId, setCatId] = useState("agenzia");
+  const [name, setName] = useState("");
+  const [why, setWhy] = useState("");
+  const [hp, setHp] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const subjectCats = (boot?.categories || []).filter(c => c.id !== "immobile" && c.id !== "zona");
+  const whyN = why.trim().length;
+  const canSend = name.trim().length >= 3 && whyN >= 20 && !busy;
+
+  if (done) {
+    return (
+      <div className="card mt3">
+        <p className="mb1"><span className="pill pill-amber">In revisione allo staff</span></p>
+        <p className="small mb1">Proposta inviata: <b>{name}</b>. Riceverai l&apos;esito via email{boot?.site.emailDelivery === "demo" ? " (casella demo)" : ""}.</p>
+        <p className="small muted mb0">Alla approvazione la scheda nasce nel catalogo e potrai scriverle la recensione.</p>
+        <div className="row mt2">
+          <a className="btn btn-primary btn-sm" href="#/cerca">Torna alla ricerca</a>
+          <a className="btn btn-ghost btn-sm" href="#/profilo">Le mie proposte</a>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="card mt3">
+      {!open ? (
+        <button type="button" className="btn btn-ghost" onClick={() => setOpen(true)}>+ Non la trovi? Proponila</button>
+      ) : (
+        <form onSubmit={async e => {
+          e.preventDefault();
+          if (!canSend) return;
+          setBusy(true); setErr(null);
+          const res = await api("/api/proposals", { body: { categoryId: catId, name: name.trim(), justification: why.trim(), hp } });
+          setBusy(false);
+          if (res.ok) { setDone(true); toast("Proposta inviata: in revisione allo staff."); }
+          else setErr(res.error);
+        }}>
+          <div className="field">
+            <label htmlFor="sp-cat">Categoria</label>
+            <select id="sp-cat" value={catId} onChange={e => setCatId(e.target.value)}>
+              {subjectCats.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="sp-name">Nome del soggetto</label>
+            <input id="sp-name" value={name} onChange={e => setName(e.target.value)} required minLength={3} placeholder="Es. Studio Tecnico Rossi" />
+          </div>
+          <div className="field">
+            <label htmlFor="sp-why">Perché è utile una scheda? <span className="muted">(min 20 caratteri)</span></label>
+            <textarea id="sp-why" value={why} onChange={e => setWhy(e.target.value)} required
+              placeholder="Es. ho ricevuto un servizio da questo soggetto e voglio condividere l'esperienza" />
+            <span className={`zz-count ${whyN >= 20 ? "ok" : "todo"}`} style={{ marginTop: 6 }}>
+              {whyN}/20 caratteri
+            </span>
+          </div>
+          <div className="hp-field"><label htmlFor="sp-hp">Non compilare</label><input id="sp-hp" tabIndex={-1} autoComplete="off" value={hp} onChange={e => setHp(e.target.value)} /></div>
+          {err ? <p className="error-msg" style={{ display: "block" }}>{err}</p> : null}
+          <div className="row" style={{ justifyContent: "flex-end" }}>
+            <button type="button" className="btn btn-ghost" onClick={() => setOpen(false)}>Annulla</button>
+            <button className="btn btn-primary" type="submit" disabled={!canSend} title={canSend ? undefined : "Nome (3+ caratteri) e motivazione (20+ caratteri)."}>
+              {busy ? "Invio…" : "Invia proposta"}
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}
+
+/* ---------- Passo 3: controlla la scheda (badge + solo i mancanti) ---------- */
+function ConfirmStep({ target, draft, setDraft, onBack, onReady }: {
+  target: Target;
+  draft: Draft;
+  setDraft: (updater: (d: Draft) => Draft) => void;
+  onBack: () => void;
+  onReady: (ent: SelEntity, note: { created: boolean; reused: boolean }) => void;
+}) {
+  const { boot, toast } = useApp();
+  const [editZone, setEditZone] = useState(!draft.zone);
+  const [editAddr, setEditAddr] = useState(target === "immobile" && draft.address.trim().length < 5);
+  const [showMap, setShowMap] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [nearby, setNearby] = useState<NearbyRow[] | null>(null);
+
+  const isImmobile = target === "immobile";
+  const addrOk = draft.address.trim().length >= 5;
+  const valid = !!draft.zone && (!isImmobile || addrOk);
+
+  // conferma: proposta di riuso (C6) → creazione/dedup (EXIST/CREATE)
+  const confirm = async (skipProx = false) => {
+    if (busy || !valid) return;
+    setErr(null); setBusy(true);
+
+    if (target === "zona") {
+      const z = draft.zone!;
+      const res = await api<{ entityId: string; created: boolean }>("/api/zones", {
+        body: { name: z.name, province: z.province, region: z.region, lat: z.lat, lng: z.lng },
+      });
+      setBusy(false);
+      if (res.ok && res.entityId) {
+        toast(res.created ? `Scheda di ${z.name} attivata.` : `Scheda di ${z.name} già pronta.`);
+        onReady({ id: res.entityId, name: z.name, categoryId: "zona" }, { created: res.created, reused: !res.created });
+      } else setErr(res.error);
+      return;
+    }
+
+    // immobile — con il pin, prima propongo le schede vicine (entro 50 m)
+    if (draft.geo && !skipProx) {
+      const nr = await api<{ rows: NearbyRow[] }>(`/api/public/nearby?lat=${draft.geo.lat}&lng=${draft.geo.lng}${draft.zone?.localId ? `&zona=${draft.zone.localId}` : ""}`);
+      if (nr.ok && nr.rows?.length) { setNearby(nr.rows); setBusy(false); return; }
+    }
+    setNearby(null);
+
+    const z = draft.zone;
+    const res = await api<{ entity: { id: string; name: string } }>("/api/entities", {
+      body: {
+        address: draft.address.trim(),
+        zoneId: z?.localId,
+        zone: z && !z.localId
+          ? { name: z.name, province: z.province, region: z.region, lat: z.lat, lng: z.lng }
+          : undefined,
+        geo: draft.geo ?? undefined,
+      },
+    });
+    setBusy(false);
+    if (res.ok && res.entity) {
+      onReady({ id: res.entity.id, name: res.entity.name, categoryId: "immobile" }, { created: true, reused: false });
+      return;
+    }
+    const ex = (res as { existingId?: string }).existingId;
+    if (ex) {
+      toast("Immobile già presente: uso la scheda esistente.");
+      onReady({ id: ex, name: draft.address.trim(), categoryId: "immobile" }, { created: false, reused: true });
+      return;
+    }
+    setErr(res.error);
+  };
+
+  return (
+    <div className="container" style={{ maxWidth: 760, paddingTop: 18 }}>
+      <div className="section-head">
+        <div>
+          <h1 style={{ margin: 0 }}>Controlla la scheda</h1>
+          <p className="sub" style={{ margin: "6px 0 0" }}>
+            {isImmobile
+              ? <>Serve <span className="pill pill-green">città</span> e <span className="pill pill-green">indirizzo</span>: il resto è facoltativo.</>
+              : <>Serve la <span className="pill pill-green">località</span>: il resto arriva con la recensione.</>}
+          </p>
+        </div>
+        <button className="btn btn-ghost btn-sm" onClick={onBack}>← Cambia luogo</button>
+      </div>
+
+      <div className="card">
+        <div className="zz-facts">
+          {/* --- città / località --- */}
+          <div className="zz-fact">
+            <span className="zz-fact-k">{target === "zona" ? "Località" : "Città"}</span>
+            {draft.zone && !editZone ? (
+              <>
+                <span className="zz-fact-v ok"><CheckSvg size={11} /> {draft.zone.name}{draft.zone.province ? ` (${draft.zone.province})` : ""}</span>
+                <span className="spacer" />
+                <button type="button" className="btn btn-ghost btn-xs" onClick={() => setEditZone(true)}>Modifica</button>
+              </>
+            ) : (
+              <div style={{ flex: 1, minWidth: 220 }}>
+                <PlaceSearch
+                  id="cf-city" localZones={boot?.zones} placeholder="Città, comune o paese…"
+                  selected={null}
+                  onPick={p => {
+                    setDraft(d => ({ ...d, zone: { name: p.zoneName || p.name, province: p.province, region: p.region, lat: p.lat, lng: p.lng, localId: p.localId } }));
+                    setEditZone(false);
+                  }}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* --- indirizzo (solo immobile) --- */}
+          {isImmobile ? (
+            <div className="zz-fact">
+              <span className="zz-fact-k">Indirizzo</span>
+              {addrOk && !editAddr ? (
+                <>
+                  <span className="zz-fact-v ok"><CheckSvg size={11} /> {draft.address}</span>
+                  <span className="spacer" />
+                  <button type="button" className="btn btn-ghost btn-xs" onClick={() => setEditAddr(true)}>Modifica</button>
+                </>
+              ) : (
+                <div style={{ flex: 1, minWidth: 220 }}>
+                  <AddressSearch
+                    id="cf-addr" value={draft.address} onChange={v => setDraft(d => ({ ...d, address: v }))}
+                    placeholder="Via e civico, es. Via dei Mille 15"
+                    onPick={p => {
+                      setDraft(d => ({
+                        ...d,
+                        address: [p.road, p.houseNumber].filter(Boolean).join(" ") || d.address,
+                        geo: { lat: p.lat, lng: p.lng },
+                        zone: d.zone ?? (p.zoneName ? { name: p.zoneName, province: p.province, region: p.region, lat: p.lat, lng: p.lng } : null),
+                      }));
+                      setEditAddr(false);
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+          ) : null}
+
+          {/* --- posizione sulla mappa (facoltativa) --- */}
+          {isImmobile ? (
+            <div className="zz-fact">
+              <span className="zz-fact-k">Posizione</span>
+              {draft.geo ? (
+                <span className="zz-fact-v ok" title="Il pin fa comparire l'immobile tra i punti della mappa pubblica."><CheckSvg size={11} /> Pin sulla mappa</span>
+              ) : (
+                <span className="zz-fact-v" title="Senza pin la scheda resta recensibile e cercabile per indirizzo.">Facoltativa</span>
+              )}
+              <span className="spacer" />
+              <button type="button" className="btn btn-ghost btn-xs" onClick={() => setShowMap(s => !s)}>{draft.geo ? "Cambia" : "Aggiungi"}</button>
+            </div>
+          ) : null}
+        </div>
+
+        {isImmobile && showMap ? (
+          <div style={{ marginBottom: 14 }}>
+            <LocationPicker value={draft.geo} onChange={g => setDraft(d => ({ ...d, geo: g }))} note="" />
+          </div>
+        ) : null}
+
+        {/* proposta di riuso: scheda vicina entro 50 m (C6) */}
+        {nearby && nearby.length ? (
+          <Alert kind="info">
+            <p className="mb1"><span className="pill pill-blue">Scheda vicina</span> Ho trovato {nearby.length === 1 ? "una scheda" : `${nearby.length} schede`} entro {nearby[0].distM === 0 ? "pochi" : "50"} metri:</p>
+            <div className="pick-list">
+              {nearby.map(nb => (
+                <button type="button" key={nb.id} className="pick-card" onClick={() => onReady({ id: nb.id, name: nb.name, categoryId: "immobile" }, { created: false, reused: true })}>
+                  <span className="pick-ico" style={{ background: "#33658A" }}>{iconSvg("immobile", 17)}</span>
+                  <span className="pick-body">
+                    <span className="pick-title">{nb.address || nb.name}</span>
+                    <span className="pick-sub">a {nb.distM} m dal tuo pin</span>
+                  </span>
+                  <span className="pick-tags"><span className="pill pill-green">Usa questa</span></span>
+                </button>
+              ))}
+            </div>
+            <div className="row mt2">
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => void confirm(true)}>No, è un&apos;altra scheda — crea la nuova</button>
+            </div>
+          </Alert>
+        ) : null}
+
+        {err ? <p className="error-msg" style={{ display: "block" }}>{err}</p> : null}
+
+        <div className="row" style={{ justifyContent: "flex-end", alignItems: "center", gap: 10 }}>
+          {!valid ? (
+            <span className="zz-count todo" title="La città si sceglie dai suggerimenti; l'indirizzo vuole almeno 5 caratteri.">
+              Manca: {!draft.zone ? "città" : ""}{!draft.zone && !addrOk ? " · " : ""}{!addrOk ? "indirizzo" : ""}
+            </span>
+          ) : null}
+          <button className="btn btn-primary" disabled={!valid || busy} onClick={() => void confirm()}>
+            {busy ? "Preparo la scheda…" : "Conferma e continua"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Passo 4: la recensione (modulo unico, validazione inline) ---------- */
+function ReviewStep({ sel, schedaNote, onBack, onDone }: {
   sel: SelEntity;
+  schedaNote: { created: boolean; reused: boolean } | null;
   onBack: () => void;
   onDone: (entityId: string, premiumDays: number) => void | Promise<void>;
 }) {
@@ -515,31 +848,88 @@ function OpenReviewForm({ sel, onBack, onDone }: {
   const [photos, setPhotos] = useState<string[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // C7 — "hai già recensito questa scheda?" PRIMA di far compilare il modulo
+  const [dup, setDup] = useState<"loading" | "mine" | "ok">("loading");
 
   useEffect(() => { if (cat?.experienceKinds.length) setKind(cat.experienceKinds[0]); }, [cat]);
 
+  useEffect(() => {
+    void (async () => {
+      const res = await api<{ myReviewCount?: number; myReviewId?: string | null }>(`/api/public/entity/${sel.id}`);
+      setDup(res.ok && (res.myReviewCount ?? 0) > 0 ? "mine" : "ok");
+    })();
+  }, [sel.id]);
+
   if (!boot || !cat) return <div className="container section"><p className="muted">Caricamento criteri…</p></div>;
 
+  // validazione inline (C8) — stesse regole del server, che resta l'autorità
+  const textLen = form.text.trim().length;
+  const prosN = countLines(form.pros);
+  const priceN = Number(form.priceAmount);
+  const priceBad = form.priceAmount !== "" && (!Number.isFinite(priceN) || priceN <= 0 || priceN > 100_000_000);
+  const okText = textLen >= 100, okPros = prosN >= 1, okHonesty = form.honesty, okPrice = !priceBad;
+  const canSend = okText && okPros && okHonesty && okPrice && !!kind && !busy;
+
+  if (dup === "loading") {
+    return <div className="container section" style={{ maxWidth: 760 }}><p className="muted">Controllo le tue recensioni…</p></div>;
+  }
+
+  if (dup === "mine") {
+    return (
+      <div className="container section" style={{ maxWidth: 640 }}>
+        <h1>Recensione già scritta</h1>
+        <Alert kind="info">
+          <span className="pill pill-amber" style={{ marginRight: 8 }}>Una per scheda</span>
+          Su <b>{sel.name}</b> c&apos;è già la tua recensione: ogni scheda accetta una recensione per utente. Puoi aggiornarla con una <b>rettifica motivata</b> (entro {boot.settings.rettificaDays} giorni dalla pubblicazione o dall&apos;ultimo aggiornamento).
+        </Alert>
+        <div className="row mt2">
+          <a className="btn btn-primary" href={`#/scheda/${sel.id}`}>Vai alla scheda e rettifica</a>
+          <a className="btn btn-ghost" href="#/profilo">Le mie recensioni</a>
+        </div>
+      </div>
+    );
+  }
+
+  if (cat.isPerson) {
+    return (
+      <div className="container section" style={{ maxWidth: 640 }}>
+        <h1>Serve una esperienza verificata</h1>
+        <Alert kind="warn">
+          <span className="pill pill-amber" style={{ marginRight: 8 }}>Persone fisiche</span>
+          <b>{sel.name}</b> è una persona fisica: le sue recensioni nascono solo con l&apos;<b>invito del soggetto</b> o la <b>verifica documentale</b> dell&apos;esperienza. È ciò che rende affidabile il badge «verificata».
+        </Alert>
+        <div className="row mt2">
+          <a className="btn btn-primary" href="#/verifica-esperienza">Verifica la tua esperienza</a>
+          <button className="btn btn-ghost" onClick={onBack}>← Cambia soggetto</button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="container" style={{ maxWidth: 760, paddingTop: 26, paddingBottom: 30 }}>
+    <div className="container" style={{ maxWidth: 760, paddingTop: 18, paddingBottom: 30 }}>
       <div className="section-head">
         <div>
-          <h1 style={{ margin: 0 }}>Scrivi la recensione</h1>
-          <p className="sub">
-            <ChipCat cat={cat} /> · {sel.name} · <span className="pill pill-gray">Esperienza dichiarata</span>
+          <h1 style={{ margin: 0 }}>La recensione</h1>
+          <p className="sub" style={{ margin: "6px 0 0", display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+            <ChipCat cat={cat} href={false} /> <b>{sel.name}</b>
+            {schedaNote?.created ? <span className="pill pill-green" title="La scheda è nata adesso, con i dati che hai confermato.">Nuova scheda</span> : null}
+            {schedaNote?.reused ? <span className="pill pill-blue" title="Stai usando una scheda già presente nel catalogo.">Scheda esistente</span> : null}
+            <span className="pill pill-gray" title="Senza invito o verifica documentale la recensione è marcata «esperienza dichiarata». Puoi verificarla in ogni momento successivo.">Dichiarata</span>
+            {boot.site.premiumEnabled ? (
+              <span className="pill pill-green" title={`Pubblicando ottieni ${boot.settings.premiumDaysPerReview} giorni di Membership Premium: lettura integrale delle recensioni di tutte le schede. Il premio è per il contributo, non per il voto.`}>
+                Premium +{boot.settings.premiumDaysPerReview} gg
+              </span>
+            ) : null}
           </p>
         </div>
         <button className="btn btn-ghost btn-sm" onClick={onBack}>← Cambia soggetto</button>
       </div>
-      <Alert kind="info">
-        Stai scrivendo senza invito: la recensione sarà marcata <b>“esperienza dichiarata”</b> (non “verificata”). Restano valide le regole: segnalazioni, moderazione con decisioni motivate e revoca del Premium in caso di frode accertata.
-      </Alert>
-      {boot.site.premiumEnabled ? (
-        <Alert kind="ok"><b>Membership Premium.</b> Pubblicando questa recensione ottieni <b>{boot.settings.premiumDaysPerReview} giorni di Premium</b>: leggi le recensioni integrali di tutte le schede. E se alleghi una foto, sblocchi anche le foto di tutte le altre recensioni. Il premio è legato al contributo, non al voto.</Alert>
-      ) : null}
+
       <div className="card">
         <form onSubmit={async e => {
           e.preventDefault();
+          if (!canSend) return;
           setErr(null); setBusy(true);
           const res = await api<{ reviewId: string; entityId: string; photos?: { added: number; skipped: number }; premium: { grantedDays: number } | null }>("/api/reviews", {
             body: { entityId: sel.id, experienceKind: kind, ...form, photos },
@@ -555,17 +945,33 @@ function OpenReviewForm({ sel, onBack, onDone }: {
             <select id="rv-kind" required value={kind} onChange={e => setKind(e.target.value)}>
               {cat.experienceKinds.map(k => <option key={k} value={k}>{k}</option>)}
             </select>
-            <span className="hint">La tua esperienza è dichiarata sotto la tua responsabilità: contributi falsi o diffamatori vengono rimossi e comportano la revoca del vantaggio.</span>
           </div>
           <ReviewFields cat={cat} form={form} setForm={setForm} />
           <PhotoInput photos={photos} onChange={setPhotos} enabled={!!boot.site.photosEnabled} />
           <label className="checkline mb2">
             <input type="checkbox" checked={form.honesty} onChange={e => setForm(f => ({ ...f, honesty: e.target.checked }))} required />
-            <span><b>Dichiarazione:</b> l&apos;esperienza è personale e il contenuto rispetta le regole; non ho inserito dati personali di terzi senza autorizzazione né finalità promozionali.</span>
+            <span><b>Dichiarazione:</b> l&apos;esperienza è personale e rispetto le <a href="#/regole-recensioni">regole</a>: niente dati di terzi senza autorizzazione, niente finalità promozionali.</span>
           </label>
+
+          {/* stato del modulo in tempo reale: stessi requisiti del server */}
+          <div className="zz-counts" aria-live="polite">
+            <span className={`zz-count ${okText ? "ok" : "todo"}`}>Testo {textLen}/100</span>
+            <span className={`zz-count ${okPros ? "ok" : "todo"}`}>Pro {prosN}</span>
+            <span className={`zz-count ${photos.length ? "ok" : ""}`}>Foto {photos.length}/3</span>
+            <span className={`zz-count ${okHonesty ? "ok" : "todo"}`}>Dichiarazione</span>
+          </div>
+
           <div className="hp-field"><label htmlFor="orv-hp">Non compilare</label><input id="orv-hp" tabIndex={-1} autoComplete="off" value={form.hp} onChange={e => setForm(f => ({ ...f, hp: e.target.value }))} /></div>
           {err ? <p className="error-msg" style={{ display: "block" }}>{err}</p> : null}
-          <button className="btn btn-primary btn-block" type="submit" disabled={busy}>Pubblica la recensione</button>
+          <button
+            className="btn btn-primary btn-block" type="submit" disabled={!canSend}
+            title={!canSend ? "Completa i requisiti segnati in ambra qui sopra (il server applica le stesse regole)." : undefined}
+          >
+            {busy ? "Pubblico…" : "Pubblica la recensione"}
+          </button>
+          <p className="small muted" style={{ marginTop: 10, marginBottom: 0 }}>
+            Pubblichi senza invito: l&apos;esperienza resta <b>dichiarata</b> — <a href="#/verifica-esperienza">verificabile dopo</a> con invito o documenti. Segnalazioni e moderazione restano attive.
+          </p>
         </form>
       </div>
     </div>

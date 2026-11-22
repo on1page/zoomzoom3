@@ -26,7 +26,7 @@ export function AddressSearch({ id, value, onChange, onPick, label, hint, placeh
   value: string;
   onChange: (v: string) => void;
   onPick: (p: AddressPlace) => void;
-  label: string;
+  label?: string;
   hint?: string;
   placeholder?: string;
 }) {
@@ -66,8 +66,9 @@ export function AddressSearch({ id, value, onChange, onPick, label, hint, placeh
 
   return (
     <div className="field">
-      <label htmlFor={id}>{label}</label>
+      {label ? <label htmlFor={id}>{label}</label> : null}
       <input id={id} type="search" autoComplete="off" required role="combobox"
+        aria-label={label || "Indirizzo"}
         aria-expanded={open && results.length > 0}
         aria-controls={id ? `${id}-list` : undefined}
         placeholder={placeholder || "Es. Via dei Mille 15"}

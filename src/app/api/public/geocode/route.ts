@@ -93,7 +93,7 @@ const KIND_IT: Record<string, string> = {
   hamlet: "frazione", municipality: "comune", suburb: "quartiere",
   county: "provincia", region: "regione", state: "regione", island: "isola",
   road: "via", pedestrian: "via", house: "indirizzo", building: "edificio",
-  postcode: "cap",
+  postcode: "cap", place: "località",
 };
 
 export async function GET(req: NextRequest) {
