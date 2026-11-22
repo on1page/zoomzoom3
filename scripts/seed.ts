@@ -237,12 +237,13 @@ async function main() {
 
   // 3) Utenti demo (staff con TOTP; credenziali salvate in demo-credentials.json, mai nel front-end)
   const credentials: Record<string, { password: string; totpSecret?: string }> = {};
-  async function mkUser(email: string, nickname: string, role: string, opts: { subject?: string; totp?: string } = {}) {
+  async function mkUser(email: string, nickname: string, role: string, opts: { subject?: string; totp?: string; category?: string } = {}) {
     const u = await db.user.create({
       data: {
         email, nickname, role, emailVerified: true,
         passwordHash: hashPassword(DEMO_PW),
         subjectEntityId: opts.subject || null,
+        categoryId: opts.category || null,
         totpSecretEnc: opts.totp ? encryptSecretStatic(opts.totp) : null,
         totpEnabled: !!opts.totp,
         createdAt: new Date(daysAgoIso(rndInt(r, 60, 700))),
@@ -258,16 +259,19 @@ async function main() {
   const totpB = base32(randomBytesStatic(r, 20));
   const totpC = base32(randomBytesStatic(r, 20));
 
-  const uArianna = await mkUser("utente@esempio.test", "Arianna_84", "user", {});
-  const uAgenzia = await mkUser("agenzia@esempio.test", "Il Portico Immobiliare", "user", { subject: "ent_ag_portico" });
+  const uArianna = await mkUser("utente@esempio.test", "Arianna_84", "user", { category: "affittuario" });
+  const uAgenzia = await mkUser("agenzia@esempio.test", "Il Portico Immobiliare", "user", { subject: "ent_ag_portico", category: "agenzia" });
   await mkUser("moderatore@esempio.test", "Ufficio Moderazione", "moderator", { totp: totpA });
   await mkUser("admin@esempio.test", "Amministrazione ZoomZoom", "admin", { totp: totpB });
   await mkUser("superadmin@esempio.test", "Super Amministrazione", "superadmin", { totp: totpC });
 
   const NICKS = ["MarcoT_79","GiuliaF","Luca_e_Sara","CasaPerDue","GeometraCurioso","MartaB","FerroVie","NuovaCasa2026","AnnaPaola","DavideG88","SoleQuarto","TreFiglie","Camilla_R","VivoInQuartiere","PaoloM1962","LeGiare","Roberta_C","DueBambini","AbitoInCentro","SergioETania","PrimaCasa","MicolF"];
+  // categoria d'appartenenza dei recensori demo: la persona che scrive è per
+  // lo più affittuario o proprietario (snapshot salvato su ogni recensione)
+  const NICK_CATS = ["affittuario", "proprietario", "affittuario", "affittuario", "proprietario"];
   const reviewers = [];
   for (let i = 0; i < NICKS.length; i++) {
-    reviewers.push(await mkUser(`recensione${i + 1}@esempio.test`, NICKS[i], "user", {}));
+    reviewers.push(await mkUser(`recensione${i + 1}@esempio.test`, NICKS[i], "user", { category: NICK_CATS[i % NICK_CATS.length] }));
   }
   const uMarco = reviewers[0];
 
@@ -373,6 +377,10 @@ async function main() {
           priceKind: hasPrice ? (r() < 0.6 ? "Concluso/pagato" : r() < 0.5 ? "Richiesto" : "Proposto/offerta") : null,
           text: rndPick(r, texts.bodies), status: "published",
           verified: true, createdAt: new Date(daysAgoIso(daysAgo)),
+          // identità: categoria dell'autore sempre visibile; firma completa
+          // (nickname + foto) solo su una recensione demo ogni cinque
+          authorCategory: author.categoryId || null,
+          showIdentity: r() < 0.2,
           updatedAt: hasUpdate ? new Date(daysAgoIso(Math.max(1, daysAgo - rndInt(r, 2, 20)))) : null,
           updateReason: hasUpdate ? rndPick(r, UPDATE_REASONS) : null, isDemo: true,
         },

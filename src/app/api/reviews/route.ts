@@ -30,6 +30,10 @@ type OpenReviewPayload = ReviewPayload & {
   entityId?: string;
   experienceKind?: string;
   photos?: unknown;
+  // privacy per recensione: di default sulla recensione compare SOLO la
+  // categoria dell'autore; il flag autorizza esplicitamente anche nickname
+  // e foto profilo per questa singola recensione
+  showIdentity?: boolean;
 };
 
 export async function POST(req: Request) {
@@ -120,6 +124,8 @@ export async function POST(req: Request) {
         prosJson: JSON.stringify(val.pros), consJson: JSON.stringify(val.cons),
         priceAmount: val.price?.amount ?? null, priceUnit: val.price?.unit ?? null, priceKind: val.price?.kind ?? null,
         text: val.text, status: "published", verified, isDemo,
+        // snapshot della categoria d'appartenenza + flag privacy (default: anonima)
+        authorCategory: user.categoryId, showIdentity: p.showIdentity === true,
       },
     });
 

@@ -62,7 +62,7 @@ type NearbyRow = { id: string; name: string; address: string | null; zoneId: str
 // interno: è il "condominio" che si vede prima di creare una scheda nuova
 type BuildingRow = { id: string; name: string; address: string; unit: string | null; unitNorm: string };
 
-type FormState = ReviewFormCore & { honesty: boolean; hp: string; kind: string };
+type FormState = ReviewFormCore & { honesty: boolean; hp: string; kind: string; showIdentity: boolean };
 
 const SUBJECT_CATS = ["proprietario", "affittuario", "amministratore", "agenzia", "ditta", "consulente"];
 
@@ -983,7 +983,7 @@ function ReviewStep({ sel, schedaNote, onBack, onDone }: {
   const [form, setForm] = useState<FormState>({
     kind: "", score: 5, crit: {} as Record<string, number>,
     priceAmount: "", priceUnit: "", priceKind: "Concluso/pagato",
-    pros: "", cons: "", text: "", honesty: false, hp: "",
+    pros: "", cons: "", text: "", honesty: false, hp: "", showIdentity: false,
   });
   const [photos, setPhotos] = useState<string[]>([]);
   const [err, setErr] = useState<string | null>(null);
@@ -1088,6 +1088,10 @@ function ReviewStep({ sel, schedaNote, onBack, onDone }: {
           </div>
           <ReviewFields cat={cat} form={form} setForm={setForm} />
           <PhotoInput photos={photos} onChange={setPhotos} enabled={!!boot.site.photosEnabled} />
+          <label className="checkline mb2" title="Di default sulla recensione compare solo la tua categoria di appartenenza (es. «Affittuario»): né nome né foto. Attiva qui soltanto se vuoi firmarla anche con pseudonimo e foto profilo, per questa sola recensione.">
+            <input type="checkbox" checked={form.showIdentity} onChange={e => setForm(f => ({ ...f, showIdentity: e.target.checked }))} />
+            <span>Firma anche con pseudonimo e foto <span className="muted">(facoltativo: di default compare solo la tua categoria)</span></span>
+          </label>
           <label className="checkline mb2">
             <input type="checkbox" checked={form.honesty} onChange={e => setForm(f => ({ ...f, honesty: e.target.checked }))} required />
             <span><b>Dichiarazione:</b> l&apos;esperienza è personale e rispetto le <a href="#/regole-recensioni">regole</a>: niente dati di terzi senza autorizzazione, niente finalità promozionali.</span>
@@ -1099,6 +1103,14 @@ function ReviewStep({ sel, schedaNote, onBack, onDone }: {
             <span className={`zz-count ${okPros ? "ok" : "todo"}`}>Pro {prosN}</span>
             <span className={`zz-count ${photos.length ? "ok" : ""}`}>Foto {photos.length}/3</span>
             <span className={`zz-count ${okHonesty ? "ok" : "todo"}`}>Dichiarazione</span>
+            <span
+              className={`zz-count ${form.showIdentity ? "" : "ok"}`}
+              title={form.showIdentity
+                ? "La recensione sarà firmata con pseudonimo e foto profilo."
+                : "Sulla recensione compare solo la tua categoria: né pseudonimo né foto."}
+            >
+              {form.showIdentity ? "Con firma" : "Anonima"}
+            </span>
           </div>
 
           <div className="hp-field"><label htmlFor="orv-hp">Non compilare</label><input id="orv-hp" tabIndex={-1} autoComplete="off" value={form.hp} onChange={e => setForm(f => ({ ...f, hp: e.target.value }))} /></div>

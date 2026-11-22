@@ -23,7 +23,7 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
     if (days > settings.rettificaDays) {
       return fail(`Finestra di rettifica conclusa: puoi aggiornare autonomamente entro ${settings.rettificaDays} giorni. Dopo, le correzioni passano dalla moderazione.`, 409);
     }
-    const p = await readJson<ReviewPayload & { updateReason?: string }>(req);
+    const p = await readJson<ReviewPayload & { updateReason?: string; showIdentity?: boolean }>(req);
     const reason = String(p.updateReason || "").trim();
     if (reason.length < 10) return fail("Indica il motivo della rettifica (almeno 10 caratteri).");
     const ent = await db.entity.findUnique({ where: { id: rev.entityId } });
@@ -39,6 +39,8 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
         prosJson: JSON.stringify(val.pros), consJson: JSON.stringify(val.cons),
         priceAmount: val.price?.amount ?? null, priceUnit: val.price?.unit ?? null, priceKind: val.price?.kind ?? null,
         text: val.text, updatedAt: new Date(), updateReason: reason,
+        // anche il flag privacy è rettificabile: scelta esplicita per singola recensione
+        ...(typeof p.showIdentity === "boolean" ? { showIdentity: p.showIdentity } : {}),
       },
     });
     return NextResponse.json({ ok: true, entityId: rev.entityId });

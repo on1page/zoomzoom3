@@ -70,6 +70,16 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 1.5em 0; }
 .user-menu { position: relative; }
 .user-menu-btn { display: flex; align-items: center; gap: 8px; background: var(--navy-mist); border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px 5px 6px; cursor: pointer; font: inherit; }
 .avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--navy); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: .8rem; font-weight: 600; flex: none; }
+/* foto profilo: le iniziali restano SOTTO l'immagine come riserva */
+.avatar.avatar-img { position: relative; overflow: hidden; }
+.avatar.avatar-img img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
+/* selettore foto profilo (registrazione e profilo) */
+.avatar-picker { display: flex; flex-direction: column; gap: 8px; }
+.avatar-preview-big { position: relative; border-radius: 50%; overflow: visible; flex: none; }
+.avatar-preview-big img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
+.avatar-preview-big .photo-remove { position: absolute; top: -6px; right: -6px; }
+.avatar-add { border-radius: 50%; border: 1.5px dashed var(--line); background: var(--paper); color: var(--navy); font: inherit; font-size: .8rem; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.avatar-add:hover { background: var(--navy-mist); }
 .user-menu-panel { position: absolute; right: 0; top: calc(100% + 6px); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-2); padding: 8px; min-width: 230px; display: none; z-index: 130; }
 .user-menu.open .user-menu-panel { display: block; }
 .user-menu-panel a, .user-menu-panel button { display: block; width: 100%; text-align: left; padding: 9px 10px; border-radius: var(--radius-s); text-decoration: none; background: none; border: 0; font: inherit; cursor: pointer; color: var(--ink); }

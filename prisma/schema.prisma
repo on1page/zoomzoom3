@@ -18,6 +18,16 @@ model User {
   // scrypt: salt + hash, formato "scrypt$N$r$p$salt$hash" — MAI testo in chiaro
   passwordHash    String?
   nickname        String
+  // categoria di appartenenza dichiarata alla registrazione (proprietario,
+  // affittuario, amministratore, agenzia, ditta, consulente; null = utente
+  // semplice). Validazione applicativa: slug di Category, mai immobile/zona.
+  // È l'identità mostrata DI DEFAULT sulle recensioni (privacy by default:
+  // nickname e foto compaiono solo con il flag esplicito per recensione).
+  categoryId      String?
+  // foto profilo JPEG ricompilata lato server (senza EXIF/GPS), servita da
+  // /api/public/avatar/[nickname] — pubblica per natura, mostrata sulle
+  // recensioni solo quando l'autore attiva il flag di identità
+  avatarData      Bytes?
   // user | moderator | admin | superadmin (validazione applicativa)
   role            String    @default("user")
   subjectEntityId String?
@@ -299,6 +309,14 @@ model Review {
   // richiesto | proposto | concluso (validazione applicativa)
   priceKind          String?
   text               String
+  // snapshot della categoria d'appartenenza dell'autore al momento della
+  // pubblicazione (null = utente semplice): è ciò che compare di default
+  // sulla recensione. Non cambia se l'utente cambia categoria in seguito.
+  authorCategory    String?
+  // privacy by default: false = sulle recensioni compare SOLO la categoria
+  // dell'autore; true = l'autore ha autorizzato esplicitamente anche
+  // nickname e foto profilo per QUESTA recensione
+  showIdentity       Boolean  @default(false)
   // published | hidden
   status             String   @default("published")
   hiddenReason       String?

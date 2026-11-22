@@ -1,5 +1,6 @@
 // ZoomZoom — serializzazione dei dati pubblici (niente dati sensibili,
-// niente email, niente identificativi di recensori oltre lo pseudonimo).
+// niente email). Recensori anonimi DI DEFAULT: il nickname lascia il server
+// solo se l'autore ha attivato il flag showIdentity per quella recensione.
 import { db } from "@/lib/db";
 import { getCategories } from "./categories";
 import { statsForEntity, priceStatsForEntity } from "./score";
@@ -7,7 +8,13 @@ import { statsForEntity, priceStatsForEntity } from "./score";
 export type PublicReview = {
   id: string;
   userId: string; // per il filtro "le proprie recensioni restano sempre visibili" (mai serializzato al client)
-  author: string; // solo pseudonimo
+  // nickname dell'autore: È PRESENTE SOLO se l'autore ha attivato il flag
+  // showIdentity per questa recensione; altrimenti null e sulla recensione
+  // compare la sola categoria (privacy by default). Mai serializzato al
+  // client quando è nascosto: il nickname non lascia il server.
+  author: string | null;
+  authorCategory: string | null; // categoria d'appartenenza dichiarata (snapshot alla pubblicazione)
+  showIdentity: boolean; // l'autore ha autorizzato nickname + foto profilo
   score: number;
   criteria: Record<string, number>;
   criteriaLabels: Record<string, string> | null; // etichette dello snapshot d'epoca
@@ -40,7 +47,10 @@ export async function publicReviewsForEntity(entityId: string): Promise<PublicRe
     return {
       id: r.id,
       userId: r.userId,
-      author: r.user.nickname,
+      // il nickname esce dal server solo con il consenso esplicito per recensione
+      author: r.showIdentity ? r.user.nickname : null,
+      authorCategory: r.authorCategory,
+      showIdentity: r.showIdentity,
       score: r.score,
       criteria: JSON.parse(r.criteriaJson) as Record<string, number>,
       criteriaLabels: labels,

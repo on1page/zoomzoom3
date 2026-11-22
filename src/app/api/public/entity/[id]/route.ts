@@ -48,11 +48,19 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     ]);
 
     // arricchisce una recensione con foto (metadati) e voti; senza accesso
-    // pieno i testi vengono offuscati e pro/contro omessi
+    // pieno i testi vengono offuscati e pro/contro omessi. L'autore compare
+    // per nome solo con il flag showIdentity: altrimenti al client arrivano
+    // esclusivamente la categoria e il fatto che è la propria (mine).
     const enrich = (r: (typeof published)[number], teaser: boolean) => {
       const base = {
         id: r.id,
         author: r.author,
+        authorCategory: r.authorCategory,
+        showIdentity: r.showIdentity,
+        mine: !!user && r.userId === user.id,
+        avatarUrl: r.showIdentity && r.author
+          ? `/api/public/avatar/${encodeURIComponent(r.author)}`
+          : null,
         score: r.score,
         criteria: r.criteria,
         criteriaLabels: r.criteriaLabels,

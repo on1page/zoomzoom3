@@ -2,11 +2,27 @@
 // ZoomZoom — autenticazione: accesso (anche 2FA e codici di backup),
 // registrazione con verifica email, riscatto token di verifica.
 // Nessuna credenziale demo o codice TOTP viene mostrato qui.
+// Alla registrazione si può caricare una foto profilo (facoltativa) e
+// dichiarare la categoria di appartenenza: per ogni categoria nasce la
+// scheda ad hoc ATTIVA nel catalogo. Le recensioni restano anonime di
+// default (sola categoria): nickname e foto compaiono solo con il flag.
 import { useEffect, useState } from "react";
 import { useApp } from "@/lib/client/store";
 import { navigate } from "@/lib/client/router";
 import { api } from "@/lib/client/api";
 import { Alert } from "../ui-kit";
+import { AvatarInput } from "../avatar-input";
+
+// opzioni del combo "a quale categoria appartieni": stessi slug validati
+// dal server (SUBJECT_CATEGORY_IDS in src/lib/server/user-identity.ts)
+const SUBJECT_OPTIONS = [
+  { id: "proprietario", label: "Proprietario di immobili", person: true },
+  { id: "affittuario", label: "Affittuario", person: true },
+  { id: "amministratore", label: "Amministratore di condominio", person: false },
+  { id: "agenzia", label: "Agenzia immobiliare", person: false },
+  { id: "ditta", label: "Ditta / professionista della casa", person: false },
+  { id: "consulente", label: "Consulente tecnico", person: false },
+];
 
 // QR di prima configurazione 2FA (forma della risposta del server)
 type Enroll = { otpauth: string; qr: string; secret: string };
@@ -132,8 +148,12 @@ export function RegisterView() {
   const [pw2, setPw2] = useState("");
   const [terms, setTerms] = useState(false);
   const [hp, setHp] = useState("");
+  const [avatar, setAvatar] = useState<string | null>(null);
+  const [catId, setCatId] = useState("");
+  const [sheetName, setSheetName] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const selCat = SUBJECT_OPTIONS.find(c => c.id === catId);
 
   return (
     <div className="container section" style={{ maxWidth: 600 }}>
@@ -146,7 +166,7 @@ export function RegisterView() {
           if (pw !== pw2) { setErr("Le password non coincidono."); return; }
           setBusy(true);
           const res = await api<{ message?: string; emailDelivery?: string }>("/api/auth/register", {
-            body: { email, nickname: nick, password: pw, terms, hp },
+            body: { email, nickname: nick, password: pw, terms, hp, avatar, categoryId: catId, sheetName: selCat && !selCat.person ? sheetName : "" },
           });
           setBusy(false);
           if (res.ok) {
@@ -162,8 +182,38 @@ export function RegisterView() {
           <div className="field">
             <label htmlFor="r-nick">Pseudonimo pubblico</label>
             <input id="r-nick" required minLength={3} value={nick} onChange={e => setNick(e.target.value)} placeholder="Es. Arianna_84" />
-            <span className="hint">Nome visibile sulle tue recensioni: scegli uno pseudonimo, non il tuo nome completo.</span>
+            <span className="hint">Nome visibile quando decidi di firmare una recensione: scegli uno pseudonimo, non il tuo nome completo.</span>
           </div>
+          <div className="field">
+            <label htmlFor="r-avatar">Foto profilo <span className="muted">(facoltativa)</span></label>
+            <AvatarInput value={avatar} onChange={setAvatar} />
+            <span className="hint">Ricompresa senza metadati (posizione EXIF inclusa). Compare sulle tue recensioni solo se attivi l&apos;apposita opzione.</span>
+          </div>
+          <div className="field">
+            <label htmlFor="r-cat">A quale categoria appartieni?</label>
+            <select id="r-cat" value={catId} onChange={e => { setCatId(e.target.value); setSheetName(""); }}>
+              <option value="">Utente — scrivo recensioni</option>
+              {SUBJECT_OPTIONS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+            </select>
+            {selCat ? (
+              <span className="hint">
+                <span className="pill pill-green" title="La scheda nasce subito, pubblicata e ricercabile nel catalogo della sua categoria.">Scheda attiva</span>{" "}
+                {selCat.person
+                  ? "Persona fisica: la scheda nasce con le sole iniziali."
+                  : "Soggetto d'impresa: puoi indicare il nome con cui sei conosciuto."}
+              </span>
+            ) : (
+              <span className="hint">Nelle recensioni compare di default solo la categoria: nickname e foto solo se li autorizzi di volta in volta.</span>
+            )}
+          </div>
+          {selCat && !selCat.person ? (
+            <div className="field">
+              <label htmlFor="r-sheet">Nome sulla scheda <span className="muted">(facoltativo)</span></label>
+              <input id="r-sheet" value={sheetName} onChange={e => setSheetName(e.target.value)} maxLength={80}
+                placeholder={selCat.id === "agenzia" ? "Es. Immobiliare Rossi" : selCat.id === "consulente" ? "Es. Studio Tecnico Bianchi" : "Es. Impresa Edile Verdi"} />
+              <span className="hint">Lasciando vuoto si usa lo pseudonimo.</span>
+            </div>
+          ) : null}
           <div className="field">
             <label htmlFor="r-pw">Password (minimo 10 caratteri)</label>
             <input id="r-pw" type="password" autoComplete="new-password" minLength={10} required value={pw} onChange={e => setPw(e.target.value)} />

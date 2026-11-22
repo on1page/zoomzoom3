@@ -76,11 +76,19 @@ function UserMenu() {
     <span className={`user-menu${open ? " open" : ""}`} ref={ref}>
       <button className="user-menu-btn" aria-expanded={open} aria-haspopup="true"
         onClick={e => { e.stopPropagation(); setOpen(o => !o); }}>
-        <span className="avatar" aria-hidden="true">{user.nickname.slice(0, 2).toUpperCase()}</span>
+        {user.hasAvatar ? (
+          <span className="avatar avatar-img" aria-hidden="true">
+            <img src={`/api/public/avatar/${encodeURIComponent(user.nickname)}`} alt="" />
+            <span className="avatar-fallback">{user.nickname.slice(0, 2).toUpperCase()}</span>
+          </span>
+        ) : (
+          <span className="avatar" aria-hidden="true">{user.nickname.slice(0, 2).toUpperCase()}</span>
+        )}
         <span>{user.nickname}</span>
       </button>
       <div className="user-menu-panel" role="menu">
         {user.subjectEntityId ? <a href="#/area-soggetto">Area del soggetto verificato</a> : null}
+        {user.subjectEntityId ? <a href={`#/scheda/${user.subjectEntityId}`}>La mia scheda pubblica</a> : null}
         <a href="#/profilo">Il mio profilo</a>
         <a href="#/profilo-inviti">Inviti ricevuti</a>
         <a href="#/profilo-impostazioni">Impostazioni e privacy</a>

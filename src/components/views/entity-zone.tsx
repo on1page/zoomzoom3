@@ -11,10 +11,19 @@ import { api, fmt1, fmtInt, fmtMonthYear } from "@/lib/client/api";
 import { Alert, ChipCat, Crumbs, CriteriaBars, DemoChip, insuffChip, MethodNoteBox, Modal, ScoreLine, Stars, VerifBadge } from "../ui-kit";
 import { MapLegend, MapViewport } from "../map";
 import { AdSlot } from "../chrome";
+import { iconSvg } from "../icons";
 import { ConsultantCard } from "./consulente";
 
 type ReviewItem = {
-  id: string; author: string; score: number; criteria: Record<string, number>;
+  id: string;
+  // null quando l'autore non ha attivato il flag: in quel caso il server
+  // non invia MAI il nickname e sulla recensione compare la sola categoria
+  author: string | null;
+  authorCategory: string | null; // categoria d'appartenenza dichiarata (snapshot alla pubblicazione)
+  showIdentity: boolean;
+  mine?: boolean; // una propria recensione: riconoscibile dall'autore anche se anonima
+  avatarUrl?: string | null;
+  score: number; criteria: Record<string, number>;
   criteriaLabels: Record<string, string> | null;
   pros: string[]; cons: string[];
   price: { amount: number; unit: string; kind: string } | null;
@@ -24,6 +33,17 @@ type ReviewItem = {
   votes: { up: number; down: number };
   myVote: number | null;
   teaser?: boolean;
+};
+
+// etichetta singolare della categoria d'appartenenza del recensore
+// (le categorie del catalogo hanno nomi plurali: qui serve la persona)
+const AUTHOR_CATEGORY_LABELS: Record<string, string> = {
+  proprietario: "Proprietario",
+  affittuario: "Affittuario",
+  amministratore: "Amministratore di condominio",
+  agenzia: "Agenzia immobiliare",
+  ditta: "Ditta / professionista",
+  consulente: "Consulente tecnico",
 };
 
 type EntityPayload = {
@@ -149,6 +169,50 @@ function VoteBar({ r, canVote, enabled }: { r: ReviewItem; canVote: boolean; ena
   );
 }
 
+// Identità dell'autore — privacy by default:
+//   - flag OFF: cerchio con l'icona della categoria + etichetta della
+//     categoria + badge «Anonima» (il nickname non è mai arrivato al client);
+//   - flag ON: foto profilo + pseudonimo. Le iniziali restano sotto la
+//     foto: se l'immagine manca o non carica, restano visibili come riserva.
+function AuthorIdentity({ r }: { r: ReviewItem }) {
+  const { boot } = useApp();
+  const cat = boot?.categories.find(c => c.id === r.authorCategory) || null;
+  const label = AUTHOR_CATEGORY_LABELS[r.authorCategory || ""] || "Utente";
+  const signed = r.showIdentity && !!r.author;
+  return (
+    <div className="review-author">
+      {signed ? (
+        r.avatarUrl ? (
+          <span className="avatar avatar-img" aria-hidden="true">
+            <img src={r.avatarUrl} alt="" loading="lazy"
+              onError={e => { const el = e.currentTarget; el.style.display = "none"; }} />
+            <span className="avatar-fallback">{r.author!.slice(0, 2).toUpperCase()}</span>
+          </span>
+        ) : (
+          <span className="avatar" aria-hidden="true">{r.author!.slice(0, 2).toUpperCase()}</span>
+        )
+      ) : (
+        <span className="avatar" style={{ background: cat?.hexColor || "#5B6770" }} aria-hidden="true" title={`Categoria dell'autore: ${label}`}>
+          {iconSvg(cat?.icon || "proprietario", 15, { color: "#fff" })}
+        </span>
+      )}
+      <div>
+        {signed ? <b>{r.author}</b> : <b>{label}</b>}{" "}
+        {!signed ? (
+          <span className="pill pill-gray" title="Per privacy sulla recensione compare solo la categoria dell'autore: né pseudonimo né foto, a meno che non li abbia autorizzati lui stesso per questa recensione.">Anonima</span>
+        ) : null}
+        {r.mine ? <span className="pill pill-blue" title="Una delle tue recensioni: per te è sempre riconoscibile.">La tua</span> : null}
+        {r.verified
+          ? <VerifBadge />
+          : <span className="pill pill-amber" title="Recensione scritta senza invito: l'esperienza è dichiarata dall'autore, soggetta a moderazione">Dichiarata</span>}
+        <div className="review-meta">
+          Pubblicata: {fmtMonthYear(r.createdAt)}{r.updatedAt ? ` · aggiornata ${fmtMonthYear(r.updatedAt)}` : ""}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ReviewCard({ r, photos, votes, onReport }: {
   r: ReviewItem;
   photos: EntityPayload["photos"];
@@ -159,18 +223,7 @@ function ReviewCard({ r, photos, votes, onReport }: {
   return (
     <article className="review" id={`rev-${r.id}`}>
       <div className="review-head">
-        <div className="review-author">
-          <span className="avatar" aria-hidden="true">{r.author.slice(0, 2).toUpperCase()}</span>
-          <div>
-            <b>{r.author}</b>{" "}
-            {r.verified
-              ? <VerifBadge />
-              : <span className="pill pill-amber" title="Recensione scritta senza invito: l'esperienza è dichiarata dall'autore, soggetta a moderazione">Dichiarata</span>}
-            <div className="review-meta">
-              Pubblicata: {fmtMonthYear(r.createdAt)}{r.updatedAt ? ` · aggiornata ${fmtMonthYear(r.updatedAt)}` : ""}
-            </div>
-          </div>
-        </div>
+        <AuthorIdentity r={r} />
         <div className="score-line">
           <Stars score={r.score} />
           <span className="score-num">{fmt1(r.score)} <small>/10</small></span>

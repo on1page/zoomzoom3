@@ -56,6 +56,7 @@ export async function GET() {
     user: user ? {
       id: user.id, email: user.email, nickname: user.nickname, role: user.role,
       emailVerified: user.emailVerified, subjectEntityId: user.subjectEntityId,
+      categoryId: user.categoryId, hasAvatar: user.hasAvatar,
       totpEnabled: user.totpEnabled, isDemo: user.isDemo,
       createdAt: user.createdAt.toISOString(),
       premium: {

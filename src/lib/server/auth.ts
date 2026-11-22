@@ -38,18 +38,21 @@ export const VISITOR_COOKIE = "zz_visitor";
 export type SessionUser = {
   id: string; email: string; nickname: string; role: Role;
   emailVerified: boolean; subjectEntityId: string | null;
+  categoryId: string | null; hasAvatar: boolean;
   totpEnabled: boolean; disabled: boolean; isDemo: boolean; createdAt: Date;
   premiumUntil: Date | null;
 };
 
 function toSessionUser(u: {
   id: string; email: string; nickname: string; role: string; emailVerified: boolean;
-  subjectEntityId: string | null; totpEnabled: boolean; disabled: boolean; isDemo: boolean; createdAt: Date;
+  subjectEntityId: string | null; categoryId: string | null; avatarData: Uint8Array | Buffer | null;
+  totpEnabled: boolean; disabled: boolean; isDemo: boolean; createdAt: Date;
   premiumUntil: Date | null;
 }): SessionUser {
   return {
     id: u.id, email: u.email, nickname: u.nickname, role: u.role as Role,
     emailVerified: u.emailVerified, subjectEntityId: u.subjectEntityId,
+    categoryId: u.categoryId, hasAvatar: !!u.avatarData,
     totpEnabled: u.totpEnabled, disabled: u.disabled, isDemo: u.isDemo, createdAt: u.createdAt,
     premiumUntil: u.premiumUntil,
   };

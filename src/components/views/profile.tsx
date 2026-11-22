@@ -6,6 +6,18 @@ import { useApp } from "@/lib/client/store";
 import { api, fmt1, fmtMonthYear } from "@/lib/client/api";
 import { Alert, Modal, VerifBadge } from "../ui-kit";
 import { navigate } from "@/lib/client/router";
+import { AvatarInput } from "../avatar-input";
+
+// opzioni del combo categoria d'appartenenza (stessi slug validati dal server)
+const SUBJECT_OPTIONS = [
+  { id: "proprietario", label: "Proprietario di immobili", person: true },
+  { id: "affittuario", label: "Affittuario", person: true },
+  { id: "amministratore", label: "Amministratore di condominio", person: false },
+  { id: "agenzia", label: "Agenzia immobiliare", person: false },
+  { id: "ditta", label: "Ditta / professionista della casa", person: false },
+  { id: "consulente", label: "Consulente tecnico", person: false },
+];
+const AUTHOR_CATEGORY_LABELS: Record<string, string> = Object.fromEntries(SUBJECT_OPTIONS.map(c => [c.id, c.label]));
 
 function ProfileTabs({ active }: { active: string }) {
   const tabs = [
@@ -219,10 +231,38 @@ export function ProfileSettingsView() {
   const [backupCodes, setBackupCodes] = useState<string[] | null>(null);
   const [disableCode, setDisableCode] = useState("");
   const [delOpen, setDelOpen] = useState(false);
+  // identità pubblica: foto profilo e categoria di appartenenza
+  const [avatar, setAvatar] = useState<string | null>(null);
+  const [avatarDirty, setAvatarDirty] = useState(false);
+  // il browser cachia l'avatar per un giorno: dopo un salvataggio riuscito si
+  // forza il ricaricamento dell'anteprima con un parametro di versione
+  const [avatarV, setAvatarV] = useState(0);
+  const [catId, setCatId] = useState(user?.categoryId || "");
+  const [sheetName, setSheetName] = useState("");
+  const [idBusy, setIdBusy] = useState(false);
+  const selCat = SUBJECT_OPTIONS.find(c => c.id === catId);
 
   const guard = RequireLogin();
   if (guard) return guard;
   if (!user || !boot) return null;
+
+  const saveIdentity = async () => {
+    setIdBusy(true);
+    const res = await api<{ categoryId: string | null; hasAvatar: boolean; sheet: { name: string; created: boolean } | null }>("/api/me/profile", {
+      body: {
+        avatar: avatarDirty ? avatar : undefined,
+        categoryId: catId,
+        sheetName: selCat && !selCat.person ? sheetName : "",
+      },
+    });
+    setIdBusy(false);
+    if (res.ok) {
+      setAvatarDirty(false);
+      setAvatarV(v => v + 1);
+      toast(res.sheet?.created ? `Scheda «${res.sheet.name}» attivata nel catalogo.` : "Identità pubblica aggiornata.");
+      await refreshBoot();
+    } else toast(res.error, "err");
+  };
 
   return (
     <div className="container" style={{ maxWidth: 760, paddingTop: 26, paddingBottom: 30 }}>
@@ -233,6 +273,61 @@ export function ProfileSettingsView() {
         </div>
       </div>
       <ProfileTabs active="#/profilo-impostazioni" />
+      <div className="card mb2">
+        <h2 style={{ fontSize: "1.05rem", marginTop: 0 }}>Identità pubblica</h2>
+        <p className="small muted">
+          Nelle tue recensioni compare di default <b>solo la categoria</b>:{" "}
+          {user.categoryId
+            ? <>«{AUTHOR_CATEGORY_LABELS[user.categoryId] || user.categoryId}»</>
+            : "al momento «Utente» (nessuna categoria dichiarata)"}
+          . Pseudonimo e foto compaiono soltanto quando attivi l&apos;apposita opzione, per ogni singola recensione.
+        </p>
+        <div className="row" style={{ alignItems: "flex-start", flexWrap: "wrap", gap: 18 }}>
+          <div className="field mb0">
+            <label htmlFor="s-avatar">Foto profilo</label>
+            {user.hasAvatar && !avatarDirty ? (
+              <div className="avatar-preview-big" style={{ width: 72, height: 72 }}>
+                <img src={`/api/public/avatar/${encodeURIComponent(user.nickname)}?v=${avatarV}`} alt="La tua foto profilo" />
+                <button type="button" className="photo-remove" aria-label="Rimuovi la foto profilo"
+                  onClick={() => void (async () => {
+                    const res = await api("/api/me/profile", { body: { avatar: null } });
+                    if (res.ok) { toast("Foto rimossa."); await refreshBoot(); } else toast(res.error, "err");
+                  })()}>×</button>
+                <button type="button" className="btn btn-ghost btn-xs" style={{ position: "absolute", bottom: -30, left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap" }}
+                  onClick={() => { setAvatar(null); setAvatarDirty(true); }}>Cambia</button>
+              </div>
+            ) : (
+              <AvatarInput value={avatar} onChange={v => { setAvatar(v); setAvatarDirty(true); }} />
+            )}
+            <span className="hint">Ricompresa senza metadati (posizione EXIF inclusa).</span>
+          </div>
+          <div style={{ flex: 1, minWidth: 240 }}>
+            <div className="field">
+              <label htmlFor="s-cat">Categoria di appartenenza</label>
+              <select id="s-cat" value={catId} onChange={e => { setCatId(e.target.value); setSheetName(""); }}>
+                <option value="">Utente — scrivo recensioni</option>
+                {SUBJECT_OPTIONS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+              </select>
+              <span className="hint">
+                {selCat
+                  ? <span className="pill pill-green" title="La scheda ad hoc della categoria è pubblica e recensibile.">Scheda attiva</span>
+                  : "Nessuna scheda pubblica: resti un recensore anonimo di default."}
+                {" "}{user.subjectEntityId ? <>· <a href={`#/scheda/${user.subjectEntityId}`}>vedi la tua scheda</a></> : null}
+              </span>
+            </div>
+            {selCat && !selCat.person ? (
+              <div className="field">
+                <label htmlFor="s-sheet">Nome sulla scheda <span className="muted">(per una nuova scheda)</span></label>
+                <input id="s-sheet" value={sheetName} onChange={e => setSheetName(e.target.value)} maxLength={80} placeholder="Es. Immobiliare Rossi — vuoto: pseudonimo" />
+                <span className="hint">Usato solo se la scheda non esiste ancora: una scheda esistente non viene rinominata da qui.</span>
+              </div>
+            ) : null}
+            <div className="row" style={{ justifyContent: "flex-end" }}>
+              <button className="btn btn-ghost" type="button" disabled={idBusy} onClick={() => void saveIdentity()}>Salva identità</button>
+            </div>
+          </div>
+        </div>
+      </div>
       <div className="card mb2">
         <h2 style={{ fontSize: "1.05rem", marginTop: 0 }}>Dati principali</h2>
         <p className="small muted">Email (privata, verificata): <b>{user.email}</b>{user.createdAt ? <> · Account dal {fmtMonthYear(String(user.createdAt))}</> : null}</p>

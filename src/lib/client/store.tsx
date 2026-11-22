@@ -22,6 +22,7 @@ export type ZoneInfo = {
 export type SessionUser = {
   id: string; email: string; nickname: string; role: string;
   emailVerified: boolean; subjectEntityId: string | null;
+  categoryId: string | null; hasAvatar: boolean;
   totpEnabled: boolean; isDemo: boolean; createdAt: string;
   premium: { active: boolean; until: string | null };
   photoAccess?: boolean;

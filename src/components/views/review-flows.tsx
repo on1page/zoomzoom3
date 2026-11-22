@@ -135,7 +135,7 @@ export function WriteReviewView({ expId }: { expId: string }) {
 function WriteReviewForm({ expId, entityId, entityName, kind, period }: { expId: string; entityId: string; entityName: string; kind: string; period: string | null }) {
   const { boot, toast, refreshBoot } = useApp();
   const [cat, setCat] = useState<{ id: string; name: string; criteria: { key: string; label: string }[]; priceUnits: string[] } | null>(null);
-  const [form, setForm] = useState({ score: 5, crit: {} as Record<string, number>, priceAmount: "", priceUnit: "", priceKind: "Concluso/pagato", pros: "", cons: "", text: "", honesty: false, hp: "" });
+  const [form, setForm] = useState({ score: 5, crit: {} as Record<string, number>, priceAmount: "", priceUnit: "", priceKind: "Concluso/pagato", pros: "", cons: "", text: "", honesty: false, hp: "", showIdentity: false });
   const [photos, setPhotos] = useState<string[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -182,6 +182,10 @@ function WriteReviewForm({ expId, entityId, entityName, kind, period }: { expId:
         }}>
           <ReviewFields cat={cat} form={form} setForm={setForm} />
           <PhotoInput photos={photos} onChange={setPhotos} enabled={!!boot.site.photosEnabled} />
+          <label className="checkline mb2" title="Di default sulla recensione compare solo la tua categoria di appartenenza (es. «Affittuario»): né nome né foto. Attiva qui soltanto se vuoi firmarla anche con pseudonimo e foto profilo, per questa sola recensione.">
+            <input type="checkbox" checked={form.showIdentity} onChange={e => setForm(f => ({ ...f, showIdentity: e.target.checked }))} />
+            <span>Firma anche con pseudonimo e foto <span className="muted">(facoltativo: di default compare solo la tua categoria)</span></span>
+          </label>
           <label className="checkline mb2">
             <input type="checkbox" checked={form.honesty} onChange={e => setForm(f => ({ ...f, honesty: e.target.checked }))} required />
             <span><b>Dichiarazione:</b> l&apos;esperienza è personale e il contenuto rispetta le regole; non ho inserito dati personali di terzi senza autorizzazione né finalità promozionali.</span>
@@ -203,6 +207,7 @@ export function UpdateReviewView({ reviewId }: { reviewId: string }) {
     entityId: string; entityName: string; catId: string; score: number;
     criteria: Record<string, number>; pros: string[]; cons: string[]; text: string;
     price: { amount: number; unit: string; kind: string } | null; createdAt: string;
+    showIdentity: boolean;
   } | null>(null);
 
   useEffect(() => {
@@ -215,13 +220,14 @@ export function UpdateReviewView({ reviewId }: { reviewId: string }) {
       if (r.status !== "published") { setState("notEditable"); return; }
       const days = (Date.now() - new Date(r.createdAt).getTime()) / 86400000;
       if (days > (boot?.settings.rettificaDays ?? 30)) { setState("windowOver"); return; }
-      const full = await api<{ reviews: Array<{ id: string; criteria: Record<string, number>; pros: string[]; cons: string[]; text: string; price: { amount: number; unit: string; kind: string } | null; entity: { id: string; name: string } }> }>(`/api/public/entity/${r.entity.id}`);
+      const full = await api<{ reviews: Array<{ id: string; criteria: Record<string, number>; pros: string[]; cons: string[]; text: string; price: { amount: number; unit: string; kind: string } | null; showIdentity?: boolean; entity: { id: string; name: string } }> }>(`/api/public/entity/${r.entity.id}`);
       if (full.ok) {
-        const fr = (full as unknown as { reviews: Array<{ id: string; criteria: Record<string, number>; pros: string[]; cons: string[]; text: string; price: { amount: number; unit: string; kind: string } | null }> }).reviews.find(x => x.id === reviewId);
+        const fr = (full as unknown as { reviews: Array<{ id: string; criteria: Record<string, number>; pros: string[]; cons: string[]; text: string; price: { amount: number; unit: string; kind: string } | null; showIdentity?: boolean }> }).reviews.find(x => x.id === reviewId);
         if (fr) {
           setRev({
             entityId: r.entity.id, entityName: r.entity.name, catId: "", score: r.score,
             criteria: fr.criteria, pros: fr.pros, cons: fr.cons, text: fr.text, price: fr.price, createdAt: r.createdAt,
+            showIdentity: fr.showIdentity === true,
           });
           setState("form");
           return;
@@ -258,7 +264,7 @@ function UpdateReviewForm({ reviewId, rev }: { reviewId: string; rev: NonNullabl
     score: rev.score, crit: rev.criteria, priceAmount: rev.price ? String(rev.price.amount) : "",
     priceUnit: rev.price?.unit || "", priceKind: rev.price?.kind || "Concluso/pagato",
     pros: rev.pros.join("\n"), cons: rev.cons.join("\n"), text: rev.text, honesty: true, hp: "",
-    updateReason: "",
+    updateReason: "", showIdentity: rev.showIdentity,
   });
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
@@ -352,6 +358,10 @@ function UpdateReviewForm({ reviewId, rev }: { reviewId: string; rev: NonNullabl
             <label htmlFor="rv-reason">Motivo della rettifica <span className="muted">(almeno 10 caratteri, sarà visibile sulla recensione)</span></label>
             <input id="rv-reason" required minLength={10} value={form.updateReason} onChange={e => setForm(f => ({ ...f, updateReason: e.target.value }))} placeholder="Es. aggiornamento dopo l'intervento promesso" />
           </div>
+          <label className="checkline mb2" title="Di default sulla recensione compare solo la tua categoria di appartenenza: né nome né foto. Attiva soltanto se vuoi firmarla anche con pseudonimo e foto profilo.">
+            <input type="checkbox" checked={form.showIdentity} onChange={e => setForm(f => ({ ...f, showIdentity: e.target.checked }))} />
+            <span>Firma anche con pseudonimo e foto <span className="muted">(facoltativo: di default compare solo la tua categoria)</span></span>
+          </label>
           <div className="hp-field"><label htmlFor="rv-hp">Non compilare</label><input id="rv-hp" tabIndex={-1} autoComplete="off" value={form.hp} onChange={e => setForm(f => ({ ...f, hp: e.target.value }))} /></div>
           {err ? <p className="error-msg" style={{ display: "block" }}>{err}</p> : null}
           <div className="row" style={{ justifyContent: "flex-end" }}>
