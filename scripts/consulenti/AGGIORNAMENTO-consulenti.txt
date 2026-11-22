@@ -1,0 +1,175 @@
+ZoomZoom — NUOVO: Consulente Tecnico (iscrizione approvata dallo staff, 2FA, perizie e valutazioni con relazione in PDF e pagamento in escrow 90/10)
+====================================================================================
+
+COSA NASCE CON QUESTO AGGIORNAMENTO
+------------------------------------
+La nuova figura professionale richiesta, integrata nel sito senza toccare
+nulla di ciò che già funziona (recensioni, catalogo, Premium, moderazione):
+
+ISCRIZIONE E PROFILO
+- Nuova categoria del catalogo: "Consulenti tecnici" (ricercabile, con
+  icona dedicata e propri criteri di recensione). La categoria si crea DA
+  SOLA anche sui database già popolati (nessun reseeding).
+- Il professionista si iscrive da #/consulente (collegamento anche dal
+  profilo): nome, cognome, FOTO PROFILO (ricompilata lato server senza
+  metadati, come le foto delle recensioni), professione (Geometra,
+  Ingegnere, Tecnico, Perito, Consulente Tecnico, Agente Immobiliare,
+  Altro), titolo di studio, presentazione, ZONA DI ESERCIZIO (qualsiasi
+  comune d'Italia, stessa ricerca geocodificata delle città) e RAGGIO DI
+  AZIONE in km (5–300), TARIFFA richiesta, PARTITA IVA, IBAN (per
+  l'accredito: visibile solo allo staff), telefono.
+- Documenti obbligatori: qualifica/titolo/albo + documento
+  d'identificazione (+ esperienza facoltativa). Massimo 8 MB per file,
+  14 MB totali. MAI pubblici: li vede solo lo staff dal back office.
+- L'iscrizione richiede la 2FA ATTIVA (impostazioni del profilo): senza,
+  la domanda non parte. La regola è ricontrollata dallo staff
+  all'approvazione.
+- APPROVAZIONE DELLO STAFF: dal back office, nuova sezione "Consulenti
+  tecnici" (con conteggio in dashboard). Approvando, nasce la scheda
+  pubblica nel catalogo (nome, professione, zona, tariffa, P.IVA, badge
+  "Approvato dallo staff" e "Accesso con 2FA"). Il rifiuto chiede una
+  motivazione (minimo 10 caratteri) che il consulente vede; può correggere
+  e ripresentare la domanda.
+
+RICHIESTE DI PERIZIA E VALUTAZIONE
+- Dalla scheda del consulente, tasto "Richiedi perizia o valutazione":
+  tipo (Perizia tecnica / Valutazione immobiliare / Altro), indirizzo
+  dell'immobile, descrizione (per l'utente che non trova l'immobile in
+  elenco o vuole una valutazione indipendente oltre alle recensioni).
+- Il consulente riceve le richieste nella sua dashboard (#/consulente):
+  ACCETTA confermando la tariffa (o RIFIUTA con motivo). L'utente può
+  annullare prima del pagamento.
+- PAGAMENTO IN ESCROW: dopo l'accettazione l'utente vede IBAN e istruzioni
+  di pagamento della piattaforma (configurabili in Impostazioni) con la
+  causale consigliata. Il SUPER AMMINISTRATORE registra il pagamento
+  ricevuto dal back office (sezione "Perizie e pagamenti", con riferimento
+  bonifico facoltativo).
+- CONSEGNA: il consulente scrive la relazione (titolo + testo, minimo 300
+  caratteri) e la consegna: l'utente la scarica in PDF (generato al volo
+  dal server, senza dipendenze nuove: font standard, accenti ed euro
+  compresi, intestazione con i dati dell'incarico, ripartizione della
+  tariffa e piè di pagina). ALLA CONSEGNA il sistema calcola e registra
+  l'accredito: 90% al consulente, 10% alla piattaforma.
+- ACCREDITO: il super amministratore registra l'accredito eseguito
+  (bonifico verso l'IBAN del consulente, visibile nel registro) e la
+  pratica si chiude. Ogni passaggio è nell'audit log.
+- Privacy: il consulente vede il nickname del richiedente (mai l'email);
+  l'utente vede nome e professione del consulente. PDF e documenti sono
+  accessibili SOLO alle parti e allo staff (verificato dai test).
+
+DOVE TROVI TUTTO NEL SITO
+- Pubblico: categoria "Consulenti" nel catalogo; scheda professionale col
+  tasto di richiesta; pagina #/consulente (come funziona + iscrizione);
+  #/consulente-richieste (le proprie richieste, con PDF); collegamenti
+  dal profilo utente.
+- Consulente: #/consulente diventa la sua dashboard (profilo, campi
+  modificabili: tariffa, raggio, presentazione, telefono; richieste
+  ricevute con accetta/rifiuta/consegna).
+- Back office: sezioni "Consulenti tecnici" (domande, documenti,
+  approvazioni) e "Perizie e pagamenti" (registro completo con tariffe,
+  accredito, commissione, registrazioni riservate al super amministratore);
+  conteggi in dashboard; in Impostazioni: attiva/disattiva servizio, IBAN
+  incassi e istruzioni di pagamento.
+
+INSTALLAZIONE (10 minuti)
+-------------------------
+1) Ferma il server di sviluppo (Ctrl+C).
+2) Estrai lo zip e copia TUTTI i file nel progetto mantenendo i percorsi
+   (PowerShell, dopo aver estratto in una cartella temporanea):
+       Copy-Item -Recurse -Force "C:\percorso\estratto\prisma" "C:\Users\Carlo\sito\zoomzoom\"
+       Copy-Item -Recurse -Force "C:\percorso\estratto\src" "C:\Users\Carlo\sito\zoomzoom\"
+       Copy-Item -Recurse -Force "C:\percorso\estratto\scripts" "C:\Users\Carlo\sito\zoomzoom\"
+3) Aggiorna il database (SOLO TABELLE NUOVE, nessun dato toccato):
+       cd C:\Users\Carlo\sito\zoomzoom
+       bun run db:push
+4) Riavvia: bun run dev
+5) SITO PUBBLICO (Vercel): pubblica e attendi il redeploy:
+       git add prisma/schema.prisma src scripts/test-consulente.mjs
+       git commit -m "Consulente Tecnico: iscrizioni con approvazione, perizie in PDF, pagamenti 90/10"
+       git push
+   (il client del database si rigenera da solo in build grazie al
+   postinstall già presente nel package.json).
+   Se il database di produzione è distinto, esegui bun run db:push anche
+   con le variabili di produzione, come per i pacchetti precedenti.
+6) Dal back office → Impostazioni compila IBAN incassi e istruzioni di
+   pagamento: sono il testo che l'utente vede per saldare le richieste.
+
+NESSUNA NUOVA DIPENDENZA. Nessuna variabile d'ambiente. Il PDF è generato
+da un componente interno (src/lib/server/pdf.ts): niente pacchetti extra.
+
+VERIFICA RAPIDA (5 minuti)
+--------------------------
+1) #/consulente da visitatore: si vede come funziona;
+2) da utente SENZA 2FA: la pagina invita ad attivarla prima di iscriversi
+   (è voluto: verifica che il blocco funzioni);
+3) da utente CON 2FA: compila la domanda con foto e i due documenti →
+   "Domanda inviata";
+4) back office → Consulenti tecnici: la domanda è lì con i documenti
+   scaricabili → Approva → "scheda" linka la pagina pubblica;
+5) con un secondo account: dalla scheda → "Richiedi perizia o valutazione"
+   → invia; dal profilo → "Le mie richieste" la mostra;
+6) dal dashboard del consulente: accetta con tariffa → l'utente vede IBAN
+   e causale; da back office → Perizie e pagamenti il SUPER amministratore
+   registra il pagamento; il consulente consegna la relazione → l'utente
+   scarica il PDF; il super amministratore registra l'accredito → pratica
+   "Conclusa e accreditata".
+
+TEST ESEGUITI SU QUESTA VERSIONE (tutti verdi: 25/25)
+-----------------------------------------------------
+Prova end-to-end via API (scripts/test-consulente.mjs), con la sequenza
+reale completa:
+- iscrizione SENZA 2FA rifiutata con messaggio chiaro; con 2FA accettata;
+- richiesta a consulente non approvato rifiutata;
+- domanda visibile nel back office con 2FA verificata; approvazione crea
+  la scheda pubblica con dati professionali, badge e foto JPEG;
+- categoria "Consulenti" auto-creata nel catalogo;
+- richiesta di perizia creata; estranei non possono accettare né pagare;
+  consegna impossibile prima del pagamento;
+- accettazione con tariffa 300 €; pagamento registrato dal super admin;
+- consegna con ripartizione ESATTA: accredito 270,00 € e commissione
+  30,00 €; PDF scaricabile dal richiedente (firma %PDF, multi-pagina con
+  piè di pagina); PDF e documenti NEGATI agli estranei, documenti
+  accessibili allo staff;
+- registro perizie corretto nel back office; accredito registrato e
+  pratica chiusa; l'utente la vede "Conclusa e accreditata".
+Inoltre: prova del generatore PDF (accenti, euro, titoli, paginazione);
+regressione della pubblicazione recensioni (test precedente) tutta verde;
+lint e controllo tipi dei file toccati puliti.
+
+FILE DEL PACCHETTO
+------------------
+prisma/schema.prisma                        3 modelli nuovi (solo aggiunte)
+src/lib/server/consultants.ts               NUOVO validazioni e helper
+src/lib/server/pdf.ts                       NUOVO generatore PDF interno
+src/lib/server/categories.ts                categoria Consulenti + auto-creazione
+src/lib/server/settings.ts                  impostazioni servizio e incassi
+src/app/api/consulente/...                  NUOVO 7 route (iscrizione, profilo,
+                                            richieste, azioni, PDF, foto, documenti)
+src/app/api/public/entity/[id]/route.ts     scheda pubblica arricchita
+src/app/api/admin/action/route.ts           approvazioni + impostazioni incassi
+src/app/api/admin/data/[section]/route.ts   sezioni dati back office
+src/app/page.tsx                            3 nuove rotte
+src/components/views/consulente.tsx         NUOVO viste (iscrizione, dashboard,
+                                            richieste, sezione scheda pubblica)
+src/components/views/entity-zone.tsx        sezione professionale nella scheda
+src/components/views/profile.tsx            collegamento dal profilo
+src/components/admin/admin.tsx              2 sezioni back office + impostazioni
+src/components/icons.tsx                    icona categoria
+scripts/test-consulente.mjs                 test end-to-end (25 controlli)
+
+NOTE ONESTE E LIMITI
+--------------------
+- Il pagamento resta MANUALE (bonifico all'IBAN della piattaforma,
+  registrato dal super amministratore): nessun gateway esterno (Stripe o
+  simili) è stato introdotto. Quando vorrai l'incasso automatico con
+  carta, la struttura dati è già pronta per collegarcelo.
+- L'IBAN del consulente è conservato nel database (serve allo staff per
+  l'accredito): come gli altri dati, va protetto dall'accesso al database,
+  che resta la responsabilità dell'amministratore.
+- Le notifiche email di perizia non sono incluse in questa versione: le
+  richieste si vedono dalle dashboard (una futura integrazione con il
+  mailer esistente è possibile senza modifiche allo schema).
+- La zona di esercizio non limita automaticamente chi può richiedere
+  (l'utente può scegliere qualunque consulente): è il consulente a
+  valutare l'accettazione. Se preferisci un filtro geografico forzato,
+  si aggiunge in un secondo tempo.

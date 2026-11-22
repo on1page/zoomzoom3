@@ -20,6 +20,7 @@ const ICON_PATHS: Record<string, string> = {
   amministratore: "M5 21 V6 L12 3 L19 6 V21 M9 9 H11 M13 9 H15 M9 13 H11 M13 13 H15 M9 17 H15 M3 21 H21",
   agenzia: "M12 3 L21 8 H3 Z M5 8 V18 H19 V8 M9 12 V18 M15 12 V18 M3 18 H21 V21 H3 Z",
   ditta: "M14.5 4.5 L19.5 9.5 L10 19 L5 20 L4 15 Z M13 6 L17 10 M11 21 H21",
+  consulente: "M12 2.5 L21.5 12 L12 21.5 L2.5 12 Z M12 7.5 L16.5 12 L12 16.5 L7.5 12 Z M12 2.5 V7.5 M12 16.5 V21.5 M2.5 12 H7.5 M16.5 12 H21.5",
 };
 
 export function iconSvg(name: string, size = 16, style?: CSSProperties) {

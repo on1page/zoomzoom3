@@ -19,6 +19,8 @@ const SECTIONS: Array<[string, string, string | null, string | null]> = [
   ["inviti", "Inviti", "admin.invites", null],
   ["utenti", "Utenti e privacy", "admin.users", "privacy"],
   ["entita", "Schede e proposte", "admin.entities", "proposals"],
+  ["consulenti", "Consulenti tecnici", "admin.entities", "consulenti"],
+  ["perizie", "Perizie e pagamenti", "admin.entities", null],
   ["contenuti", "Contenuti del sito", "admin.contents", null],
   ["impostazioni", "Impostazioni", "admin.settings", null],
   ["log", "Log di moderazione", "audit.full", null],
@@ -174,6 +176,7 @@ export function AdminView({ section }: { section: string }) {
       for (const q of res.queues || []) {
         if (q.href.includes("contestazioni")) c.disputes = q.count;
         if (q.href.includes("entita")) c.proposals = q.count;
+        if (q.href.includes("consulenti")) c.consulenti = q.count;
         if (q.href.includes("utenti")) c.privacy = q.count;
       }
       setCounts(c);
@@ -272,6 +275,7 @@ const actionModalTitles: Record<string, string> = {
   "premium.grant": "Concedi Membership Premium",
   "premium.revoke": "Revoca il Premium (tutte le concessioni)",
   "proposal.approve": "Decisione sulla proposta",
+  "consultant.approve": "Decisione sull'iscrizione consulente",
   "entity.toggle": "Pubblica/nascondi scheda",
   "review.restore": "Ripristina la recensione",
   "photo.remove": "Rimuovi la foto",
@@ -635,6 +639,124 @@ function AdminSection({ section, data, onAction, reload }: {
       );
     }
 
+    case "consulenti": {
+      const consulenti = (d?.consulenti || []) as Array<{
+        id: string; name: string; email: string; nickname: string; totpEnabled: boolean;
+        profession: string; title: string; bio: string | null; zone: string; province: string | null;
+        radiusKm: number; feeCents: number; vatNumber: string | null; iban: string | null; phone: string | null;
+        status: string; rejectReason: string | null; entityId: string | null; hasPhoto: boolean;
+        docs: Array<{ id: string; kind: string; originalName: string; sizeBytes: number }>;
+        requestsCount: number; createdAt: string;
+      }>;
+      const pendenti = consulenti.filter(c => c.status === "pending");
+      const altri = consulenti.filter(c => c.status !== "pending");
+      const fmtE = (c: number) => (c / 100).toLocaleString("it-IT", { minimumFractionDigits: 2 });
+      return (
+        <>
+          <div className="admin-head"><h1>Consulenti tecnici</h1><span className="pill pill-gray">{pendenti.length} domande da esaminare</span></div>
+          <Alert kind="info">L&apos;approvazione crea la scheda pubblica nel catalogo (categoria Consulenti) e abilita la ricezione delle richieste di perizia. L&apos;accesso del consulente richiede la 2FA: verificata qui prima di approvare. I documenti sono riservati allo staff.</Alert>
+          <h2 style={{ fontSize: "1.05rem" }}>Domande in attesa</h2>
+          <div className="table-wrap mb2">
+            <table className="table">
+              <thead><tr><th scope="col">Candidato</th><th scope="col">Professione e dati</th><th scope="col">Documenti (riservati)</th><th scope="col">Decisione</th></tr></thead>
+              <tbody>
+                {pendenti.map(c => (
+                  <tr key={c.id}>
+                    <td><b>{c.name}</b><br /><span className="small muted">{c.email}</span><br />
+                      {c.totpEnabled ? <span className="pill pill-green">2FA attiva</span> : <span className="pill pill-red">2FA mancante</span>}</td>
+                    <td className="small">{c.profession} · {c.title}<br />Zona: {c.zone}{c.province ? ` (${c.province})` : ""} · raggio {c.radiusKm} km<br />Tariffa: {c.feeCents > 0 ? `€ ${fmtE(c.feeCents)}` : "su richiesta"} · P.IVA {c.vatNumber}<br />IBAN: <span className="mono">{c.iban}</span>{c.phone ? ` · tel. ${c.phone}` : ""}{c.bio ? <><br /><span className="muted">{c.bio.slice(0, 200)}</span></> : null}</td>
+                    <td className="small">{c.docs.map(doc => (
+                      <div key={doc.id}><a href={`/api/consulente/doc/${doc.id}`}>{doc.originalName}</a> <span className="muted">({doc.kind})</span></div>
+                    ))}</td>
+                    <td>
+                      <button className="btn btn-primary btn-xs" onClick={() => onAction("consultant.approve", c.id)}>Approva</button>{" "}
+                      <button className="btn btn-danger btn-xs" onClick={() => onAction("consultant.reject", c.id)}>Respingi</button>
+                    </td>
+                  </tr>
+                ))}
+                {!pendenti.length ? <tr><td colSpan={4}>Nessuna domanda in attesa.</td></tr> : null}
+              </tbody>
+            </table>
+          </div>
+          <h2 style={{ fontSize: "1.05rem" }}>Iscritti ({altri.length})</h2>
+          <div className="table-wrap">
+            <table className="table">
+              <thead><tr><th scope="col">Nome</th><th scope="col">Professione</th><th scope="col">Zona</th><th scope="col" className="num">Richieste</th><th scope="col">Stato</th></tr></thead>
+              <tbody>
+                {altri.map(c => (
+                  <tr key={c.id}>
+                    <td><b>{c.name}</b><br /><span className="small muted">{c.email}</span></td>
+                    <td className="small">{c.profession}</td>
+                    <td className="small">{c.zone}</td>
+                    <td className="num">{c.requestsCount}</td>
+                    <td>
+                      {c.status === "approved" ? <span className="pill pill-green">Approvato</span> : <span className="pill pill-red">Respinto</span>}
+                      {c.entityId ? <> <a className="small" href={`#/scheda/${c.entityId}`}>scheda</a></> : null}
+                    </td>
+                  </tr>
+                ))}
+                {!altri.length ? <tr><td colSpan={5}>Nessun altro iscritto.</td></tr> : null}
+              </tbody>
+            </table>
+          </div>
+        </>
+      );
+    }
+
+    case "perizie": {
+      const perizie = (d?.perizie || []) as Array<{
+        id: string; kind: string; address: string; description: string; status: string;
+        feeCents: number | null; payoutCents: number | null; commissionCents: number | null;
+        paymentRef: string | null; paidAt: string | null; deliveredAt: string | null; createdAt: string;
+        consultant: string; consultantIban: string | null; requester: string; requesterEmail: string;
+      }>;
+      const fmtE = (c: number | null) => c == null ? "—" : `€ ${(c / 100).toLocaleString("it-IT", { minimumFractionDigits: 2 })}`;
+      const periziaAct = async (id: string, action: string, extra: Record<string, unknown> = {}) => {
+        const res = await api(`/api/consulente/requests/${id}/action`, { body: { action, ...extra } });
+        toast(res.ok ? "Operazione registrata." : res.error, res.ok ? "ok" : "err");
+        if (res.ok) void reload();
+      };
+      return (
+        <>
+          <div className="admin-head"><h1>Perizie e pagamenti</h1><span className="pill pill-gray">{perizie.length} richieste</span></div>
+          <Alert kind="info">
+            Il denaro è custodito dalla piattaforma: l&apos;utente paga dopo l&apos;accettazione, il consulente è accreditato (tariffa meno il 10%) solo dopo la consegna della relazione.
+            La registrazione del pagamento e dell&apos;accredito è riservata al <b>super amministratore</b>: agli altri ruoli il server risponde con un rifiuto.
+          </Alert>
+          <div className="table-wrap">
+            <table className="table">
+              <thead><tr><th scope="col">Richiesta</th><th scope="col">Parti</th><th scope="col">Tariffa</th><th scope="col">Stato</th><th scope="col">Registrazioni</th></tr></thead>
+              <tbody>
+                {perizie.map(r => (
+                  <tr key={r.id}>
+                    <td className="small"><b>{r.kind}</b><br />{r.address}<br /><span className="muted">{fmtDateTime(r.createdAt)}</span></td>
+                    <td className="small">Consulente: {r.consultant}<br /><span className="muted">IBAN: <span className="mono">{r.consultantIban || "—"}</span></span><br />Richiedente: {r.requester} ({r.requesterEmail})</td>
+                    <td className="small">Tariffa: <b>{fmtE(r.feeCents)}</b><br />Accredito: {fmtE(r.payoutCents)}<br /><span className="muted">Commissione: {fmtE(r.commissionCents)}</span></td>
+                    <td className="small">{{ requested: "In attesa", accepted: "Accettata", rejected: "Rifiutata", paid: "Pagata", delivered: "Consegnata", closed: "Conclusa", cancelled: "Annullata" }[r.status] || r.status}{r.paymentRef ? <><br /><span className="muted">rif. {r.paymentRef}</span></> : null}</td>
+                    <td>
+                      {r.status === "accepted" ? (
+                        <button className="btn btn-primary btn-xs mb1" onClick={() => {
+                          const ref = window.prompt("Riferimento del pagamento ricevuto (facoltativo, es. CRO bonifico):") ?? "";
+                          void periziaAct(r.id, "pay", { paymentRef: ref });
+                        }}>Registra pagamento</button>
+                      ) : null}
+                      {r.status === "delivered" ? (
+                        <button className="btn btn-primary btn-xs" onClick={() => void periziaAct(r.id, "payout")}>Registra accredito</button>
+                      ) : null}
+                      {r.status === "delivered" || r.status === "closed" ? (
+                        <a className="btn btn-ghost btn-xs" href={`/api/consulente/requests/${r.id}/pdf`}>PDF</a>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+                {!perizie.length ? <tr><td colSpan={5}>Nessuna richiesta.</td></tr> : null}
+              </tbody>
+            </table>
+          </div>
+        </>
+      );
+    }
+
     case "contenuti":
       return <ContentsSection initial={d} />;
 
@@ -851,8 +973,11 @@ function SettingsSection({ initial }: { initial: Record<string, unknown> | null 
     openReviewsEnabled: s.openReviewsEnabled !== false,
     photosEnabled: s.photosEnabled !== false,
     votesEnabled: s.votesEnabled !== false,
+    consulentiEnabled: s.consulentiEnabled !== false,
+    platformIban: String(s.platformIban ?? ""),
+    paymentInstructions: String(s.paymentInstructions ?? ""),
   });
-  const fields: Array<[Exclude<keyof typeof form, "premiumEnabled" | "openReviewsEnabled" | "photosEnabled" | "votesEnabled">, string, string]> = [
+  const fields: Array<[Exclude<keyof typeof form, "premiumEnabled" | "openReviewsEnabled" | "photosEnabled" | "votesEnabled" | "consulentiEnabled" | "platformIban" | "paymentInstructions">, string, string]> = [
     ["minReviews", "Soglia recensioni sufficienti (m della formula)", "Peso della media di categoria nella media ponderata; le schede sotto questa soglia sono segnala te come non sufficienti."],
     ["rettificaDays", "Finestra di rettifica (giorni)", "Giorni per aggiornare autonomamente una recensione con rettifica motivata."],
     ["inviteDailyCap", "Inviti al giorno per scheda", "Limite anti-abuso per soggetto verificato."],
@@ -913,6 +1038,24 @@ function SettingsSection({ initial }: { initial: Record<string, unknown> | null 
               Voti di utilità attivi (pollice su/giù degli utenti Premium)
             </label>
             <span className="hint">I conteggi esistenti restano nel database; disattivando, i pulsanti scompaiono dalle schede.</span>
+          </div>
+          <div className="field">
+            <label htmlFor="s-consulentiEnabled">
+              <input id="s-consulentiEnabled" type="checkbox" checked={form.consulentiEnabled}
+                onChange={e => setForm(f => ({ ...f, consulentiEnabled: e.target.checked }))} />{" "}
+              Consulenti tecnici attivi (iscrizioni e richieste di perizia)
+            </label>
+            <span className="hint">Sospende nuove iscrizioni e nuove richieste; le schede esistenti restano nel catalogo e le pratiche avviate si concludono.</span>
+          </div>
+          <div className="field">
+            <label htmlFor="s-platformIban">IBAN della piattaforma (incassi perizie)</label>
+            <input id="s-platformIban" value={form.platformIban} placeholder="ITXX..." onChange={e => setForm(f => ({ ...f, platformIban: e.target.value }))} />
+            <span className="hint">Mostrato all&apos;utente per saldare le richieste accettate. Lascia vuoto per comunicarlo con altre istruzioni.</span>
+          </div>
+          <div className="field">
+            <label htmlFor="s-paymentInstructions">Istruzioni di pagamento perizie</label>
+            <textarea id="s-paymentInstructions" rows={2} value={form.paymentInstructions} onChange={e => setForm(f => ({ ...f, paymentInstructions: e.target.value }))} placeholder="Es. Bonifico entro 3 giorni dall'accettazione, causale 'perizia <codice>'. All'esito invia la ricevuta a amministrazione@sito.it." />
+            <span className="hint">Testo libero mostrato accanto all&apos;IBAN nella pagina delle richieste.</span>
           </div>
           <button className="btn btn-primary" type="submit">Salva impostazioni</button>
         </form>

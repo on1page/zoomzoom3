@@ -17,6 +17,7 @@ export type CategoryDef = {
 export const DEFAULT_EXP_KINDS: Record<string, string[]> = {
   immobile: ["Abitazione in affitto", "Abitazione di proprietà", "Soggiorno prolungato", "Visita e sopralluogo"],
   zona: ["Residenza attuale (oltre 6 mesi)", "Residenza precedente", "Lavoro o studio quotidiano nella zona"],
+  consulente: ["Perizia tecnica commissionata", "Valutazione immobiliare richiesta", "Consulenza tecnica ricevuta", "Altro servizio tecnico"],
   proprietario: ["Contratto di affitto in corso", "Contratto di affitto cessato", "Interazioni da richiedente"],
   affittuario: ["Affitto del mio immobile", "Affitto cessato di recente", "Interazione da coobbligato/garante"],
   amministratore: ["Condominio in cui abito", "Condominio di proprietà affittata", "Assemblea e gestione economica"],
@@ -26,6 +27,7 @@ export const DEFAULT_EXP_KINDS: Record<string, string[]> = {
 
 export const DEFAULT_PRICE_UNITS: Record<string, string[]> = {
   immobile: ["€/mese", "€ totale"],
+  consulente: ["€ totale"],
   proprietario: ["€/mese"],
   amministratore: ["€/anno"],
   agenzia: ["€ totale"],
@@ -123,6 +125,18 @@ const CAT_SEED: Array<Omit<CategoryDef, "criteria" | "experienceKinds" | "priceU
       { key: "assistenza", label: "Assistenza e garanzia post-intervento" },
     ],
   },
+  {
+    id: "consulente", name: "Consulenti tecnici", shortName: "Consulenti", hexColor: "#50648C", icon: "consulente",
+    description: "Geometri, ingegneri, periti e consulenti tecnici iscritti con approvazione dello staff: perizie e valutazioni immobiliari su richiesta, oltre alle recensioni di chi li ha incaricati.",
+    isPerson: false, isMapped: false,
+    criteria: [
+      { key: "competenza", label: "Competenza tecnica e chiarezza della relazione" },
+      { key: "tempi", label: "Rispetto di tempi e impegni" },
+      { key: "trasparenza", label: "Trasparenza di costi e condizioni" },
+      { key: "comunicazione", label: "Comunicazione e disponibilità" },
+      { key: "rapporto", label: "Rapporto qualità-prezzo" },
+    ],
+  },
 ];
 
 /** Popola le categorie di default (idempotente). */
@@ -142,11 +156,42 @@ export async function ensureCategoriesSeeded() {
   }
 }
 
+/** Crea (se manca) la categoria Consulenti con i suoi criteri: idempotente,
+ *  così i database già popolati la ottengono senza reseeding. */
+export async function ensureConsulenteCategory() {
+  const cat = CAT_SEED.find(c => c.id === "consulente");
+  if (!cat) return;
+  const existing = await db.category.findUnique({
+    where: { id: "consulente" },
+    include: { criteria: true },
+  });
+  if (!existing) {
+    await db.category.create({
+      data: {
+        id: cat.id, name: cat.name, shortName: cat.shortName, description: cat.description,
+        hexColor: cat.hexColor, icon: cat.icon, isPerson: cat.isPerson, isMapped: cat.isMapped,
+        orderIndex: 99, isActive: true, isDemo: true,
+        criteria: { create: cat.criteria.map((cr, j) => ({ key: cr.key, label: cr.label, orderIndex: j })) },
+      },
+    });
+    return;
+  }
+  // categoria presente ma senza criteri (creata a mano?): si completano
+  if (!existing.criteria.length) {
+    await db.criterion.createMany({
+      data: cat.criteria.map((cr, j) => ({ categoryId: "consulente", key: cr.key, label: cr.label, orderIndex: j })),
+    });
+  }
+}
+
 let cache: { at: number; cats: CategoryDef[] } | null = null;
 const TTL = 5000;
 
 export async function getCategories(): Promise<CategoryDef[]> {
   if (cache && Date.now() - cache.at < TTL) return cache.cats;
+  // self-healing: se la categoria Consulenti manca (database nato prima di
+  // questa funzione), viene creata al volo — una sola query di controllo
+  try { await ensureConsulenteCategory(); } catch { /* non blocca il catalogo */ }
   const rows = await db.category.findMany({
     where: { isActive: true },
     orderBy: { orderIndex: "asc" },

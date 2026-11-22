@@ -56,6 +56,9 @@ model User {
   privacyRequests   PrivacyRequest[]
   premiumGrants     PremiumGrant[]
   reviewVotes       ReviewVote[]
+  // Consulente Tecnico: profilo professionale (uno per utente, se iscritto)
+  consultantProfile ConsultantProfile?
+  perizieRequested  PeriziaRequest[] @relation("periziaRequester")
 
   @@index([role])
 }
@@ -153,6 +156,9 @@ model Zone {
   radiusM Int     @default(3000) // raggio indicativo dell'area urbana, in metri
   isDemo  Boolean @default(false)
   entities Entity[]
+  // Consulenti con zona di esercizio qui e perizie richieste in questa zona
+  consultantProfiles ConsultantProfile[]
+  perizie            PeriziaRequest[]
 }
 
 model Entity {
@@ -494,4 +500,110 @@ model ContactRequest {
   message   String
   status    String   @default("received")
   createdAt DateTime @default(now())
+}
+
+/* ============================================================
+   CONSULENTE TECNICO — figura professionale iscritta con appro-
+   vazione dello staff e accesso protetto da 2FA. La scheda
+   pubblica nel catalogo (categoria "consulente") è collegata da
+   entityId; i documenti di qualifica sono in ConsultantDoc; le
+   richieste di perizie/valutazioni con pagamento in escrow
+   (90% consulente / 10% piattaforma, accreditato solo a relazione
+   consegnata) sono in PeriziaRequest.
+   ============================================================ */
+
+model ConsultantProfile {
+  id            String    @id @default(cuid())
+  userId        String    @unique
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // scheda pubblica nel catalogo (category "consulente"), creata
+  // all'approvazione dello staff
+  entityId      String?   @unique
+  // anagrafica professionale (visibile sulla scheda pubblica)
+  firstName     String
+  lastName      String
+  photoData     Bytes?    // foto profilo JPEG ricompilata lato server (senza EXIF)
+  // Geometra | Ingegnere | Tecnico | Perito | Consulente Tecnico |
+  // Agente Immobiliare | Altro (validazione applicativa)
+  profession    String
+  title         String    // titolo di studio
+  bio           String?   // presentazione ed esperienza
+  zoneId        String    // zona di esercizio
+  zone          Zone      @relation(fields: [zoneId], references: [id])
+  radiusKm      Int       @default(30) // raggio di azione in km
+  feeCents      Int       @default(0)  // tariffa richiesta (0 = su richiesta)
+  vatNumber     String?   // partita IVA
+  iban          String?   // coordinate bancarie per l'accredito (visibili solo allo staff)
+  phone         String?
+  // pending | approved | rejected (approvazione dello staff)
+  status        String    @default("pending")
+  rejectReason  String?
+  reviewedById  String?
+  reviewedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  docs     ConsultantDoc[]
+  requests PeriziaRequest[] @relation("periziaConsultant")
+
+  @@index([status])
+}
+
+// Documenti caricati dal consulente per l'iscrizione: qualifica,
+// esperienza, documento d'identificazione. Accessibili solo al
+// consulente stesso e allo staff (mai pubblici).
+model ConsultantDoc {
+  id           String    @id @default(cuid())
+  consultantId String
+  consultant   ConsultantProfile @relation(fields: [consultantId], references: [id], onDelete: Cascade)
+  // qualifica | esperienza | documento | altro
+  kind         String
+  originalName String
+  mimeType     String
+  sizeBytes    Int
+  data         Bytes
+  createdAt    DateTime  @default(now())
+
+  @@index([consultantId])
+}
+
+// Richiesta di perizia tecnica o valutazione immobiliare a un
+// consulente approvato. Flusso e stati:
+//   requested → accepted (il consulente conferma la tariffa)
+//            → paid (il super amministratore registra il pagamento
+//               ricevuto dalla piattaforma)
+//            → delivered (relazione consegnata: qui si calcolano
+//               accredito al consulente e commissione piattaforma)
+//            → closed (accredito eseguito dal super amministratore)
+//   uscite anticipate: rejected (consulente), cancelled (richiedente)
+model PeriziaRequest {
+  id          String    @id @default(cuid())
+  requesterId String
+  requester   User      @relation("periziaRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  consultantId String
+  consultant  ConsultantProfile @relation("periziaConsultant", fields: [consultantId], references: [id], onDelete: Cascade)
+  // Perizia tecnica | Valutazione immobiliare | Altro
+  kind        String
+  address     String    // indirizzo dell'immobile oggetto della richiesta
+  zoneId      String?
+  zone        Zone?     @relation(fields: [zoneId], references: [id])
+  description String
+  // requested | accepted | rejected | paid | delivered | closed | cancelled
+  status      String    @default("requested")
+  feeCents    Int?      // tariffa confermata dal consulente all'accettazione
+  rejectReason String?
+  reportTitle String?
+  reportBody  String?   // testo della relazione (reso come PDF scaricabile)
+  deliveredAt DateTime?
+  paidAt      DateTime?
+  paymentRef  String?   // riferimento del pagamento registrato dallo staff
+  // ripartizione calcolata ALLA CONSEGNA: accredito 90% / commissione 10%
+  payoutCents     Int?
+  commissionCents Int?
+  payoutDoneAt    DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([consultantId, status])
+  @@index([requesterId])
 }

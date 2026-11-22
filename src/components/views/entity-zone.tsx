@@ -11,6 +11,7 @@ import { api, fmt1, fmtInt, fmtMonthYear } from "@/lib/client/api";
 import { Alert, ChipCat, Crumbs, CriteriaBars, DemoChip, insuffChip, MethodNoteBox, Modal, ScoreLine, Stars, VerifBadge } from "../ui-kit";
 import { MapLegend, MapViewport } from "../map";
 import { AdSlot } from "../chrome";
+import { ConsultantCard } from "./consulente";
 
 type ReviewItem = {
   id: string; author: string; score: number; criteria: Record<string, number>;
@@ -34,6 +35,11 @@ type EntityPayload = {
     priceStats: { unit: string; min: number; max: number; median: number; n: number } | null;
   };
   category: { id: string; name: string; shortName: string; hexColor: string; icon: string; isPerson: boolean; isMapped: boolean; criteria: { key: string; label: string }[] } | null;
+  consultant: {
+    id: string; firstName: string; lastName: string; profession: string; title: string;
+    bio: string | null; zoneName: string; province: string | null; region: string | null;
+    radiusKm: number; feeCents: number; vatNumber: string | null; hasPhoto: boolean; twoFactor: boolean;
+  } | null;
   reviews: ReviewItem[];
   teasers: ReviewItem[];
   hiddenCount: number;
@@ -275,6 +281,7 @@ export function EntityView({ id }: { id: string }) {
                 </div>
               ) : null}
             </div>
+            {data.consultant ? <ConsultantCard c={data.consultant} entityId={ent.id} /> : null}
             {st.n > 0 ? (
               <>
                 <h2>Criteri specifici di questa categoria</h2>

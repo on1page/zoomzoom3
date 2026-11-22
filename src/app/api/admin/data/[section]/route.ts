@@ -25,11 +25,17 @@ export async function GET(_req: Request, ctx: { params: Promise<{ section: strin
           db.privacyRequest.count({ where: { status: "received" } }),
         ]);
         const security = await db.securityLog.findMany({ orderBy: { at: "desc" }, take: 5 });
+        const consulentiPending = await db.consultantProfile.count({ where: { status: "pending" } });
+        const perizieDaPagare = await db.periziaRequest.count({ where: { status: "accepted" } });
+        const perizieDaAccreditare = await db.periziaRequest.count({ where: { status: "delivered" } });
         const queues = [
           hasPerm(admin.role, "mod.reports") && { label: "Segnalazioni da valutare", href: "#/admin/segnalazioni", count: reports },
           hasPerm(admin.role, "mod.experiences") && { label: "Verifiche di esperienza da esaminare", href: "#/admin/esperienze", count: exps },
           hasPerm(admin.role, "mod.disputes") && { label: "Contestazioni di associazione", href: "#/admin/contestazioni", count: disputes },
           hasPerm(admin.role, "admin.entities") && { label: "Proposte di nuove schede", href: "#/admin/entita", count: proposals },
+          hasPerm(admin.role, "admin.entities") && { label: "Iscrizioni Consulenti tecnici", href: "#/admin/consulenti", count: consulentiPending },
+          hasPerm(admin.role, "admin.entities") && { label: "Perizie: pagamenti da registrare", href: "#/admin/perizie", count: perizieDaPagare },
+          hasPerm(admin.role, "admin.entities") && { label: "Perizie: accrediti da eseguire", href: "#/admin/perizie", count: perizieDaAccreditare },
           hasPerm(admin.role, "admin.users") && { label: "Richieste privacy", href: "#/admin/utenti", count: privacy },
         ].filter(Boolean);
         return NextResponse.json({ ok: true, stats: { users, reviews, reports, exps }, queues, security, role: admin.role, roleLabel: ROLE_LABELS[admin.role] });
@@ -236,6 +242,65 @@ export async function GET(_req: Request, ctx: { params: Promise<{ section: strin
             reviewsCount: e._count.reviews,
           })),
           zones: zones.map(z => ({ id: z.id, name: z.name })),
+        });
+      }
+
+      case "consulenti": {
+        await requireStaff("admin.entities");
+        const profili = await db.consultantProfile.findMany({
+          orderBy: { createdAt: "asc" },
+          include: {
+            zone: { select: { name: true, province: true } },
+            user: { select: { email: true, nickname: true, totpEnabled: true } },
+            docs: { select: { id: true, kind: true, originalName: true, sizeBytes: true } },
+            requests: { select: { status: true } },
+          },
+        });
+        return NextResponse.json({
+          ok: true,
+          consulenti: profili.map(c => ({
+            id: c.id,
+            name: `${c.firstName} ${c.lastName}`,
+            email: c.user.email, nickname: c.user.nickname,
+            totpEnabled: c.user.totpEnabled,
+            profession: c.profession, title: c.title, bio: c.bio,
+            zone: c.zone.name, province: c.zone.province,
+            radiusKm: c.radiusKm, feeCents: c.feeCents,
+            vatNumber: c.vatNumber, iban: c.iban, phone: c.phone,
+            status: c.status, rejectReason: c.rejectReason,
+            entityId: c.entityId,
+            hasPhoto: c.photoData != null,
+            docs: c.docs,
+            requestsCount: c.requests.length,
+            createdAt: c.createdAt.toISOString(),
+          })),
+        });
+      }
+
+      case "perizie": {
+        await requireStaff("admin.entities");
+        const rows = await db.periziaRequest.findMany({
+          orderBy: { createdAt: "desc" }, take: 200,
+          include: {
+            consultant: { select: { firstName: true, lastName: true, profession: true, iban: true } },
+            requester: { select: { nickname: true, email: true } },
+          },
+        });
+        const settings = await getSettings();
+        return NextResponse.json({
+          ok: true,
+          platformIban: settings.platformIban,
+          perizie: rows.map(r => ({
+            id: r.id, kind: r.kind, address: r.address, description: r.description,
+            status: r.status, feeCents: r.feeCents, payoutCents: r.payoutCents,
+            commissionCents: r.commissionCents, paymentRef: r.paymentRef,
+            paidAt: r.paidAt?.toISOString() ?? null,
+            deliveredAt: r.deliveredAt?.toISOString() ?? null,
+            createdAt: r.createdAt.toISOString(),
+            consultant: `${r.consultant.firstName} ${r.consultant.lastName} (${r.consultant.profession})`,
+            consultantIban: r.consultant.iban,
+            requester: r.requester.nickname, requesterEmail: r.requester.email,
+          })),
         });
       }
 

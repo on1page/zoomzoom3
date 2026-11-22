@@ -306,6 +306,70 @@ export async function POST(req: Request) {
         return NextResponse.json({ ok: true });
       }
 
+      /* ---- Consulenti tecnici: iscrizioni ---- */
+      case "consultant.approve": {
+        const actor = await requireStaff("admin.entities");
+        const prof = await db.consultantProfile.findUnique({
+          where: { id: p.id },
+          include: { zone: true, user: { select: { id: true, totpEnabled: true, isDemo: true } } },
+        });
+        if (!prof || prof.status !== "pending") return fail("Domanda di iscrizione non disponibile.", 409);
+        // l'accesso del consulente è protetto da 2FA: garantita all'iscrizione
+        // e ricontrollata qui, prima di pubblicare la scheda
+        if (!prof.user.totpEnabled) {
+          return fail("L'account non ha più la 2FA attiva: l'approvazione richiede la verifica in due passaggi. Contatta l'iscritto prima di procedere.", 409);
+        }
+        const displayName = `${prof.firstName} ${prof.lastName}`;
+        const subtitle = `${prof.profession}${prof.zone.province ? ` · ${prof.zone.name} (${prof.zone.province})` : ` · ${prof.zone.name}`}`;
+        // scheda pubblica nel catalogo (categoria "consulente"): creata ora o
+        // aggiornata se era già stata creata in un ciclo precedente
+        let entityId = prof.entityId;
+        if (entityId) {
+          await db.entity.update({
+            where: { id: entityId },
+            data: { name: displayName, subtitle, zoneId: prof.zoneId, status: "published" },
+          });
+        } else {
+          const ent = await db.entity.create({
+            data: {
+              categoryId: "consulente",
+              name: displayName,
+              subtitle,
+              zoneId: prof.zoneId,
+              initialsOnly: false,
+              verifiedBusiness: true,
+              status: "published",
+              proposedBy: `user:${prof.userId}`,
+              ownerUserId: prof.userId,
+              isDemo: prof.user.isDemo,
+            },
+          });
+          entityId = ent.id;
+        }
+        await db.consultantProfile.update({
+          where: { id: prof.id },
+          data: { status: "approved", rejectReason: null, reviewedById: actor.id, reviewedAt: new Date(), entityId },
+        });
+        await auditLog({ actorId: actor.id, actorRole: actor.role, action: "Iscrizione consulente approvata", targetType: "consultantProfile", targetId: prof.id, reason: reason || null });
+        return NextResponse.json({ ok: true, entityId });
+      }
+      case "consultant.reject": {
+        const actor = await requireStaff("admin.entities");
+        if (reason.length < 10) return fail("Motivazione della decisione obbligatoria (almeno 10 caratteri).");
+        const prof = await db.consultantProfile.findUnique({ where: { id: p.id } });
+        if (!prof || prof.status !== "pending") return fail("Domanda di iscrizione non disponibile.", 409);
+        // la scheda pubblica (se esiste da un ciclo precedente) viene nascosta
+        if (prof.entityId) {
+          await db.entity.update({ where: { id: prof.entityId }, data: { status: "hidden" } }).catch(() => {});
+        }
+        await db.consultantProfile.update({
+          where: { id: prof.id },
+          data: { status: "rejected", rejectReason: reason, reviewedById: actor.id, reviewedAt: new Date() },
+        });
+        await auditLog({ actorId: actor.id, actorRole: actor.role, action: "Iscrizione consulente respinta", targetType: "consultantProfile", targetId: prof.id, reason });
+        return NextResponse.json({ ok: true });
+      }
+
       /* ---- contenuti e impostazioni ---- */
       case "contents.update": {
         const actor = await requireStaff("admin.contents");
@@ -343,6 +407,9 @@ export async function POST(req: Request) {
         if (typeof s.openReviewsEnabled === "boolean") patch.openReviewsEnabled = s.openReviewsEnabled;
         if (typeof s.photosEnabled === "boolean") patch.photosEnabled = s.photosEnabled;
         if (typeof s.votesEnabled === "boolean") patch.votesEnabled = s.votesEnabled;
+        if (typeof s.consulentiEnabled === "boolean") patch.consulentiEnabled = s.consulentiEnabled;
+        if (typeof s.platformIban === "string") patch.platformIban = s.platformIban.trim().toUpperCase().replace(/\s+/g, "").slice(0, 40);
+        if (typeof s.paymentInstructions === "string") patch.paymentInstructions = s.paymentInstructions.trim().slice(0, 600);
         if (typeof s.adsEnabled === "boolean") patch.adsEnabled = s.adsEnabled;
         if (typeof s.adsClient === "string") patch.adsClient = s.adsClient.trim().slice(0, 40);
         const settings = await updateSettings(patch);

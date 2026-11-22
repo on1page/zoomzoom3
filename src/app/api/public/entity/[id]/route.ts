@@ -18,6 +18,7 @@ import { getCurrentUser } from "@/lib/server/auth";
 import { hasPremiumAccess, premiumStateOf } from "@/lib/server/premium";
 import { publicEntity, publicReviewsForEntity, photoMetaForEntity } from "@/lib/server/public-data";
 import { obfuscateReviewText, photoAccessOf, voteSummariesForEntity, myVotesForEntity } from "@/lib/server/review-access";
+import { publicConsultantForEntity } from "@/lib/server/consultants";
 import { handleError } from "@/lib/server/http";
 
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
@@ -29,9 +30,11 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
       return NextResponse.json({ ok: false, error: "Scheda non trovata." }, { status: 404 });
     }
     const cat = await getCategory(ent.categoryId);
-    const [pub, reviews] = await Promise.all([
+    const [pub, reviews, consultant] = await Promise.all([
       publicEntity(id, settings.minReviews),
       publicReviewsForEntity(id),
+      // scheda professionale (solo per la categoria Consulenti tecnici)
+      ent.categoryId === "consulente" ? publicConsultantForEntity(id) : Promise.resolve(null),
     ]);
     const published = reviews.filter(r => r.status === "published");
     const hiddenCount = reviews.length - published.length;
@@ -91,6 +94,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
       ok: true,
       entity: pub,
       category: cat,
+      consultant,
       reviews: reviewsOut,
       teasers,
       hiddenCount,

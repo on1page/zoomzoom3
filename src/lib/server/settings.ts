@@ -22,6 +22,9 @@ export type AppSettings = {
   openReviewsPerDay: number;     // limite anti-abuso: recensioni aperte e nuove schede per utente al giorno
   photosEnabled: boolean;        // foto allegate alle recensioni
   votesEnabled: boolean;         // voti di utilità (pollice su/giù) riservati ai Premium
+  consulentiEnabled: boolean;    // Consulenti tecnici: iscrizioni e richieste di perizia
+  platformIban: string;          // IBAN della piattaforma per i pagamenti delle perizie (vuoto = istruzioni generiche)
+  paymentInstructions: string;   // istruzioni mostrate all'utente per saldare una richiesta accettata
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -45,6 +48,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   openReviewsPerDay: 5,
   photosEnabled: true,
   votesEnabled: true,
+  consulentiEnabled: true,
+  platformIban: "",
+  paymentInstructions: "",
 };
 
 const SETTINGS_KEY = "app";
