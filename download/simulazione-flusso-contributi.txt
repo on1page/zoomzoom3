@@ -1,0 +1,427 @@
+ZOOMZOOM — SIMULAZIONE DEL FLUSSO DI CONTRIBUTO SIMPLIFICATO (proposta utente)
+Le chiamate che mutano lo stato sono eseguite DAVVERO sulle porte del backend
+(normAddress, ensureZone, 409/403/429/400 calcolati dalle regole reali del server).
+Impostazioni reali: 5 contributi/giorno · Premium 30 gg/recensione · foto max 3.
+
+══════════════════════════════════════════════════════════════════════════
+S01 · Immobile nuovo da ricerca testuale — «Via dei Mille 15, Milano»
+══════════════════════════════════════════════════════════════════════════
+  [START]       Utente autenticato (alice), email verificata
+  [TARGET]      Scelto: Immobile
+  [SEARCH]      Campo unico: «Via dei Mille 15, Milano»
+                prima le schede interne (0), poi il geocoder (1 risultati)
+                ↳ API GET /api/public/search + GET /api/public/geocode
+  [TEXT]        Selezione del risultato: «Via dei Mille 15, Milano»
+  [AUTOFILL]    città=Milano (Milano, Lombardia) · indirizzo=Via dei Mille 15 · coordinate 45.478, 9.205
+                4 campi autocompilati, tutti modificabili
+  [REVIEWPLACE] Riepilogo compatto: nessun campo mancante, si conferma la città
+                ✎ utente vede: «Controlla i dati: Milano · Via dei Mille 15 ✓»
+  [CONFIRM]     Conferma città e luogo → sì
+  [RESOLVE]     Risoluzione città (dentro la stessa chiamata): Milano già in catalogo, match ≤30 km
+  [EXIST]       Esiste già una scheda per questo indirizzo e città? → No (HTTP 200)
+                ↳ API POST /api/entities → 200
+                ⌘ DB: +1 scheda immobile «Via dei Mille 15» (Milano)
+  [CREATE]      Nuova scheda creata e usata
+  [DUPUSER [v2]] alice ha già recensito questa scheda? → No
+                ↳ API GET la-mia-recensione → vuoto
+  [FORM]        Modulo unico: tipo, voto 7,5, 4 criteri, pro, contro, testo 160 caratteri, prezzo 850 €/mese, 2 foto, onestà
+                validazione inline attiva: nessun errore durante la compilazione
+  [VALIDATE]    Controllo finale lato server → ok (HTTP 200)
+                ↳ API POST /api/reviews → 200 (dichiarata, Premium 30 gg)
+                ⌘ DB: +1 esperienza self · +1 recensione «dichiarata» · +1 grant Premium
+  [ACTIVE]      Esperienza verificabile con invito o documenti? → No, si pubblica subito
+  [DECLARED]    Pubblicata come «esperienza dichiarata»
+  [UPDATE]      Scheda aggiornata: punteggi, criteri, prezzi, classifiche
+  ────────────────────────────────────────────────────────────
+  ESITO: OK — recensione dichiarata pubblicata su scheda nuova (un solo campo, 4 campi autocompilati)
+  Metriche: 12 campi a mano · 4 autocompilati · 0 sprecati · 0 invii falliti · 4 chiamate API · 16 passi
+
+══════════════════════════════════════════════════════════════════════════
+S02 · Immobile già esistente riscritto diversamente — «Via Dei Mille, 15.»
+══════════════════════════════════════════════════════════════════════════
+  [TARGET]      Scelto: Immobile
+  [SEARCH]      Campo unico: «Via Dei Mille, 15.»
+                1° strato di dedup: 1 scheda interna in cima all'elenco (rank 1)
+                ↳ API GET /api/public/search + GET /api/public/geocode
+  [TEXT]        (a) se bob sceglie la scheda interna → si va diretti al FORM, EXIST è scendato
+  [SEARCH]      (b) bob ignora l'elenco e clicca il suggerimento OSM (caso peggiore per la dedup)
+  [AUTOFILL]    autocompilati: città=Milano · indirizzo=Via dei Mille 15 · coordinate
+  [REVIEWPLACE] Riepilogo ok, nessun campo mancante
+  [CONFIRM]     Conferma → sì
+  [RESOLVE]     Città: Milano (ensureZone ≤30 km)
+  [EXIST]       Esiste già la scheda? → Sì (HTTP 409 + existingId)
+                normAddress("Via Dei Mille, 15.") = «via dei mille 15» ≡ «via dei mille 15»: maiuscole, accenti e punteggiatura non creano duplicati
+                ↳ API POST /api/entities → 409 + existingId
+                ✎ utente vede: «Questo immobile risulta già presente: puoi recensire la scheda esistente.»
+  [USE]         Uso della scheda esistente
+                ⌘ DB: 0 scritture: la 409 instrada sulla scheda giusta
+  [DUPUSER [v2]] bob ha già recensito questa scheda? → No
+                ↳ API GET la-mia-recensione → vuoto
+  [FORM]        Modulo unico (11 campi)
+  [VALIDATE]    ok (HTTP 200)
+                ↳ API POST /api/reviews → 200
+                ⌘ DB: +1 recensione dichiarata + Premium
+  [UPDATE]      Scheda aggiornata: 2 recensioni, media ricalcolata
+  ────────────────────────────────────────────────────────────
+  ESITO: OK — dedup su DUE strati: elenco interno al rank 1 e 409+existingId alla creazione
+  Metriche: 12 campi a mano · 4 autocompilati · 0 sprecati · 0 invii falliti · 4 chiamate API · 14 passi
+
+══════════════════════════════════════════════════════════════════════════
+S03a · Quasi-duplicato «Via dei Mille 15/A» — flowchart attuale (v1)
+══════════════════════════════════════════════════════════════════════════
+  [TARGET]      Scelto: Immobile
+  [SEARCH]      «Via dei Mille 15/A, Milano»
+                0 schede interne ("15 a" non contiene "15") · 1 risultato OSM
+                ↳ API GET /api/public/search + GET /api/public/geocode
+  [AUTOFILL]    indirizzo=Via dei Mille 15/A · coordinate 45.4781, 9.2051 (a ~15 m dal civico 15)
+  [REVIEWPLACE] Riepilogo ok
+  [CONFIRM]     Conferma → sì
+  [RESOLVE]     Città: Milano
+  [EXIST]       Scheda per «via dei mille 15 a»? → No (HTTP 200)
+                il dedup del backend è ESATTO sulla stringa normalizzata: «15 a» ≠ «15»
+                ↳ API POST /api/entities → 200
+                ⌘ DB: +1 scheda «Via dei Mille 15/A» a ~15 metri da «Via dei Mille 15»
+  [CREATE]      Scheda quasi-duplicata creata ⚠
+  [DUPUSER [v2]] carol ha già recensito? → No
+  [FORM]        Recensione compilata
+  [VALIDATE]    ok (HTTP 200)
+                ↳ API POST /api/reviews → 200
+  ────────────────────────────────────────────────────────────
+  ESITO: ⚠ RISCHIO — nasce una scheda quasi-duplicata a 15 m dall'esistente: fusione a carico dello staff
+  Metriche: 12 campi a mano · 4 autocompilati · 0 sprecati · 0 invii falliti · 3 chiamate API · 11 passi
+
+══════════════════════════════════════════════════════════════════════════
+S03b · Quasi-duplicato «Via dei Mille 15/A» — con controllo prossimità [v2]
+══════════════════════════════════════════════════════════════════════════
+  [TARGET]      Scelto: Immobile
+  [SEARCH]      «Via dei Mille 15/A, Milano»
+                ↳ API GET /api/public/search + GET /api/public/geocode
+  [AUTOFILL]    indirizzo=Via dei Mille 15/A · coordinate 45.4781, 9.2051
+  [REVIEWPLACE] Riepilogo ok
+  [CONFIRM]     Conferma → sì
+  [RESOLVE]     Città: Milano
+  [EXIST]       Stringa «via dei mille 15 a» → nessuna corrispondenza esatta
+  [PROX [v2]]   Prima di creare: schede della stessa zona entro 50 m? → 1 («Via dei Mille 15» a 14 m)
+                ✎ utente vede: «A pochi metri c'è già la scheda «Via dei Mille 15». È lo stesso immobile? [Usa quella] / [È un altro]»
+  [USE]         Carol conferma il riuso (interno B o scala A)
+                ⌘ DB: 0 nuove schede: il quasi-duplicato non nasce
+  [DUPUSER [v2]] carol ha già recensito? → No
+  [FORM]        Recensione compilata
+  [VALIDATE]    ok (HTTP 200)
+                ↳ API POST /api/reviews → 200
+                ⌘ DB: +1 recensione sulla scheda esistente
+  ────────────────────────────────────────────────────────────
+  ESITO: OK — PROX (possibile solo con le coordinate) previene il quasi-duplicato; senza pin resta la dedup stringa
+  Metriche: 12 campi a mano · 4 autocompilati · 0 sprecati · 0 invii falliti · 2 chiamate API · 12 passi
+
+══════════════════════════════════════════════════════════════════════════
+S04a · Alice recensisce di nuovo lo stesso immobile — flowchart attuale (v1)
+══════════════════════════════════════════════════════════════════════════
+  [TARGET]      Scelto: Immobile
+  [SEARCH]      «Via dei Mille 15»
+                1 scheda interna al rank 1
+                ↳ API GET /api/public/search
+  [USE]         Scheda esistente selezionata dall'elenco
+  [FORM]        alice ricompila TUTTO il modulo: tipo, voto, 4 criteri, pro, contro, testo, prezzo, foto, onestà
+  [VALIDATE]    Invio → controllo doppia recensione per utente (HTTP 409)
+                ↳ API POST /api/reviews → 409
+                ✎ utente vede: «Hai già scritto una recensione su questa scheda: puoi aggiornarla con una rettifica motivata.»
+  ────────────────────────────────────────────────────────────
+  ESITO: ⚠ SPRECO — la 409 arriva DOPO il modulo completo: 13 campi persi, rettifica da cercare nel profilo
+  Metriche: 13 campi a mano · 0 autocompilati · 13 sprecati · 1 invii falliti · 2 chiamate API · 5 passi
+
+══════════════════════════════════════════════════════════════════════════
+S04b · Alice recensisce di nuovo lo stesso immobile — con DUPUSER [v2]
+══════════════════════════════════════════════════════════════════════════
+  [TARGET]      Scelto: Immobile
+  [SEARCH]      «Via dei Mille 15»
+                ↳ API GET /api/public/search → 1 scheda
+  [USE]         Scheda esistente selezionata
+  [DUPUSER [v2]] Subito dopo il riuso: alice ha già recensito? → Sì
+                ↳ API GET la-mia-recensione → rev007
+                ✎ utente vede: «Hai già recensito questa scheda. [Leggi la tua recensione] [Aggiorna con una rettifica]»
+  [MYREV [v2]]  Aperta la recensione esistente con il percorso di rettifica: niente da ricompilare
+                ⌘ DB: 0 scritture inutili
+  ────────────────────────────────────────────────────────────
+  ESITO: OK — blocco anticipato: 0 campi sprecati, rettifica offerta subito
+  Metriche: 0 campi a mano · 0 autocompilati · 0 sprecati · 0 invii falliti · 2 chiamate API · 5 passi
+
+══════════════════════════════════════════════════════════════════════════
+S05 · GPS davanti all'immobile — reverse geocoding urbano
+══════════════════════════════════════════════════════════════════════════
+  [TARGET]      Scelto: Immobile
+  [PLACE]       «Usa la posizione»: dave è davanti al civico 15 di Via dei Mille (Milano)
+  [GPS]         Coordinate 45.47805, 9.20498 → trovato
+                ↳ API GET /api/public/geocode/reverse → found: Via dei Mille 15, Milano
+  [AUTOFILL]    via+civico=Via dei Mille 15 · città=Milano · pin impostato
+                4 campi autocompilati: chi è sul posto non digita nulla
+  [REVIEWPLACE] Riepilogo: nessun campo mancante
+  [CONFIRM]     Conferma → sì
+  [RESOLVE]     Città: Milano (ensureZone ≤30 km)
+  [EXIST]       «via dei mille 15» → Sì, la scheda nata in S01 (HTTP 409 + existingId)
+                ↳ API POST /api/entities → 409
+                ✎ utente vede: «Questo immobile risulta già presente: puoi recensire la scheda esistente.»
+  [USE]         Scheda esistente usata
+                ⌘ DB: 0 scritture
+  [DUPUSER [v2]] dave ha già recensito? → No
+                ↳ API GET la-mia-recensione → vuoto
+  [FORM]        Modulo compilato (11 campi)
+  [VALIDATE]    ok (HTTP 200)
+                ↳ API POST /api/reviews → 200
+                ⌘ DB: +1 recensione dichiarata + Premium
+  [UPDATE]      Scheda aggiornata
+  ────────────────────────────────────────────────────────────
+  ESITO: OK — GPS → autocompilazione → scheda esistente → recensione: zero digitazione di indirizzi
+  Metriche: 12 campi a mano · 4 autocompilati · 0 sprecati · 0 invii falliti · 4 chiamate API · 13 passi
+
+══════════════════════════════════════════════════════════════════════════
+S06 · GPS in campagna (Lodigiano) — strada non mappata da OSM
+══════════════════════════════════════════════════════════════════════════
+  [TARGET]      Scelto: Immobile
+  [PLACE]       «Usa la posizione»: bob è in una cascina fuori Lodi
+  [GPS]         Coordinate 45.3097, 9.503 → comune sì, strada NO
+                ↳ API GET /api/public/geocode/reverse → found ma road=null
+                ✎ utente vede: «Posizione rilevata, ma l'indirizzo non risulta mappato: inseriscilo a mano (il pin è già a posto).»
+  [AUTOFILL]    città=Lodi (LO, Lombardia) · pin impostato · indirizzo MANCANTE
+                3 campi su 4 autocompilati: il riepilogo chiede SOLO ciò che manca
+  [REVIEWPLACE] Solo i campi mancanti: bob digita «Strada Provinciale 12»
+                ✎ utente vede: «Manca l'indirizzo: scrivilo come appare su una buca delle lettere»
+  [CONFIRM]     Conferma → sì
+  [RESOLVE]     Lodi NON è in catalogo: ensureZone crea la zona al volo
+                nessun omonimo entro 30 km né in provincia di Lodi → nuova zona (source=user)
+                ⌘ DB: +1 zona «Lodi» · +1 scheda zona «Lodi» (ensureZoneEntity)
+  [EXIST]       Nessuna scheda immobile in zona Lodi → No (HTTP 200)
+                ↳ API POST /api/entities → 200
+                ⌘ DB: +1 scheda «Strada Provinciale 12, Lodi» (con pin, senza civico)
+  [CREATE]      Scheda creata
+  [DUPUSER [v2]] bob ha già recensito? → No
+  [FORM]        Modulo compilato
+  [VALIDATE]    ok (HTTP 200)
+                ↳ API POST /api/reviews → 200
+                ⌘ DB: +1 recensione + Premium
+  [UPDATE]      Prima recensione di Lodi: la città entra nelle classifiche
+  ────────────────────────────────────────────────────────────
+  ESITO: OK — copertura nazionale reale: zona nuova creata dal GPS, solo l'indirizzo chiesto a mano
+  Metriche: 12 campi a mano · 3 autocompilati · 0 sprecati · 0 invii falliti · 3 chiamate API · 13 passi
+
+══════════════════════════════════════════════════════════════════════════
+S07 · Zona/città — «Alassio», comune non ancora in catalogo
+══════════════════════════════════════════════════════════════════════════
+  [TARGET]      Scelto: Zona o città
+  [SEARCH]      «Alassio»
+                0 schede interne · 1 risultato OSM (località)
+                ↳ API GET /api/public/search + GET /api/public/geocode
+  [TEXT]        Selezione «Alassio, Savona»
+  [AUTOFILL]    città=Alassio (Savona, Liguria) · coordinate — per una zona non serve l'indirizzo
+  [REVIEWPLACE] Riepilogo: solo la città, nessun campo mancante
+  [CONFIRM]     Conferma → sì
+  [RESOLVE]     ensureZone: nessun omonimo entro 30 km né in provincia → CREA
+                ↳ API POST /api/zones → zona creata + scheda città attivata
+                ⌘ DB: +1 zona «Alassio» (user) · +1 scheda zona
+  [EXIST]       Per le zone la scheda È la zona: nessun dedup indirizzo
+                ensureZoneEntity garantisce UNA scheda per zona (una per città)
+  [USE]         Scheda zona «Alassio» attivata e usata
+  [DUPUSER [v2]] carol ha già recensito Alassio? → No
+  [FORM]        Modulo zona: voto, criteri (servizi, trasporti, sicurezza, costi), pro, contro, testo, affitto medio
+  [VALIDATE]    ok (HTTP 200)
+                ↳ API POST /api/reviews → 200
+                ⌘ DB: +1 recensione zona + Premium
+  [UPDATE]      Alassio sulla mappa d'Italia con la prima recensione
+  ────────────────────────────────────────────────────────────
+  ESITO: OK — il target «zona» entra nel campo unico senza passaggi separati (backend già pronto)
+  Metriche: 12 campi a mano · 2 autocompilati · 0 sprecati · 0 invii falliti · 3 chiamate API · 13 passi
+
+══════════════════════════════════════════════════════════════════════════
+S08 · Altro soggetto (agenzia) — recensione in revisione staff
+══════════════════════════════════════════════════════════════════════════
+  [TARGET]      Scelto: Altro soggetto (persona, agenzia, ditta…)
+  [SEARCH]      «Agenzia Immobiliare XYZ»
+                0 schede interne: il soggetto non esiste ancora
+                ↳ API GET /api/public/search
+  [SEARCH]      Il campo unico propone il risultato OSM solo come aiuto per la città (Roma)
+                ↳ API GET /api/public/geocode
+  [FORM]        Modulo unico con in più NOME del soggetto e MOTIVAZIONE (min 20 caratteri) + recensione completa
+                per un nuovo soggetto la scheda NON nasce subito: proposta + recensione trattenute
+  [VALIDATE]    Controllo server (stesse regole) (HTTP 200)
+                ↳ API POST /api/proposals → 200
+                ⌘ DB: +1 EntityProposal (received)
+  [PROP]        Recensione trattenuta in stato «in revisione» [v2: serve Review.status=pending]
+                ✎ utente vede: «Grazie! La tua recensione è in revisione: ti avvisiamo via email appena decidiamo.»
+                ⌘ DB: +1 recensione status=pending (NON pubblica, NON conta nelle medie)
+  [NOTIF [v2]]  Email di conferma registrata
+                ⌘ DB: +1 EmailLog
+  [STAFFOK [v2]] Lo staff approva: nasce la scheda e la recensione va online
+                ✎ utente vede: «Email: «La tua recensione su Agenzia Immobiliare XYZ è stata pubblicata»»
+                ⌘ DB: +1 scheda «Agenzia Immobiliare XYZ» (Roma) · recensione pending → published
+  [SEARCH]      bob cerca la stessa agenzia il giorno dopo
+                1 scheda approvata al rank 1: bob la recensisce direttamente
+                ↳ API GET /api/public/search
+  [DUPUSER [v2]] bob ha già recensito? → No
+  [FORM]        Modulo di bob (11 campi)
+  [VALIDATE]    ok (HTTP 200)
+                nota: nel flowchart com'è disegnato OGNI recensione «altro soggetto» passerebbe dallo staff; si consiglia il criterio ibrido: solo i soggetti NUOVI (o le persone fisiche) vanno in revisione
+                ↳ API POST /api/reviews → 200
+  ────────────────────────────────────────────────────────────
+  ESITO: OK con NOVITÀ BACKEND — serve Review.status=pending + pubblicazione all'approvazione
+  Metriche: 25 campi a mano · 0 autocompilati · 0 sprecati · 0 invii falliti · 5 chiamate API · 12 passi
+
+══════════════════════════════════════════════════════════════════════════
+S09a · Modulo con 3 errori — validazione solo all'invio (v1)
+══════════════════════════════════════════════════════════════════════════
+  [TARGET]      Scelto: Immobile — «Via Appia Nuova 20, Roma» (nuova scheda)
+  [SEARCH]      ricerca e autocompilazione (4 campi)
+                ↳ API search + geocode + POST /api/entities → 200
+  [FORM]        carol compila in fretta: nessun pro, testo di 80 caratteri, onestà non spuntata
+                il modulo statico non segnala nulla durante la digitazione
+  [VALIDATE]    Invio 1 → Indica almeno un aspetto positivo. (HTTP 400)
+                ↳ API POST /api/reviews → 400
+                ✎ utente vede: «Indica almeno un aspetto positivo.»
+  [FORM]        carol corregge (pro) e reinvia
+  [VALIDATE]    Invio 2 → La descrizione dell'esperienza deve essere di almeno 100 caratteri. (HTTP 400)
+                ↳ API POST /api/reviews → 400
+                ✎ utente vede: «La descrizione dell'esperienza deve essere di almeno 100 caratteri.»
+  [FORM]        carol corregge (testo) e reinvia
+  [VALIDATE]    Invio 3 → Devi confermare la dichiarazione sull'esperienza personale e sulle regole. (HTTP 400)
+                ↳ API POST /api/reviews → 400
+                ✎ utente vede: «Devi confermare la dichiarazione sull'esperienza personale e sulle regole.»
+  [FORM]        carol corregge (onestà) e reinvia
+  [VALIDATE]    Invio 4 → ok (HTTP 200)
+                ↳ API POST /api/reviews → 200
+  ────────────────────────────────────────────────────────────
+  ESITO: ⚠ 3 invii falliti: ogni errore arriva uno alla volta e l'utente perde il contesto
+  Metriche: 13 campi a mano · 5 autocompilati · 13 sprecati · 3 invii falliti · 5 chiamate API · 10 passi
+
+══════════════════════════════════════════════════════════════════════════
+S09b · Modulo con gli stessi 3 errori — validazione inline [v2]
+══════════════════════════════════════════════════════════════════════════
+  [TARGET]      Scelto: Immobile — «Via Appia Nuova 20, Roma»
+  [SEARCH]      ricerca e autocompilazione (4 campi)
+                ↳ API search + geocode + POST /api/entities → 200
+  [FORM]        carol digita il testo: contatore visibile «80/100»
+  [INLINE [v2]] Errore mostrato mentre compila: testo troppo corto
+                ✎ utente vede: «Ancora 20 caratteri per la descrizione (minimo 100)»
+  [FORM]        pro vuoto → segnalato in tempo reale; la 4ª foto non si può aggiungere (limite 3 lato client)
+                ✎ utente vede: «Massimo 3 foto per recensione»
+  [INLINE [v2]] onestà non spuntata → il pulsante resta disabilitato con il motivo
+                ✎ utente vede: «Serve la dichiarazione sull'esperienza personale»
+  [VALIDATE]    Tutto a posto PRIMA dell'invio: un solo invio
+                ↳ API POST /api/reviews → 200
+                ⌘ DB: +1 recensione + Premium
+  ────────────────────────────────────────────────────────────
+  ESITO: OK — 0 invii falliti: ogni regola del server è replicabile lato client (il server resta l'autorità)
+  Metriche: 13 campi a mano · 5 autocompilati · 0 sprecati · 0 invii falliti · 2 chiamate API · 7 passi
+
+══════════════════════════════════════════════════════════════════════════
+S10 · Recensione con invito riscattato inline → badge «verificata»
+══════════════════════════════════════════════════════════════════════════
+  [TARGET]      Scelto: Immobile o altro — cerca «Agenzia Immobiliare XYZ»
+  [SEARCH]      1 scheda approvata al rank 1
+                ↳ API GET /api/public/search
+  [USE]         Scheda esistente selezionata
+  [DUPUSER [v2]] dave ha già recensito? → No
+  [FORM]        Modulo compilato (l'invito NON è obbligatorio per partire)
+  [ACTIVE]      «Puoi verificare la tua esperienza?» → dave ha un codice invito
+  [INVITE [v2]] Codice INV-XYZ-001 inserito nel modulo
+                ↳ API POST /api/invitations/redeem → 200 (esperienza attiva, origin=business)
+                ⌘ DB: +1 Experience attiva collegata a dave
+  [VALIDATE]    ok con esperienza collegata (HTTP 200, verified=True)
+                ↳ API POST /api/reviews (via experienceId) → 200
+                ⌘ DB: +1 recensione VERIFICATA + Premium
+  [VERIFIED]    Pubblicata subito come «verificata»
+  [UPDATE]      La scheda distingue recensioni verificate e dichiarate
+  ────────────────────────────────────────────────────────────
+  ESITO: OK — l'invito è SINCRONO: verifica e pubblicazione nello stesso momento (backend già esistente)
+  Metriche: 13 campi a mano · 0 autocompilati · 0 sprecati · 0 invii falliti · 3 chiamate API · 10 passi
+
+══════════════════════════════════════════════════════════════════════════
+S11 · Recensione con documenti caricati inline → pubblicata, poi upgradata
+══════════════════════════════════════════════════════════════════════════
+  [TARGET]      Scelto: altro — cerca «Agenzia Immobiliare XYZ»
+  [SEARCH]      scheda al rank 1
+                ↳ API GET /api/public/search
+  [USE]         Scheda selezionata
+  [DUPUSER [v2]] erin ha già recensito? → No
+  [FORM]        Modulo compilato + upload del contratto (PDF)
+  [ACTIVE]      «Puoi verificare la tua esperienza?» → erin carica un documento
+  [DOCS [v2]]   Documento allegato alla richiesta di verifica
+                ↳ API POST /api/experiences/verify-request → 200
+                ⌘ DB: +1 PendingVer + VerificationDoc (conservata, retention dopo la decisione)
+  [VALIDATE]    ok — la verifica documentale è ASINCRONA: non si può aspettare (HTTP 200, verificata=no)
+                ↳ API POST /api/reviews → 200 (dichiarata)
+  [DECLARED]    Pubblicata SUBITO come «dichiarata»: nessuna attesa, nessun contenuto perso
+                ✎ utente vede: «Recensione pubblicata! Il documento è in verifica: se è tutto ok diventa «verificata».»
+  [UPDATE]      Scheda aggiornata con la recensione dichiarata
+  [PENDVER [v2]] (ore dopo) Lo staff approva il documento
+                ⌘ DB: PendingVer → approved · +1 Experience attiva (origin=verification-request)
+  [UPGRADE [v2]] Badge aggiornato: dichiarata → VERIFICATA (nessuna nuova pubblicazione)
+                ✎ utente vede: «Email: la tua recensione su Agenzia Immobiliare XYZ è ora verificata»
+                ⌘ DB: review.verified = true · email all'utente
+  ────────────────────────────────────────────────────────────
+  ESITO: OK — pattern consigliato: pubblica subito, verifica dopo (evita attese e abbandoni)
+  Metriche: 14 campi a mano · 0 autocompilati · 0 sprecati · 0 invii falliti · 3 chiamate API · 12 passi
+
+══════════════════════════════════════════════════════════════════════════
+S12 · Cancelli d'ingresso — email non verificata e limite giornaliero
+══════════════════════════════════════════════════════════════════════════
+  [START]       eve ha un account ma NON ha confermato l'email
+  [TARGET]      Scelto: Immobile
+  [SEARCH]      «Via dei Mille 15»
+                1 scheda (le ricerche pubbliche funzionano)
+                ↳ API GET /api/public/search
+  [USE]         Scheda selezionata (l'interfaccia procede: il controllo è lontano)
+  [FORM]        eve compila il modulo completo
+  [VALIDATE]    Invio → BLOCCATA (HTTP 403)
+                ↳ API POST /api/reviews → 403
+                ✎ utente vede: «Conferma prima l'indirizzo email dal collegamento ricevuto via email.»
+  [GATE [v2]]   PROPOSTA: anticipare il controllo a START (lo stato emailVerified è già nel bootstrap)
+                a START eve vedrebbe «Conferma l'email per scrivere recensioni [Rinvia email]» → 0 campi sprecati
+  [START]       (variante) alice ha già scritto 5 recensioni aperte oggi (setup della simulazione)
+  [TARGET]      Scelto: Immobile
+  [SEARCH]      «Via Appia Nuova 21, Roma» → nuova scheda (limite nuove schede separato)
+                ↳ API GET /api/public/search + geocode
+  [CREATE]      Scheda creata
+  [FORM]        alice compila il modulo
+  [VALIDATE]    Invio → (HTTP 429)
+                ↳ API POST /api/reviews → 429
+                ✎ utente vede: «Limite di 5 recensioni aperte al giorno raggiunto: riprova domani.»
+  [GATE [v2]]   PROPOSTA: mostrare a START la quota residua («ti restano N recensioni oggi»)
+  ────────────────────────────────────────────────────────────
+  ESITO: ⚠ ENTRAMBI i blocchi arrivano DOPO il modulo nel flusso attuale → v2: anticiparli a START/GATE
+  Metriche: 26 campi a mano · 0 autocompilati · 26 sprecati · 2 invii falliti · 4 chiamate API · 14 passi
+
+══════════════════════════════════════════════════════════════════════════
+SINTESI
+══════════════════════════════════════════════════════════════════════════
+Cod   Scenario                                  Esito                              Mano Auto Sprec  KO
+------------------------------------------------------------------------------------------------------
+S01   Immobile nuovo da ricerca testuale        OK — pubblicata (scheda nuova)       12    4     0   0
+S02   Indirizzo esistente riscritto diversament OK — riuso scheda (2 strati dedup    12    4     0   0
+S03a  Quasi-duplicato 15/A (v1)                 ⚠ scheda duplicata creata            12    4     0   0
+S03b  Quasi-duplicato 15/A (v2 PROX)            OK — riuso proposto (0 duplicati)    12    4     0   0
+S04a  Doppia recensione stesso utente (v1)      ⚠ 409 dopo 13 campi compilati        13    0    13   1
+S04b  Doppia recensione stesso utente (v2)      OK — blocco prima del modulo          0    0     0   0
+S05   GPS urbano (reverse geocoding ok)         OK — riuso scheda esistente          12    4     0   0
+S06   GPS extra-urbano (strada non mappata)     OK — nuova zona + scheda creata      12    3     0   0
+S07   Zona/città non in catalogo                OK — zona attivata al volo           12    2     0   0
+S08   Altro soggetto in revisione staff         OK — proposta+recensione approvat    25    0     0   0
+S09a  Tre errori trovati uno per volta (v1)     ⚠ 3 invii falliti                    13    5    13   3
+S09b  Stessi errori con validazione inline (v2) OK — 0 invii falliti                 13    5     0   0
+S10   Invito riscattato inline                  OK — pubblicata verificata           13    0     0   0
+S11   Documenti inline con upgrade asincrono    OK — dichiarata → verificata         14    0     0   0
+S12   Cancelli d'ingresso (email, quota)        ⚠ blocchi tardivi (v2: GATE a STA    26    0    26   2
+
+CONFRONTI v1 (flowchart attuale) → v2 (con nodi proposti)
+  • S03 quasi-duplicato 15/A
+      v1: scheda duplicata a 15 m, fusione manuale a carico dello staff
+      v2: PROX: riuso proposto quando ci sono coordinate (GPS o suggerimento OSM)
+  • S04 seconda recensione stesso utente
+      v1: 409 dopo 13 campi compilati (frustrazione, abbandono)
+      v2: DUPUSER: blocco prima del modulo, rettifica offerta subito
+  • S09 modulo con errori
+      v1: 3 invii falliti, errori uno per volta
+      v2: INLINE: 0 invii falliti, errori in tempo reale (foto già limitate a 3 dal client)
+
+STATO FINALE DEL MONDO (S01→S12 in sequenza)
+  zone: 4 (Milano, Roma, Lodi, Alassio)
+  schede: 8 · recensioni pubblicate: 10 (verificate: 2) · proposte approvate: 1
+  email inviate: 2 · voci audit: 12

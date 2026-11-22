@@ -1,0 +1,162 @@
+---
+title: "Contributo aperto — flusso semplificato (v2: tua proposta + correzioni dalla simulazione)"
+config:
+  theme: base
+  themeVariables:
+    primaryColor: "#EFF6FF"
+    primaryBorderColor: "#3B82F6"
+    primaryTextColor: "#1E293B"
+    lineColor: "#94A3B8"
+    fontSize: "14px"
+    fontFamily: "Helvetica, Arial, DejaVu Sans, sans-serif"
+  flowchart:
+    curve: basis
+    padding: 20
+    nodeSpacing: 45
+    rankSpacing: 55
+    htmlLabels: true
+---
+flowchart TB
+
+    %% ════════════════════════════════════════════════════════════════
+    %% CHANGELOG v1 → v2 (modifica proposta dopo la simulazione S01–S12)
+    %% Ogni modifica ha un codice: puoi scrivere «accetto C1–C7, rifiuto C8»
+    %% oppure «C6: alza il raggio a 100 m» e la applico senza ambiguità.
+    %%
+    %% C1  GATE/VERIFYBLOC — controllo email verificata + quota residua
+    %%     SPOSTATO a inizio flusso (oggi la 403/429 arriva dopo il modulo:
+    %%     simulazione S12 → 13–26 campi sprecati).
+    %% C2  SEARCH cerca in tutte le categorie: per «altro soggetto» il campo
+    %%     unico trova la scheda del soggetto se esiste già (SUBJEX → USE);
+    %%     la revisione staff vale solo per i soggetti NUOVI (S08).
+    %% C3  FORMA — per un soggetto nuovo il modulo chiede anche NOME e
+    %%     MOTIVAZIONE (min 20 caratteri), come già richiede /api/proposals.
+    %% C4  NOTIF/STAFF/PUBA/REJA — comunicazione «in revisione» ed esiti
+    %%     con email. RICHIEDE BACKEND: Review.status = pending e
+    %%     pubblicazione della recensione all'approvazione.
+    %% C5  TEXT — l'elenco mostra PRIMA le schede interne (dedup al rank 1),
+    %%     POI i luoghi della mappa (S02).
+    %% C6  PROX — prima di creare, se ci sono coordinate, proposta di riuso
+    %%     per schede entro 50 m nella stessa città (S03: «15» vs «15/A»).
+    %% C7  DUPUSER/MYREV — «hai già recensito questa scheda?» subito dopo
+    %%     USE/CREATE, con offerta di rettifica (S04: 13 campi salvati).
+    %% C8  INLINE — validazione in tempo reale nel FORM, stesse regole del
+    %%     server: testo ≥ 100 caratteri, pro ≥ 1, foto ≤ 3, onestà (S09).
+    %% C9  ACTIVE → INVITE (sincrono: verificata subito) / DOCS (asincrono:
+    %%     pubblicata dichiarata, badge → verificata dopo PENDVER/UPGRADE)
+    %%     (S10–S11).
+    %% C10 INVARIATE le regole attuali: punteggio 0–10 step 0,5, criteri con
+    %%     default 5, prezzo facoltativo 1 €–100.000.000, honeypot anti-bot,
+    %%     5 contributi/giorno, Premium 30 giorni per recensione pubblicata.
+    %%
+    %% LEGENDA CLASSI: ui (azzurro) azione dell'utente · api (verde) logica
+    %% del server · esito (verde scuro) risultato · bivio (arancio) decisione
+    %% · nuovo/bivio2 (viola TRATTEGGIATO) nodi AGGIUNTI in v2.
+    %% ════════════════════════════════════════════════════════════════
+
+    GATE{"Email verificata?<br>Quota contributi di oggi ok?"}
+    START(["Scrivi una recensione"]):::esito
+    VERIFYBLOC["Sblocca: conferma l'email dal link<br>(o attendi la quota di domani)"]:::nuovo
+    TARGET{"Che cosa vuoi recensire?"}:::bivio
+    IMM["Immobile"]:::ui
+    ZONA["Zona o città"]:::ui
+    ALTRO["Altro soggetto<br>(persona, agenzia, ditta…)"]:::ui
+
+    GATE -->|"sì"| START
+    GATE -->|"no"| VERIFYBLOC
+    START --> TARGET
+    TARGET -->|"immobile"| IMM
+    TARGET -->|"zona / città"| ZONA
+    TARGET -->|"altro"| ALTRO
+
+    SEARCH["Cerca in un solo campo:<br>soggetto, città, indirizzo o zona"]:::ui
+    IMM --> SEARCH
+    ZONA --> SEARCH
+    ALTRO --> SEARCH
+
+    PLACE{"Come vuoi indicare il luogo?"}:::bivio
+    SEARCH -->|"immobile / zona"| PLACE
+    PLACE -->|"Ricerca testuale"| TEXT["Seleziona un risultato:<br>prima le schede già su ZoomZoom,<br>poi i luoghi della mappa"]:::ui
+    PLACE -->|"Usa la posizione"| GPS["GPS o pin sulla mappa"]:::ui
+
+    SUBJEX{"Il soggetto è già<br>sul catalogo?"}
+    SEARCH -->|"altro: cerca il soggetto"| SUBJEX
+    SUBJEX -->|"sì"| USE
+    FORMA["Modulo esteso: nome del soggetto,<br>motivazione (min 20 caratteri)<br>+ la recensione"]:::nuovo
+    SUBJEX -->|"no: soggetto nuovo"| FORMA
+
+    PROP["Invia proposta e recensione<br>in revisione allo staff<br>(la scheda non nasce ancora)"]:::api
+    FORMA --> PROP
+    NOTIF["«La tua recensione è in revisione»<br>+ email di conferma"]:::nuovo
+    PROP --> NOTIF
+    STAFF{"Decisione dello staff"}
+    NOTIF --> STAFF
+    PUBA["Scheda creata + recensione pubblicata<br>+ email di esito"]:::nuovo
+    REJA["Rifiutata: notifica con il motivo<br>(la recensione non si pubblica)"]:::nuovo
+    STAFF -->|"approva"| PUBA
+    STAFF -->|"rifiuta"| REJA
+
+    AUTOFILL["Compila automaticamente i dati disponibili:<br>città, provincia, indirizzo, coordinate"]:::api
+    TEXT --> AUTOFILL
+    GPS --> AUTOFILL
+
+    REVIEWPLACE["Controlla e modifica i dati<br>Inserisci solo quelli mancanti"]:::ui
+    AUTOFILL --> REVIEWPLACE
+    CONFIRM{"Città e luogo corretti?"}:::bivio
+    REVIEWPLACE --> CONFIRM
+    CONFIRM -->|"No: correggi"| REVIEWPLACE
+
+    RESOLVE["Il sistema risolve la città<br>e recupera o crea la zona"]:::api
+    CONFIRM -->|"Sì: conferma"| RESOLVE
+
+    EXIST{"Esiste già una scheda<br>per questo indirizzo e città?"}:::bivio
+    RESOLVE --> EXIST
+    USE["Usa la scheda esistente"]:::esito
+    CREATE["Crea la nuova scheda"]:::esito
+    EXIST -->|"Sì"| USE
+    PROX{"Un'altra scheda della stessa città<br>entro 50 metri?<br>(solo se hai le coordinate)"}
+    EXIST -->|"No"| PROX
+    PROX -->|"sì: proponi il riuso"| USE
+    PROX -->|"no / senza coordinate"| CREATE
+
+    DUPUSER{"Hai già recensito<br>questa scheda?"}
+    MYREV["Mostra la tua recensione<br>+ aggiorna con una rettifica motivata"]:::nuovo
+    USE --> DUPUSER
+    CREATE --> DUPUSER
+    DUPUSER -->|"sì"| MYREV
+
+    FORM["Compila la recensione:<br>voto, criteri, pro e contro,<br>testo, prezzo e foto"]:::ui
+    INLINE["Validazione in tempo reale, mentre compili:<br>testo ≥ 100 caratteri · almeno un pro ·<br>foto ≤ 3 · dichiarazione di onestà<br>(il server resta l'autorità finale)"]:::nuovo
+    DUPUSER -->|"no"| FORM
+    FORM -.- INLINE
+
+    VALIDATE["Controlla i campi richiesti<br>e invia la recensione"]:::api
+    FORM --> VALIDATE
+
+    ACTIVE{"Esperienza verificabile<br>con invito o documenti?"}:::bivio
+    VALIDATE --> ACTIVE
+    INVITE["Riscatta il codice invito:<br>esperienza attiva subito"]:::nuovo
+    DOCS["Carica un documento:<br>verifica asincrona dello staff"]:::nuovo
+    VERIFIED["Pubblica come verificata"]:::esito
+    DECLARED["Pubblica come dichiarata"]:::esito
+    ACTIVE -->|"nessuna: pubblica ora"| DECLARED
+    ACTIVE -->|"ho un codice invito"| INVITE
+    INVITE --> VERIFIED
+    ACTIVE -->|"ho dei documenti"| DOCS
+    DOCS -->|"pubblica subito"| DECLARED
+    PENDVER["Dopo la decisione:<br>il documento è approvato"]:::nuovo
+    UPGRADE["Badge aggiornato:<br>dichiarata → verificata"]:::nuovo
+    DOCS -.->|"in attesa"| PENDVER
+    PENDVER --> UPGRADE
+
+    UPDATE["Aggiorna la scheda:<br>punteggi, criteri, prezzi e classifiche"]:::api
+    VERIFIED --> UPDATE
+    DECLARED --> UPDATE
+
+    class GATE,SUBJEX,PROX,DUPUSER,STAFF bivio2
+    classDef ui fill:#EFF6FF,stroke:#3B82F6,stroke-width:1.5px,color:#1E293B
+    classDef api fill:#F0FDF4,stroke:#10B981,stroke-width:1.5px,color:#1E293B
+    classDef esito fill:#D1FAE5,stroke:#059669,stroke-width:1.5px,color:#1E293B
+    classDef bivio fill:#FFF7ED,stroke:#F59E0B,stroke-width:2px,color:#1E293B
+    classDef nuovo fill:#FDF4FF,stroke:#A855F7,stroke-width:2px,stroke-dasharray:5 4,color:#1E293B
+    classDef bivio2 fill:#FFF7ED,stroke:#A855F7,stroke-width:2px,stroke-dasharray:5 4,color:#1E293B
