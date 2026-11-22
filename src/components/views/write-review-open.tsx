@@ -322,13 +322,12 @@ function PlaceStep({ target, onBack, onInternal, onDraft }: {
     }
   }, [target]);
 
-  // ricerca con debounce. A vuoto (immobile) si aprono le schede esistenti:
-  // chi entra trova subito anche il catalogo, non solo la mappa (C5)
+  // ricerca con debounce: i risultati compaiono SOLO se l'utente cerca —
+  // niente elenchi precaricati di schede, la pagina resta pulita
   useEffect(() => {
     const query = q.trim();
     if (query.length < 2) {
-      setGeoRes(null); setThrottled(false);
-      if (target === "immobile") void runSearch(""); else setInternal(null);
+      setGeoRes(null); setThrottled(false); setInternal(null);
       return;
     }
     const t = setTimeout(() => { void runSearch(query); }, 420);
@@ -537,11 +536,6 @@ function PlaceStep({ target, onBack, onInternal, onDraft }: {
                 </>
               ) : geoRes && !geoRes.length && !noQuery ? (
                 <p className="small muted mt2 mb0">{throttled ? "Troppe ricerche di fila: attendi qualche secondo." : "Nessun luogo trovato sulla mappa: controlla il nome o usa il GPS."}</p>
-              ) : null}
-              {noQuery && target === "immobile" ? (
-                <p className="small muted mt2 mb0" title="Gli indirizzi sono dati pubblici per natura: una scheda per indirizzo e città, il dedup è automatico.">
-                  Scegli una scheda esistente oppure un luogo dalla mappa: la scheda nasce subito, se manca.
-                </p>
               ) : null}
             </>
           ) : (
