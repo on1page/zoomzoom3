@@ -1,0 +1,77 @@
+---
+title: "D4 — Browsing, scheda e gating Premium"
+config:
+  theme: base
+  themeVariables:
+    primaryColor: "#EFF6FF"
+    primaryBorderColor: "#3B82F6"
+    primaryTextColor: "#1E293B"
+    lineColor: "#94A3B8"
+    fontSize: "14px"
+    fontFamily: "Helvetica, Arial, DejaVu Sans, sans-serif"
+  flowchart:
+    curve: basis
+    padding: 20
+    nodeSpacing: 55
+    rankSpacing: 65
+    htmlLabels: true
+---
+flowchart TB
+
+    %% ═══ NAVIGAZIONE ═══
+    HOME["Home #/ — ricerca, anteprima mappa,<br>classifiche, CTA"]:::ui
+    CERCA["#/cerca — filtri categoria, zona, prezzo,<br>ordinamento — GET /api/public/search"]:::ui
+    MAPP["#/mappa — GET /api/public/map<br>marker immobili + aggregati per zona<br>(soppressione sotto la soglia)"]:::ui
+    CLAS["#/classifiche — GET /api/public/rankings<br>punteggio = (n·M + m·C) / (n+m)"]:::ui
+    CATV["#/categoria/[id] — elenco schede"]:::ui
+    SCH["#/scheda/[id] — EntityView<br>GET /api/public/entity/[id]"]:::ui
+
+    HOME --> CERCA
+    HOME --> MAPP
+    HOME --> CLAS
+    HOME --> CATV
+    CERCA -->|"apri scheda"| SCH
+    CATV -->|"apri scheda"| SCH
+    CLAS -->|"apri scheda"| SCH
+    MAPP -->|"apri scheda"| SCH
+
+    %% ═══ SEMPRE PUBBLICO ═══
+    subgraph PUBB["Sempre visibile a tutti"]
+        direction LR
+        SCORE["score medio /10, stelle,<br>numero recensioni"]:::dati
+        MED["mediana prezzi dichiarati"]:::dati
+        BARS["CriteriaBars — medie per criterio"]:::dati
+        VCOUNT["conteggio voti utili<br>per ogni recensione"]:::dati
+    end
+    SCH --> PUBB
+
+    %% ═══ GATING PREMIUM ═══
+    GATE{"Lettore Premium, staff<br>o autore della recensione?"}:::bivio
+    SCH --> GATE
+    GATE -->|"sì"| FULL["testi integrali delle recensioni<br>+ foto: GET /api/public/photo/[id]<br>(Cache-Control: private)"]:::esito
+    GATE -->|"no"| TEAS["3 teaser offuscati + conteggio<br>delle bloccate (premium.lockedCount)<br>+ le proprie recensioni in chiaro"]:::ui
+    TEAS --> PREML["PremiumLockedBox — invito a #/premium<br>foto: 403 per non Premium"]:::blocco
+    PREML --> PREM["#/premium — il Premium si guadagna:<br>recensioni (grant 30 gg), admin, seed<br>premiumUntil = scadenza più alta dei grant"]:::esito
+
+    %% ═══ VOTI COMMUNITY (FASE 3) ═══
+    VOTE{"Può votare le recensioni?<br>solo Premium o staff"}:::bivio
+    SCH --> VOTE
+    VOTE -->|"sì"| VOK["pollice su/giù — POST /api/reviews/[id]/vote<br>mai sulla propria · click ripetuto = rimuovi<br>UNIQUE (recensione, utente)"]:::esito
+    VOTE -->|"no"| VNO["votazione disattivata / nascosta"]:::ui
+
+    %% ═══ AZIONI DALLA SCHEDA ═══
+    ZON["#/zona/[id] — top 3 per categoria<br>nella città"]:::ui
+    SEGN["Segnala (ReportModal)<br>POST /api/reports — 8 motivi,<br>solo utenti registrati"]:::ui
+    DISP["Contesta associazione (DisputeModal)<br>POST /api/disputes — anche anonima"]:::ui
+    CTAR["CTA «Scrivi una recensione»<br>→ #/recensione?entity=[id] (D2)"]:::ui
+    SCH --> ZON
+    SCH --> SEGN
+    SCH --> DISP
+    SCH --> CTAR
+
+    classDef ui fill:#EFF6FF,stroke:#3B82F6,stroke-width:1.5px,color:#1E293B
+    classDef dati fill:#F8FAFC,stroke:#64748B,stroke-width:1.5px,color:#1E293B
+    classDef esito fill:#D1FAE5,stroke:#059669,stroke-width:1.5px,color:#1E293B
+    classDef blocco fill:#FEF2F2,stroke:#EF4444,stroke-width:1.5px,color:#1E293B
+    classDef bivio fill:#FFF7ED,stroke:#F59E0B,stroke-width:2px,color:#1E293B
+    style PUBB fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px

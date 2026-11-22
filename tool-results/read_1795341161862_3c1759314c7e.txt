@@ -1,0 +1,479 @@
+    40→    40→        await db.report.update({ where: { id: rep.id }, data: { status: "reviewing" } });
+    41→    41→        await db.reportDecision.create({ data: { reportId: rep.id, byId: actor.id, action: "Presa in carico", reason: reason || "In valutazione da parte della moderazione." } });
+    42→    42→        return NextResponse.json({ ok: true });
+    43→    43→      }
+    44→    44→      case "report.decide": {
+    45→    45→        const actor = await requireStaff("mod.reports");
+    46→    46→        if (reason.length < 15) return fail("Motivazione obbligatoria (almeno 15 caratteri).");
+    47→    47→        const rep = await db.report.findUnique({ where: { id: p.id }, include: { review: true } });
+    48→    48→        if (!rep || !["reviewing", "received"].includes(rep.status)) return fail("Segnalazione non decidibile.", 409);
+    49→    49→        const decision = p.decision === "hide" ? "hide" : "keep";
+    50→    50→        if (decision === "hide" && rep.review) {
+    51→    51→          if (rep.review.status !== "published") return fail("La recensione non è pubblicata.", 409);
+    52→    52→          await db.review.update({ where: { id: rep.review.id }, data: { status: "hidden", hiddenReason: reason } });
+    53→    53→          // frode accertata o contenuto illecito: il Premium ottenuto con quel
+    54→    54→          // contributo viene revocato e ricalcolato (adattamento del modello
+    55→    55→          // "rimuovi recensione e vantaggio" alla filosofia ZoomZoom)
+    56→    56→          await revokePremiumForReview(rep.review.id, `Recensione nascosta dalla moderazione: ${reason}`);
+    57→    57→        }
+    58→    58→        await db.report.update({ where: { id: rep.id }, data: { status: "decided", decision } });
+    59→    59→        await db.reportDecision.create({
+    60→    60→          data: { reportId: rep.id, byId: actor.id, action: decision === "hide" ? "Recensione nascosta" : "Nessuna azione: recensione mantenuta", reason },
+    61→    61→        });
+    62→    62→        await auditLog({ actorId: actor.id, actorRole: actor.role, action: decision === "hide" ? "Recensione nascosta" : "Segnalazione respinta", targetType: "review", targetId: rep.targetId, reason, isDemo: rep.isDemo });
+    63→    63→        if (rep.review) {
+    64→    64→          const author = await db.user.findUnique({ where: { id: rep.review.userId } });
+    65→    65→          if (author) {
+    66→    66→            await sendMail(author.email, "La tua recensione è stata nascosta",
+    67→    67→              `La moderazione ha nascosto la recensione con questa motivazione: ${reason} Puoi presentare appello entro 15 giorni.`);
+    68→    68→          }
+    69→    69→        }
+    70→    70→        return NextResponse.json({ ok: true });
+    71→    71→      }
+    72→    72→      case "report.appeal": {
+    73→    73→        // appello presentato dall'autore o dal segnalatore (dal sito pubblico, ma gestito qui per tracciabilità)
+    74→    74→        const actor = await requireStaff(); // placeholder: gli appelli arrivano da /api/reports/appeal
+    75→    75→        return fail("Usare la rotta dedicata per gli appelli.", 400);
+    76→    76→      }
+    77→    77→
+    78→    78→      /* ---- moderazione recensioni ---- */
+    79→    79→      case "review.hide": {
+    80→    80→        const actor = await requireStaff("mod.reviews");
+    81→    81→        if (reason.length < 15) return fail("Motivo obbligatorio (almeno 15 caratteri).");
+    82→    82→        const rev = await db.review.findUnique({ where: { id: p.id } });
+    83→    83→        if (!rev || rev.status !== "published") return fail("Recensione non pubblicata.", 409);
+    84→    84→        await db.review.update({ where: { id: rev.id }, data: { status: "hidden", hiddenReason: reason } });
+    85→    85→        await revokePremiumForReview(rev.id, `Recensione nascosta dalla moderazione: ${reason}`);
+    86→    86→        await auditLog({ actorId: actor.id, actorRole: actor.role, action: "Recensione nascosta", targetType: "review", targetId: rev.id, reason, isDemo: rev.isDemo });
+    87→    87→        const author = await db.user.findUnique({ where: { id: rev.userId } });
+    88→    88→        if (author) {
+    89→    89→          await sendMail(author.email, "La tua recensione è stata nascosta",
+    90→    90→            `La moderazione ha nascosto la recensione con questa motivazione: ${reason} Puoi presentare appello entro 15 giorni.`);
+    91→    91→        }
+    92→    92→        return NextResponse.json({ ok: true });
+    93→    93→      }
+    94→    94→      case "review.restore": {
+    95→    95→        const actor = await requireStaff("mod.reviews");
+    96→    96→        const rev = await db.review.findUnique({ where: { id: p.id } });
+    97→    97→        if (!rev || rev.status !== "hidden") return fail("Recensione non nascosta.", 409);
+    98→    98→        await db.review.update({ where: { id: rev.id }, data: { status: "published", hiddenReason: null } });
+    99→    99→        // appello accolto: il contributo torna valido e il Premium viene ripristinato
+   100→   100→        await restorePremiumForReview(rev.id);
+   101→   101→        await auditLog({ actorId: actor.id, actorRole: actor.role, action: "Recensione ripristinata", targetType: "review", targetId: rev.id, reason: reason || "Ripristino a seguito di riesame.", isDemo: rev.isDemo });
+   102→   102→        return NextResponse.json({ ok: true });
+   103→   103→      }
+   104→   104→      case "photo.remove": {
+   105→   105→        // rimozione di una singola foto (privacy/illiceità): la recensione resta
+   106→   106→        const actor = await requireStaff("mod.reviews");
+   107→   107→        if (reason.length < 15) return fail("Motivo obbligatorio (almeno 15 caratteri).");
+   108→   108→        const photo = await db.reviewPhoto.findUnique({ where: { id: p.id }, include: { review: { select: { id: true, userId: true, isDemo: true } } } });
+   109→   109→        if (!photo) return fail("Foto non trovata.", 404);
+   110→   110→        await db.reviewPhoto.delete({ where: { id: photo.id } });
+   111→   111→        await auditLog({ actorId: actor.id, actorRole: actor.role, action: "Foto rimossa dalla recensione", targetType: "review", targetId: photo.review.id, reason, isDemo: photo.review.isDemo });
+   112→   112→        const author = await db.user.findUnique({ where: { id: photo.review.userId } });
+   113→   113→        if (author) {
+   114→   114→          await sendMail(author.email, "Una tua foto è stata rimossa",
+   115→   115→            `La moderazione ha rimosso una foto allegata a una tua recensione con questa motivazione: ${reason}`);
+   116→   116→        }
+   117→   117→        return NextResponse.json({ ok: true });
+   118→   118→      }
+   119→   119→
+   120→   120→      /* ---- contestazioni associazione ---- */
+   121→   121→      case "dispute.take": {
+   122→   122→        const actor = await requireStaff("mod.disputes");
+   123→   123→        const d = await db.dispute.findUnique({ where: { id: p.id } });
+   124→   124→        if (!d || d.status !== "received") return fail("Contestazione non disponibile.", 409);
+   125→   125→        await db.dispute.update({ where: { id: d.id }, data: { status: "reviewing" } });
+   126→   126→        await db.disputeDecision.create({ data: { disputeId: d.id, byId: actor.id, action: "Presa in carico", reason: reason || "In valutazione." } });
+   127→   127→        return NextResponse.json({ ok: true });
+   128→   128→      }
+   129→   129→      case "dispute.decide": {
+   130→   130→        const actor = await requireStaff("mod.disputes");
+   131→   131→        if (reason.length < 15) return fail("Motivazione obbligatoria (almeno 15 caratteri).");
+   132→   132→        const d = await db.dispute.findUnique({ where: { id: p.id }, include: { entity: true } });
+   133→   133→        if (!d || !["received", "reviewing"].includes(d.status)) return fail("Contestazione non decidibile.", 409);
+   134→   134→        const decision = p.decision === "hide" ? "hide" : "keep";
+   135→   135→        if (decision === "hide") {
+   136→   136→          // sospende la visibilità della scheda come provvedimento motivato (non cancellazione)
+   137→   137→          await db.entity.update({ where: { id: d.entityId }, data: { status: "rejected" } });
+   138→   138→        }
+   139→   139→        await db.dispute.update({ where: { id: d.id }, data: { status: "closed", decision } });
+   140→   140→        await db.disputeDecision.create({
+   141→   141→          data: { disputeId: d.id, byId: actor.id, action: decision === "hide" ? "Scheda sospesa per correzione" : "Associazione mantenuta", reason },
+   142→   142→        });
+   143→   143→        await auditLog({ actorId: actor.id, actorRole: actor.role, action: decision === "hide" ? "Scheda sospesa su contestazione" : "Contestazione respinta", targetType: "entity", targetId: d.entityId, reason, isDemo: d.isDemo });
+   144→   144→        await sendMail(d.claimantEmail, "Esito della contestazione",
+   145→   145→          `La tua contestazione sulla scheda "${d.entity.name}" è stata valutata: ${decision === "hide" ? "la scheda è stata sospesa per correzione" : "l'associazione è stata mantenuta"}. Motivazione: ${reason}`);
+   146→   146→        return NextResponse.json({ ok: true });
+   147→   147→      }
+   148→   148→
+   149→   149→      /* ---- esperienze e verifiche ---- */
+   150→   150→      case "experience.approve": {
+   151→   151→        const actor = await requireStaff("mod.experiences");
+   152→   152→        const e = await db.experience.findUnique({ where: { id: p.id }, include: { entity: true, requester: true, docs: true } });
+   153→   153→        if (!e || e.status !== "pending") return fail("Richiesta non disponibile.", 409);
+   154→   154→        const isRequest = e.origin === "verification-request";
+   155→   155→        if (isRequest && !e.requester) return fail("Richiedente non trovato.", 409);
+   156→   156→        await db.$transaction(async (tx) => {
+   157→   157→          await tx.experience.update({
+   158→   158→            where: { id: e.id },
+   159→   159→            data: isRequest ? { status: "active", userId: e.requester!.id, claimedAt: new Date() } : { status: "active" },
+   160→   160→          });
+   161→   161→          // cancellazione documenti dopo la decisione (retention)
+   162→   162→          for (const d of e.docs) {
+   163→   163→            if (!d.deletedAt) await tx.verificationDoc.update({ where: { id: d.id }, data: { deletedAt: new Date() } });
+   164→   164→          }
+   165→   165→        });
+   166→   166→        await auditLog({ actorId: actor.id, actorRole: actor.role, action: "Esperienza verificata e approvata", targetType: "experience", targetId: e.id, reason: reason || "Documento ritenuto sufficiente.", isDemo: e.isDemo });
+   167→   167→        if (e.requester) {
+   168→   168→          const base = process.env.APP_BASE_URL || "";
+   169→   169→          await sendMail(e.requester.email, "Esperienza approvata: puoi recensire",
+   170→   170→            `La tua esperienza con ${e.entity.name} è stata verificata: ora puoi pubblicare la tua recensione.`,
+   171→   171→            [{ label: "Scrivi la recensione", href: `${base}/#/scrivi/${e.id}` }]);
+   172→   172→        }
+   173→   173→        return NextResponse.json({ ok: true });
+   174→   174→      }
+   175→   175→      case "experience.reject": {
+   176→   176→        const actor = await requireStaff("mod.experiences");
+   177→   177→        if (reason.length < 15) return fail("Motivo (comunicato all'utente) obbligatorio.");
+   178→   178→        const e = await db.experience.findUnique({ where: { id: p.id }, include: { entity: true, requester: true, docs: true } });
+   179→   179→        if (!e || e.status !== "pending") return fail("Richiesta non disponibile.", 409);
+   180→   180→        await db.$transaction(async (tx) => {
+   181→   181→          await tx.experience.update({ where: { id: e.id }, data: { status: "rejected" } });
+   182→   182→          for (const d of e.docs) {
+   183→   183→            if (!d.deletedAt) await tx.verificationDoc.update({ where: { id: d.id }, data: { deletedAt: new Date() } });
+   184→   184→          }
+   185→   185→        });
+   186→   186→        await auditLog({ actorId: actor.id, actorRole: actor.role, action: "Verifica esperienza rigettata", targetType: "experience", targetId: e.id, reason, isDemo: e.isDemo });
+   187→   187→        if (e.requester) {
+   188→   188→          await sendMail(e.requester.email, "Verifica esperienza non approvata",
+   189→   189→            `La richiesta relativa a ${e.entity.name} non è stata approvata. Motivo: ${reason}`);
+   190→   190→        }
+   191→   191→        return NextResponse.json({ ok: true });
+   192→   192→      }
+   193→   193→
+   194→   194→      /* ---- inviti ---- */
+   195→   195→      case "invite.revoke": {
+   196→   196→        const actor = await requireStaff("admin.invites");
+   197→   197→        const inv = await db.invite.findUnique({ where: { id: p.id } });
+   198→   198→        if (!inv || inv.usedAt || inv.revoked) return fail("Invito non revocabile.", 409);
+   199→   199→        await db.invite.update({ where: { id: inv.id }, data: { revoked: true } });
+   200→   200→        await auditLog({ actorId: actor.id, actorRole: actor.role, action: "Invito revocato", targetType: "invite", targetId: inv.id, reason: reason || "Revoca amministrativa.", isDemo: inv.isDemo });
+   201→   201→        await securityLog("invite_revoked", "info", "Invito revocato dall'area amministrativa.", inv.isDemo);
+   202→   202→        return NextResponse.json({ ok: true });
+   203→   203→      }
+   204→   204→
+   205→   205→      /* ---- utenti ---- */
+   206→   206→      case "user.toggle": {
+   207→   207→        const actor = await requireStaff("admin.users");
+   208→   208→        const u = await db.user.findUnique({ where: { id: p.id } });
+   209→   209→        if (!u) return fail("Utente non trovato.", 404);
+   210→   210→        if (u.id === actor.id) return fail("Non puoi sospendere il tuo account.", 400);
+   211→   211→        if (["moderator", "admin", "superadmin"].includes(u.role) && actor.role !== "superadmin") {
+   212→   212→          return fail("I ruoli dello staff sono gestibili solo dal super amministratore.", 403);
+   213→   213→        }
+   214→   214→        await db.user.update({ where: { id: u.id }, data: { disabled: !u.disabled } });
+   215→   215→        await db.session.deleteMany({ where: { userId: u.id } });
+   216→   216→        await auditLog({ actorId: actor.id, actorRole: actor.role, action: u.disabled ? "Account riattivato" : "Account sospeso", targetType: "user", targetId: u.id, reason: reason || (u.disabled ? "Riattivazione." : "Sospensione per violazioni o indagini su abusi."), isDemo: u.isDemo });
+   217→   217→        return NextResponse.json({ ok: true });
+   218→   218→      }
+   219→   219→      case "user.forceLogout": {
+   220→   220→        const actor = await requireStaff("admin.users");
+   221→   221→        const u = await db.user.findUnique({ where: { id: p.id } });
+   222→   222→        if (!u) return fail("Utente non trovato.", 404);
+   223→   223→        if (u.id === actor.id) return fail("Impossibile forzare l'uscita di te stesso.", 400);
+   224→   224→        await db.session.deleteMany({ where: { userId: u.id } });
+   225→   225→        await auditLog({ actorId: actor.id, actorRole: actor.role, action: "Uscita forzata sessione", targetType: "user", targetId: u.id, reason: reason || "Chiusura sessione per sicurezza.", isDemo: u.isDemo });
+   226→   226→        return NextResponse.json({ ok: true });
+   227→   227→      }
+   228→   228→      /* ---- Membership Premium ---- */
+   229→   229→      case "premium.grant": {
+   230→   230→        const actor = await requireStaff("admin.users");
+   231→   231→        const days = Math.min(365, Math.max(1, Math.round(Number(p.days) || 0)));
+   232→   232→        if (!days) return fail("Giorni non validi (1-365).");
+   233→   233→        if (reason.length < 10) return fail("Motivazione obbligatoria (almeno 10 caratteri).");
+   234→   234→        const u = await db.user.findUnique({ where: { id: p.id } });
+   235→   235→        if (!u) return fail("Utente non trovato.", 404);
+   236→   236→        const res = await grantPremiumManually({ userId: u.id, days, reason });
+   237→   237→        await auditLog({ actorId: actor.id, actorRole: actor.role, action: `Premium concesso manualmente: ${res.grantedDays} giorni`, targetType: "user", targetId: u.id, reason, isDemo: u.isDemo });
+   238→   238→        await sendMail(u.email, "Membership Premium attiva",
+   239→   239→          `Hai ricevuto ${res.grantedDays} giorni di Membership Premium. Motivazione: ${reason}`);
+   240→   240→        return NextResponse.json({ ok: true, premium: { until: res.until ? res.until.toISOString() : null } });
+   241→   241→      }
+   242→   242→      case "premium.revoke": {
+   243→   243→        const actor = await requireStaff("admin.users");
+   244→   244→        if (reason.length < 15) return fail("Motivazione obbligatoria (almeno 15 caratteri).");
+   245→   245→        const u = await db.user.findUnique({ where: { id: p.id } });
+   246→   246→        if (!u) return fail("Utente non trovato.", 404);
+   247→   247→        const n = await revokeAllPremium(u.id, reason);
+   248→   248→        await auditLog({ actorId: actor.id, actorRole: actor.role, action: `Premium revocato (${n} concessioni)`, targetType: "user", targetId: u.id, reason, isDemo: u.isDemo });
+   249→   249→        return NextResponse.json({ ok: true, revoked: n });
+   250→   250→      }
+   251→   251→
+   252→   252→      case "privacy.done": {
+   253→   253→        const actor = await requireStaff("admin.users");
+   254→   254→        const pr = await db.privacyRequest.findUnique({ where: { id: p.id } });
+   255→   255→        if (!pr) return fail("Richiesta non trovata.", 404);
+   256→   256→        await db.privacyRequest.update({ where: { id: pr.id }, data: { status: "done" } });
+   257→   257→        await auditLog({ actorId: actor.id, actorRole: actor.role, action: "Richiesta privacy evasa", targetType: "privacy_request", targetId: pr.id, reason: reason || null });
+   258→   258→        return NextResponse.json({ ok: true });
+   259→   259→      }
+   260→   260→
+   261→   261→      /* ---- schede e proposte ---- */
+   262→   262→      case "proposal.approve": {
+   263→   263→        const actor = await requireStaff("admin.entities");
+   264→   264→        if (reason.length < 10) return fail("Motivazione della decisione obbligatoria (almeno 10 caratteri).");
+   265→   265→        const prop = await db.entityProposal.findUnique({ where: { id: p.id }, include: { category: true } });
+   266→   266→        if (!prop || prop.status !== "received") return fail("Proposta non disponibile.", 409);
+   267→   267→        const isPerson = prop.category.isPerson;
+   268→   268→        const initials = initialsFrom(prop.name);
+   269→   269→        const geo = isPerson ? null : p.geo as { lat: number; lng: number } | undefined;
+   270→   270→        const ent = await db.entity.create({
+   271→   271→          data: {
+   272→   272→            categoryId: prop.categoryId,
+   273→   273→            name: isPerson ? initials : prop.name,
+   274→   274→            subtitle: prop.subtitle, address: isPerson ? null : prop.address,
+   275→   275→            zoneId: prop.zoneId, geoLat: geo?.lat ?? null, geoLng: geo?.lng ?? null,
+   276→   276→            initialsOnly: isPerson, verifiedBusiness: false,
+   277→   277→            status: "published", proposedBy: prop.proposedById || "proposal", isDemo: prop.isDemo,
+   278→   278→          },
+   279→   279→        });
+   280→   280→        await db.entityProposal.update({
+   281→   281→          where: { id: prop.id },
+   282→   282→          data: { status: "approved", decisionReason: reason, decidedById: actor.id, decidedAt: new Date() },
+   283→   283→        });
+   284→   284→        await auditLog({ actorId: actor.id, actorRole: actor.role, action: "Proposta di scheda approvata", targetType: "entity", targetId: ent.id, reason, isDemo: prop.isDemo });
+   285→   285→        return NextResponse.json({ ok: true, entityId: ent.id });
+   286→   286→      }
+   287→   287→      case "proposal.reject": {
+   288→   288→        const actor = await requireStaff("admin.entities");
+   289→   289→        if (reason.length < 10) return fail("Motivazione della decisione obbligatoria (almeno 10 caratteri).");
+   290→   290→        const prop = await db.entityProposal.findUnique({ where: { id: p.id } });
+   291→   291→        if (!prop || prop.status !== "received") return fail("Proposta non disponibile.", 409);
+   292→   292→        await db.entityProposal.update({
+   293→   293→          where: { id: prop.id },
+   294→   294→          data: { status: "rejected", decisionReason: reason, decidedById: actor.id, decidedAt: new Date() },
+   295→   295→        });
+   296→   296→        await auditLog({ actorId: actor.id, actorRole: actor.role, action: "Proposta di scheda respinta", targetType: "entity_proposal", targetId: prop.id, reason, isDemo: prop.isDemo });
+   297→   297→        return NextResponse.json({ ok: true });
+   298→   298→      }
+   299→   299→      case "entity.toggle": {
+   300→   300→        const actor = await requireStaff("admin.entities");
+   301→   301→        const ent = await db.entity.findUnique({ where: { id: p.id } });
+   302→   302→        if (!ent) return fail("Scheda non trovata.", 404);
+   303→   303→        const next = ent.status === "published" ? "hidden" : "published";
+   304→   304→        await db.entity.update({ where: { id: ent.id }, data: { status: next } });
+   305→   305→        await auditLog({ actorId: actor.id, actorRole: actor.role, action: next === "published" ? "Scheda pubblicata" : "Scheda nascosta", targetType: "entity", targetId: ent.id, reason: reason || null, isDemo: ent.isDemo });
+   306→   306→        return NextResponse.json({ ok: true });
+   307→   307→      }
+   308→   308→
+   309→   309→      /* ---- Consulenti tecnici: iscrizioni ---- */
+   310→   310→      case "consultant.approve": {
+   311→   311→        const actor = await requireStaff("admin.entities");
+   312→   312→        const prof = await db.consultantProfile.findUnique({
+   313→   313→          where: { id: p.id },
+   314→   314→          include: { zone: true, user: { select: { id: true, totpEnabled: true, isDemo: true } } },
+   315→   315→        });
+   316→   316→        if (!prof || prof.status !== "pending") return fail("Domanda di iscrizione non disponibile.", 409);
+   317→   317→        // l'accesso del consulente è protetto da 2FA: garantita all'iscrizione
+   318→   318→        // e ricontrollata qui, prima di pubblicare la scheda
+   319→   319→        if (!prof.user.totpEnabled) {
+   320→   320→          return fail("L'account non ha più la 2FA attiva: l'approvazione richiede la verifica in due passaggi. Contatta l'iscritto prima di procedere.", 409);
+   321→   321→        }
+   322→   322→        const displayName = `${prof.firstName} ${prof.lastName}`;
+   323→   323→        const subtitle = `${prof.profession}${prof.zone.province ? ` · ${prof.zone.name} (${prof.zone.province})` : ` · ${prof.zone.name}`}`;
+   324→   324→        // scheda pubblica nel catalogo (categoria "consulente"): creata ora o
+   325→   325→        // aggiornata se era già stata creata in un ciclo precedente
+   326→   326→        let entityId = prof.entityId;
+   327→   327→        if (entityId) {
+   328→   328→          await db.entity.update({
+   329→   329→            where: { id: entityId },
+   330→   330→            data: { name: displayName, subtitle, zoneId: prof.zoneId, status: "published" },
+   331→   331→          });
+   332→   332→        } else {
+   333→   333→          const ent = await db.entity.create({
+   334→   334→            data: {
+   335→   335→              categoryId: "consulente",
+   336→   336→              name: displayName,
+   337→   337→              subtitle,
+   338→   338→              zoneId: prof.zoneId,
+   339→   339→              initialsOnly: false,
+   340→   340→              verifiedBusiness: true,
+   341→   341→              status: "published",
+   342→   342→              proposedBy: `user:${prof.userId}`,
+   343→   343→              ownerUserId: prof.userId,
+   344→   344→              isDemo: prof.user.isDemo,
+   345→   345→            },
+   346→   346→          });
+   347→   347→          entityId = ent.id;
+   348→   348→        }
+   349→   349→        await db.consultantProfile.update({
+   350→   350→          where: { id: prof.id },
+   351→   351→          data: { status: "approved", rejectReason: null, reviewedById: actor.id, reviewedAt: new Date(), entityId },
+   352→   352→        });
+   353→   353→        await auditLog({ actorId: actor.id, actorRole: actor.role, action: "Iscrizione consulente approvata", targetType: "consultantProfile", targetId: prof.id, reason: reason || null });
+   354→   354→        return NextResponse.json({ ok: true, entityId });
+   355→   355→      }
+   356→   356→      case "consultant.reject": {
+   357→   357→        const actor = await requireStaff("admin.entities");
+   358→   358→        if (reason.length < 10) return fail("Motivazione della decisione obbligatoria (almeno 10 caratteri).");
+   359→   359→        const prof = await db.consultantProfile.findUnique({ where: { id: p.id } });
+   360→   360→        if (!prof || prof.status !== "pending") return fail("Domanda di iscrizione non disponibile.", 409);
+   361→   361→        // la scheda pubblica (se esiste da un ciclo precedente) viene nascosta
+   362→   362→        if (prof.entityId) {
+   363→   363→          await db.entity.update({ where: { id: prof.entityId }, data: { status: "hidden" } }).catch(() => {});
+   364→   364→        }
+   365→   365→        await db.consultantProfile.update({
+   366→   366→          where: { id: prof.id },
+   367→   367→          data: { status: "rejected", rejectReason: reason, reviewedById: actor.id, reviewedAt: new Date() },
+   368→   368→        });
+   369→   369→        await auditLog({ actorId: actor.id, actorRole: actor.role, action: "Iscrizione consulente respinta", targetType: "consultantProfile", targetId: prof.id, reason });
+   370→   370→        return NextResponse.json({ ok: true });
+   371→   371→      }
+   372→   372→      case "consultant.ibanConfirm":
+   373→   373→      case "consultant.ibanMismatch": {
+   374→   374→        // verifica dell'intestazione dell'IBAN: conferma manuale dello staff
+   375→   375→        // (il richiamo al servizio esterno, se configurato, avviene alla
+   376→   376→        // presentazione della domanda)
+   377→   377→        const actor = await requireStaff("admin.entities");
+   378→   378→        const prof = await db.consultantProfile.findUnique({ where: { id: p.id } });
+   379→   379→        if (!prof) return fail("Profilo consulente non trovato.", 404);
+   380→   380→        const next = p.action === "consultant.ibanConfirm" ? "confirmed" : "mismatch";
+   381→   381→        await db.consultantProfile.update({
+   382→   382→          where: { id: prof.id },
+   383→   383→          data: { ibanCheck: next, ibanCheckedAt: new Date() },
+   384→   384→        });
+   385→   385→        await auditLog({
+   386→   386→          actorId: actor.id, actorRole: actor.role,
+   387→   387→          action: next === "confirmed" ? "IBAN consulente verificato" : "Discordanza IBAN consulente segnalata",
+   388→   388→          targetType: "consultantProfile", targetId: prof.id, reason: reason || null,
+   389→   389→        });
+   390→   390→        return NextResponse.json({ ok: true, ibanCheck: next });
+   391→   391→      }
+   392→   392→
+   393→   393→      /* ---- contenuti e impostazioni ---- */
+   394→   394→      case "contents.update": {
+   395→   395→        const actor = await requireStaff("admin.contents");
+   396→   396→        const s = p.settings || {};
+   397→   397→        const patch: Record<string, unknown> = {};
+   398→   398→        if (typeof s.siteName === "string" && s.siteName.trim()) patch.siteName = s.siteName.trim().slice(0, 40);
+   399→   399→        if (typeof s.heroTitle === "string") patch.heroTitle = s.heroTitle.slice(0, 200);
+   400→   400→        if (typeof s.heroSub === "string") patch.heroSub = s.heroSub.slice(0, 400);
+   401→   401→        if (typeof s.globalNotice === "string") patch.globalNotice = s.globalNotice.slice(0, 300);
+   402→   402→        if (typeof s.adsEnabled === "boolean") patch.adsEnabled = s.adsEnabled;
+   403→   403→        if (typeof s.adsClient === "string") patch.adsClient = s.adsClient.trim().slice(0, 40);
+   404→   404→        const settings = await updateSettings(patch);
+   405→   405→        await auditLog({ actorId: actor.id, actorRole: actor.role, action: "Contenuti aggiornati", targetType: "settings", targetId: "contents", reason: reason || null });
+   406→   406→        return NextResponse.json({ ok: true, settings });
+   407→   407→      }
+   408→   408→      case "settings.update": {
+   409→   409→        const actor = await requireStaff("admin.settings");
+   410→   410→        const s = p.settings || {};
+   411→   411→        const patch: Record<string, unknown> = {};
+   412→   412→        const num = (v: unknown, min: number, max: number) => {
+   413→   413→          const n = Number(v);
+   414→   414→          return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : undefined;
+   415→   415→        };
+   416→   416→        const mr = num(s.minReviews, 1, 50); if (mr != null) patch.minReviews = mr;
+   417→   417→        const rd = num(s.rettificaDays, 1, 365); if (rd != null) patch.rettificaDays = rd;
+   418→   418→        const idc = num(s.inviteDailyCap, 1, 200); if (idc != null) patch.inviteDailyCap = idc;
+   419→   419→        const iaa = num(s.inviteApprovalAbove, 1, 500); if (iaa != null) patch.inviteApprovalAbove = iaa;
+   420→   420→        const ied = num(s.inviteExpiryDays, 1, 90); if (ied != null) patch.inviteExpiryDays = ied;
+   421→   421→        const prd = num(s.proofRetentionDays, 1, 365); if (prd != null) patch.proofRetentionDays = prd;
+   422→   422→        const mma = num(s.mapMinAggregate, 1, 50); if (mma != null) patch.mapMinAggregate = mma;
+   423→   423→        const pdpr = num(s.premiumDaysPerReview, 0, 365); if (pdpr != null) patch.premiumDaysPerReview = pdpr;
+   424→   424→        const pmd = num(s.premiumMaxDays, 1, 3650); if (pmd != null) patch.premiumMaxDays = pmd;
+   425→   425→        const orpd = num(s.openReviewsPerDay, 1, 50); if (orpd != null) patch.openReviewsPerDay = orpd;
+   426→   426→        if (typeof s.premiumEnabled === "boolean") patch.premiumEnabled = s.premiumEnabled;
+   427→   427→        if (typeof s.openReviewsEnabled === "boolean") patch.openReviewsEnabled = s.openReviewsEnabled;
+   428→   428→        if (typeof s.photosEnabled === "boolean") patch.photosEnabled = s.photosEnabled;
+   429→   429→        if (typeof s.votesEnabled === "boolean") patch.votesEnabled = s.votesEnabled;
+   430→   430→        if (typeof s.consulentiEnabled === "boolean") patch.consulentiEnabled = s.consulentiEnabled;
+   431→   431→        if (typeof s.platformIban === "string") patch.platformIban = s.platformIban.trim().toUpperCase().replace(/\s+/g, "").slice(0, 40);
+   432→   432→        if (typeof s.paymentInstructions === "string") patch.paymentInstructions = s.paymentInstructions.trim().slice(0, 600);
+   433→   433→        if (typeof s.adsEnabled === "boolean") patch.adsEnabled = s.adsEnabled;
+   434→   434→        if (typeof s.adsClient === "string") patch.adsClient = s.adsClient.trim().slice(0, 40);
+   435→   435→        const settings = await updateSettings(patch);
+   436→   436→        await auditLog({ actorId: actor.id, actorRole: actor.role, action: "Impostazione aggiornata", targetType: "settings", targetId: Object.keys(patch).join(","), reason: reason || null });
+   437→   437→        return NextResponse.json({ ok: true, settings });
+   438→   438→      }
+   439→   439→
+   440→   440→      /* ---- ruoli (solo superadmin) ---- */
+   441→   441→      case "role.set": {
+   442→   442→        const actor = await requireStaff("admin.roles");
+   443→   443→        const u = await db.user.findUnique({ where: { id: p.id } });
+   444→   444→        if (!u) return fail("Utente non trovato.", 404);
+   445→   445→        if (u.id === actor.id) return fail("Non puoi cambiare il tuo ruolo.", 400);
+   446→   446→        const newRole = String(p.role);
+   447→   447→        if (!["user", "moderator", "admin", "superadmin"].includes(newRole)) return fail("Ruolo non valido.");
+   448→   448→        // promozione a staff concessa solo se la 2FA è attiva (obbligatoria per il back office)
+   449→   449→        if (["moderator", "admin", "superadmin"].includes(newRole) && !u.totpEnabled) {
+   450→   450→          return fail("L'account deve avere la 2FA attiva prima di poter ricevere un ruolo di back office.", 409);
+   451→   451→        }
+   452→   452→        await db.user.update({ where: { id: u.id }, data: { role: newRole } });
+   453→   453→        if (newRole === "user") await db.session.deleteMany({ where: { userId: u.id, kind: "admin" } });
+   454→   454→        await auditLog({ actorId: actor.id, actorRole: actor.role, action: `Ruolo impostato: ${newRole}`, targetType: "user", targetId: u.id, reason: reason || null, isDemo: u.isDemo });
+   455→   455→        return NextResponse.json({ ok: true });
+   456→   456→      }
+   457→   457→
+   458→   458→      /* ---- dati demo (solo superadmin, solo DEMO_MODE) ---- */
+   459→   459→      case "demo.wipe": {
+   460→   460→        const actor = await requireStaff("admin.demo");
+   461→   461→        if (process.env.DEMO_MODE !== "true") return fail("Operazione disponibile solo in modalità demo.", 403);
+   462→   462→        await wipeDemoData();
+   463→   463→        await auditLog({ actorId: actor.id, actorRole: actor.role, action: "Dati demo eliminati", targetType: "demo", targetId: "all", reason: reason || "Pulizia dati dimostrativi." });
+   464→   464→        return NextResponse.json({ ok: true });
+   465→   465→      }
+   466→   466→      case "demo.reseed": {
+   467→   467→        const actor = await requireStaff("admin.demo");
+   468→   468→        if (process.env.DEMO_MODE !== "true") return fail("Operazione disponibile solo in modalità demo.", 403);
+   469→   469→        await wipeDemoData();
+   470→   470→        await new Promise<void>((resolve, reject) => {
+   471→   471→          const child = spawn("bun", ["scripts/seed.ts"], { cwd: process.cwd() });
+   472→   472→          child.on("close", code => code === 0 ? resolve() : reject(new Error("seed fallito")));
+   473→   473→          child.on("error", reject);
+   474→   474→        });
+   475→   475→        await auditLog({ actorId: actor.id, actorRole: actor.role, action: "Dati demo rigenerati", targetType: "demo", targetId: "all", reason: reason || "Rigenerazione dati dimostrativi." });
+   476→   476→        return NextResponse.json({ ok: true });
+   477→   477→      }
+   478→   478→
+   479→   479→      default:
+   480→   480→        return fail("Azione non riconosciuta.", 404);
+   481→   481→    }
+   482→   482→  } catch (e) {
+   483→   483→    return handleError(e);
+   484→   484→  }
+   485→   485→}
+   486→   486→
+   487→   487→function initialsFrom(name: string): string {
+   488→   488→  const w = String(name).trim().split(/\s+/);
+   489→   489→  return w.length >= 2 ? `${w[0][0].toUpperCase()}. ${w[1][0].toUpperCase()}.` : `${w[0][0].toUpperCase()}.`;
+   490→   490→}
+   491→   491→
+   492→   492→async function wipeDemoData() {
+   493→   493→  const demoUsers = await db.user.findMany({ where: { isDemo: true }, select: { id: true } });
+   494→   494→  const ids = demoUsers.map(u => u.id);
+   495→   495→  if (ids.length) {
+   496→   496→    await db.auditLog.deleteMany({ where: { actorId: { in: ids } } });
+   497→   497→    await db.consent.deleteMany({ where: { userId: { in: ids } } });
+   498→   498→    await db.privacyRequest.deleteMany({ where: { userId: { in: ids } } });
+   499→   499→    await db.session.deleteMany({ where: { userId: { in: ids } } });
+   500→   500→    await db.backupCode.deleteMany({ where: { userId: { in: ids } } });
+   501→   501→    await db.emailVerifyToken.deleteMany({ where: { userId: { in: ids } } });
+   502→   502→  }
+   503→   503→  await db.entityProposal.deleteMany({ where: { isDemo: true } });
+   504→   504→  // foto e voti delle recensioni demo (il resto va a cascata con entità e utenti)
+   505→   505→  await db.reviewPhoto.deleteMany({ where: { isDemo: true } });
+   506→   506→  await db.reviewVote.deleteMany({ where: { review: { isDemo: true } } });
+   507→   507→  await db.entity.deleteMany({ where: { isDemo: true } });
+   508→   508→  await db.experience.deleteMany({ where: { isDemo: true } });
+   509→   509→  await db.invite.deleteMany({ where: { isDemo: true } });
+   510→   510→  await db.report.deleteMany({ where: { isDemo: true } });
+   511→   511→  await db.dispute.deleteMany({ where: { isDemo: true } });
+   512→   512→  await db.emailLog.deleteMany({ where: { isDemo: true } });
+   513→   513→  await db.zone.deleteMany({ where: { isDemo: true } });
+   514→   514→  if (ids.length) {
+   515→   515→    await db.user.deleteMany({ where: { id: { in: ids } } });
+   516→   516→  }
+   517→   517→}
+   518→   518→

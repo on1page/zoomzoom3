@@ -1,0 +1,42 @@
+---
+title: "D10 — Modello dati (2/2): utenti, premium e consulenza"
+config:
+  theme: base
+  themeVariables:
+    primaryColor: "#EFF6FF"
+    primaryBorderColor: "#3B82F6"
+    primaryTextColor: "#1E293B"
+    lineColor: "#94A3B8"
+    fontSize: "14px"
+    fontFamily: "Helvetica, Arial, DejaVu Sans, sans-serif"
+---
+erDiagram
+    USER ||--o{ SESSION : "cookie pubblico / admin"
+    USER ||--o{ PREMIUM_GRANT : "riceve"
+    USER ||--o| CONSULTANT_PROFILE : "1 a 1, se consulente"
+    USER ||--o{ PERIZIA_REQUEST : "richiedente"
+    CONSULTANT_PROFILE ||--|| ENTITY : "scheda pubblica"
+    CONSULTANT_PROFILE ||--o{ CONSULTANT_DOC : "documenti privati"
+    CONSULTANT_PROFILE ||--o{ PERIZIA_REQUEST : "consulente"
+
+    USER {
+        string email UK
+        string role "user / moderator / admin / superadmin"
+        boolean totpEnabled
+        datetime premiumUntil "derivato dai grant"
+    }
+    PREMIUM_GRANT {
+        int days
+        string origin "review / admin / seed"
+        datetime expiresAt
+    }
+    CONSULTANT_PROFILE {
+        string status "pending / approved / rejected"
+        string ibanCheck "self / confirmed / mismatch"
+        int feeCents "0 = su richiesta"
+    }
+    PERIZIA_REQUEST {
+        string status "requested / accepted / paid / delivered / closed"
+        int payoutCents "90 percento"
+        int commissionCents "10 percento"
+    }

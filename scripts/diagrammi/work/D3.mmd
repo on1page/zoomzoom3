@@ -1,0 +1,77 @@
+---
+title: "D3 — Contributo aperto (2/2): salvataggio della scheda e pubblicazione"
+config:
+  theme: base
+  themeVariables:
+    primaryColor: "#EFF6FF"
+    primaryBorderColor: "#3B82F6"
+    primaryTextColor: "#1E293B"
+    lineColor: "#94A3B8"
+    fontSize: "14px"
+    fontFamily: "Helvetica, Arial, DejaVu Sans, sans-serif"
+  flowchart:
+    curve: basis
+    padding: 20
+    nodeSpacing: 55
+    rankSpacing: 65
+    htmlLabels: true
+---
+flowchart TB
+
+    %% ═══ PASSO 3: salvataggio ═══
+    subgraph P3["PASSO 3 — Salvataggio della scheda"]
+        SENT["POST /api/entities<br>indirizzo + zona + coordinate<br>richiede email verificata"]:::api
+        RISOL["Risoluzione della città a gradini:<br>1) zoneId già noto  2) nome + coordinate<br>3) coordinate del pin"]:::api
+        ENSZ["ensureZone (dedup):<br>nome + provincia + distanza max 30 km<br>crea la scheda zona se manca"]:::api
+        DEDI{"Indirizzo già presente<br>nella stessa città?"}:::bivio
+        E409(["409 + existingId:<br>riusa la scheda esistente"]):::blocco
+        NEW["Entity immobile pubblicata subito<br>proposta da «user:id», audit log"]:::esito
+        SENTZ["POST /api/zones<br>target zona: attiva la località"]:::api
+        ZNEW["Scheda zona recensibile<br>ent_z_ + slug"]:::esito
+        SENT --> RISOL
+        RISOL --> ENSZ
+        SENTZ --> ENSZ
+        ENSZ -->|"per immobile"| DEDI
+        ENSZ -->|"per zona"| ZNEW
+        DEDI -->|"sì"| E409
+        DEDI -->|"no"| NEW
+    end
+
+    %% ═══ PASSO 4: recensione ═══
+    subgraph P4["PASSO 4 — Pubblicazione della recensione"]
+        FRM["ReviewFields: voto 0–10 (passo 0,5),<br>criteri della categoria → criteriaJson,<br>pro (obbligatori) e contro, testo min 100 caratteri,<br>dichiarazione di onestà, prezzo"]:::ui
+        FOTO["PhotoInput: max 3 foto<br>compresse nel browser + sharp<br>EXIF e GPS rimossi, JPEG max 1280 px"]:::ui
+        POSTR["POST /api/reviews"]:::api
+        DUP{"Recensione già presente dello<br>stesso utente per la stessa scheda?"}:::bivio
+        R409(["409 — una recensione<br>per utente per scheda"]):::blocco
+        VIA{"Quale via?"}:::bivio
+        VER["RECENSIONE VERIFICATA (badge verde)<br>da esperienza attiva: invito del soggetto<br>o verifica documentale — UNIQUE experienceId"]:::esito
+        DIC["RECENSIONE DICHIARATA (badge ambra)<br>contributo aperto: crea<br>esperienza origin «self»"]:::ui
+        FRM --> POSTR
+        FOTO --> POSTR
+        POSTR --> DUP
+        DUP -->|"sì"| R409
+        DUP -->|"no"| VIA
+        VIA -->|"esperienza attiva"| VER
+        VIA -->|"contributo aperto"| DIC
+    end
+
+    NEW -->|"apri il modulo"| FRM
+    ZNEW -->|"apri il modulo"| FRM
+    E409 -.->|"recensisci la scheda esistente"| FRM
+
+    ESIT["Scheda aggiornata: score medio,<br>medie per criterio, prezzi, mappa, classifiche"]:::esito
+    PREM["PremiumGrant (Fase 2):<br>es. 30 giorni, cap 365, audit log"]:::esito
+    RETT["Rettifica: #/rettifica/[id] → PUT /api/reviews/[id]<br>solo autore, motivo min 10 caratteri,<br>entro la finestra configurabile (rettificaDays)"]:::ui
+    VER --> ESIT
+    DIC --> ESIT
+    ESIT --> PREM
+    ESIT -.->|"rettifica"| RETT
+
+    classDef ui fill:#EFF6FF,stroke:#3B82F6,stroke-width:1.5px,color:#1E293B
+    classDef api fill:#F0FDF4,stroke:#10B981,stroke-width:1.5px,color:#1E293B
+    classDef esito fill:#D1FAE5,stroke:#059669,stroke-width:1.5px,color:#1E293B
+    classDef blocco fill:#FEF2F2,stroke:#EF4444,stroke-width:1.5px,color:#1E293B
+    classDef bivio fill:#FFF7ED,stroke:#F59E0B,stroke-width:2px,color:#1E293B
+    style P3 fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px
+    style P4 fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px

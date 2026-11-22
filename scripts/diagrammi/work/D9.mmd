@@ -1,0 +1,53 @@
+---
+title: "D9 — Modello dati (1/2): catalogo e recensioni"
+config:
+  theme: base
+  themeVariables:
+    primaryColor: "#EFF6FF"
+    primaryBorderColor: "#3B82F6"
+    primaryTextColor: "#1E293B"
+    lineColor: "#94A3B8"
+    fontSize: "14px"
+    fontFamily: "Helvetica, Arial, DejaVu Sans, sans-serif"
+  flowchart:
+    curve: basis
+    padding: 20
+    nodeSpacing: 55
+    rankSpacing: 65
+    htmlLabels: true
+---
+flowchart LR
+
+    %% ═══ TASSONOMIA ═══
+    CAT["Category<br>8 categorie: immobile, zona, proprietario,<br>affittuario, amministratore, agenzia, ditta, consulente"]:::dati
+    CRI["Criterion<br>i criteri di voto della categoria"]:::dati
+    CVER["CategoryVersion<br>snapshot storico dei criteri<br>(per recensioni passate)"]:::dati
+    CAT -->|"1:N definisce"| CRI
+    CAT -->|"1:N versiona"| CVER
+
+    ZON["Zone<br>comune, provincia, regione,<br>coordinate, raggio"]:::dati
+    USR["User<br>l'autore della recensione"]:::dati
+
+    %% ═══ NUCLEO ═══
+    ENT["Entity — la scheda recensibile<br>nome, sottotitolo, indirizzo, stato,<br>coordinate (solo categorie mappate)"]:::dati
+        EXP["Experience<br>origine: business / verification-request / self / seed<br>stato: pending / active / rejected"]:::dati
+        REV["Review — la recensione<br>score 0–10 (passo 0,5) · criteriaJson {criterio: voto}<br>verified (badge) · pro e contro · testo · prezzo · retifica"]:::dati
+    ENT -->|"1:N esperienze"| EXP
+    EXP -->|"1:1 — UNIQUE experienceId"| REV
+    ENT -.->|"1:N riceve"| REV
+
+    %% ═══ ALLEGATI ═══
+    INV["Invite<br>invito email: token hashato,<br>monouso, scadenza"]:::dati
+        VDOC["VerificationDoc<br>documento caricato<br>in area privata (db/uploads)"]:::dati
+        PHO["ReviewPhoto<br>max 3 per recensione,<br>JPEG senza EXIF"]:::dati
+    VOT["ReviewVote — Fase 3<br>pollice su/giù · UNIQUE (recensione, utente)"]:::dati
+
+    CAT -->|"1:N classifica"| ENT
+    ZON -->|"1:N localizza"| ENT
+    USR -->|"1:N scrive"| REV
+    EXP -->|"1:N inviti"| INV
+    EXP -->|"1:N allega"| VDOC
+    REV -->|"1:3 foto"| PHO
+    REV -->|"1:N voti utili"| VOT
+
+    classDef dati fill:#F8FAFC,stroke:#64748B,stroke-width:1.5px,color:#1E293B

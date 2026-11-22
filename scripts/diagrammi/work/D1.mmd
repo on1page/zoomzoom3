@@ -1,0 +1,82 @@
+---
+title: "D1 — Architettura generale di ZoomZoom"
+config:
+  theme: base
+  themeVariables:
+    primaryColor: "#EFF6FF"
+    primaryBorderColor: "#3B82F6"
+    primaryTextColor: "#1E293B"
+    lineColor: "#94A3B8"
+    secondaryColor: "#F0FDF4"
+    tertiaryColor: "#FFF7ED"
+    fontSize: "14px"
+    fontFamily: "Helvetica, Arial, DejaVu Sans, sans-serif"
+  flowchart:
+    curve: basis
+    padding: 20
+    nodeSpacing: 55
+    rankSpacing: 65
+    htmlLabels: true
+---
+flowchart TB
+
+    %% ═══ BROWSER ═══
+    subgraph CLIENT["Browser — client"]
+        direction LR
+        SPA["App ZoomZoom<br>pagina unica / con hash router<br>33 viste — src/app/page.tsx"]:::ui
+        MAPPA["Mappa Leaflet<br>src/components/map.tsx"]:::ui
+        MEMO["localStorage<br>zoomzoom.miaZona + consensi cookie"]:::ui
+    end
+
+    %% ═══ SERVER ═══
+    subgraph SERV["Server Next.js — API routes (src/app/api)"]
+        direction TB
+        PUB["/api/public<br>bootstrap, search, rankings, entity,<br>photo, map, geocode, geocode/reverse"]:::api
+        AUTH["/api/auth<br>register, login, login-2fa, 2fa,<br>verify-email, change-password, google"]:::api
+        CONTR["Contributo aperto (Fase 1)<br>/api/entities, /api/zones,<br>/api/reviews + rettifica + vote"]:::api
+        PERS["Persona, soggetti, verifica<br>/api/me, /api/subject,<br>/api/invitations, /api/experiences"]:::api
+        CIV["Segnala e contatta<br>/api/reports, /api/disputes, /api/proposals,<br>/api/contact, /api/consent, /api/diagnostica"]:::api
+        CONS["Consulente Tecnico<br>/api/consulente<br>apply, me, docs, photo, requests, action, pdf"]:::api
+        ADM["Back office staff<br>/api/admin<br>login, data (17 sezioni), action (29 azioni)"]:::staff
+    end
+
+    %% ═══ DATI ═══
+    subgraph DATI["Dati"]
+        direction LR
+        DB[("Prisma 6 + SQLite<br>db/custom.db — 25 modelli")]:::dati
+        FILE["Area privata file system<br>db/uploads — documenti di verifica"]:::dati
+    end
+
+    %% ═══ SERVIZI ESTERNI ═══
+    subgraph EST["Servizi esterni"]
+        direction LR
+        NOM["Nominatim / OpenStreetMap<br>geocoding + reverse<br>rate 20/min, cache 15 min / 1 h"]:::ext
+        TILES["Tile mappa OpenStreetMap<br>richiesti direttamente dal browser"]:::ext
+        SMTP["SMTP via nodemailer<br>se configurato, altrimenti coda EmailLog"]:::ext
+        GOOG["Google OAuth 2.0<br>opzionale, variabili d'ambiente"]:::ext
+        ADS["Google AdSense<br>solo con consenso marketing"]:::ext
+        IBANV["Verifica intestatario IBAN<br>opzionale (TrueLayer, Tink, Fabrick…)"]:::ext
+    end
+
+    %% collegamenti
+    SPA --> MAPPA
+    SPA -->|"fetch HTTPS + cookie zz_session"| SERV
+    MAPPA -->|"tile della mappa"| TILES
+    SPA -.->|"script annunci (solo con consenso)"| ADS
+    SERV -->|"Prisma ORM"| DB
+    PERS -->|"upload documenti"| FILE
+    PUB -->|"geocoding / reverse"| NOM
+    CONTR -->|"geocoding / reverse"| NOM
+    AUTH -->|"invio email"| SMTP
+    AUTH -->|"OAuth 2.0"| GOOG
+    CONS -->|"verifica intestatario"| IBANV
+
+    classDef ui fill:#EFF6FF,stroke:#3B82F6,stroke-width:1.5px,color:#1E293B
+    classDef api fill:#F0FDF4,stroke:#10B981,stroke-width:1.5px,color:#1E293B
+    classDef dati fill:#F8FAFC,stroke:#64748B,stroke-width:1.5px,color:#1E293B
+    classDef ext fill:#FFF7ED,stroke:#F59E0B,stroke-width:1.5px,color:#1E293B
+    classDef staff fill:#F5F3FF,stroke:#8B5CF6,stroke-width:1.5px,color:#1E293B
+    style CLIENT fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px
+    style SERV fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px
+    style DATI fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px
+    style EST fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px

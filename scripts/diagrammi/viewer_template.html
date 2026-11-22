@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ZoomZoom — Atlante di funzionamento</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #F8FAFC;
+    color: #1E293B;
+    line-height: 1.55;
+  }
+  header {
+    background: #FFFFFF;
+    border-bottom: 1px solid #E2E8F0;
+    padding: 20px 28px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  header h1 { font-size: 19px; font-weight: 700; }
+  header h1 span { color: #64748B; font-weight: 500; }
+  header p { font-size: 13px; color: #64748B; margin-top: 4px; max-width: 900px; }
+  header p strong { color: #334155; }
+
+  #nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 14px 28px;
+    background: #FFFFFF;
+    border-bottom: 1px solid #E2E8F0;
+    position: sticky;
+    top: 73px;
+    z-index: 9;
+  }
+  .chip {
+    border: 1px solid #CBD5E1;
+    background: #FFFFFF;
+    border-radius: 999px;
+    padding: 5px 13px;
+    font-size: 13px;
+    cursor: pointer;
+    color: #334155;
+    font-variant-numeric: tabular-nums;
+  }
+  .chip:hover { border-color: #3B82F6; color: #1D4ED8; }
+  .chip.active { background: #EFF6FF; border-color: #3B82F6; color: #1D4ED8; font-weight: 600; }
+
+  main { padding: 24px 28px 60px; }
+  #title { font-size: 17px; margin-bottom: 4px; }
+  #subtitle { font-size: 13px; color: #64748B; margin-bottom: 16px; }
+  #toolbar { margin-bottom: 14px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  button.act {
+    border: 1px solid #CBD5E1;
+    background: #FFFFFF;
+    border-radius: 8px;
+    padding: 7px 14px;
+    font-size: 13px;
+    cursor: pointer;
+    color: #1E293B;
+  }
+  button.act:hover { background: #F1F5F9; }
+  button.act.primary { background: #1E293B; border-color: #1E293B; color: #FFFFFF; }
+  button.act.primary:hover { background: #334155; }
+  #status { font-size: 13px; color: #64748B; }
+  #status.err { color: #DC2626; }
+
+  #diagramWrap {
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
+    padding: 24px;
+    overflow: auto;
+    min-height: 200px;
+  }
+  #diagram { width: fit-content; min-width: 100%; }
+  #diagram svg { max-width: none; }
+  #diagram .placeholder { color: #94A3B8; font-size: 14px; padding: 40px; }
+
+  #editorBox {
+    margin-top: 18px;
+    display: none;
+  }
+  #editorBox.open { display: block; }
+  #editorBox label { font-size: 13px; font-weight: 600; display: block; margin-bottom: 6px; }
+  #src {
+    width: 100%;
+    min-height: 340px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12.5px;
+    border: 1px solid #CBD5E1;
+    border-radius: 10px;
+    padding: 14px;
+    background: #FFFFFF;
+    color: #0F172A;
+    resize: vertical;
+    white-space: pre;
+    tab-size: 4;
+  }
+  #src:focus { outline: 2px solid #BFDBFE; border-color: #3B82F6; }
+  #editorHint { font-size: 12.5px; color: #64748B; margin-top: 8px; }
+  #editorHint code { background: #F1F5F9; border-radius: 4px; padding: 1px 6px; font-size: 12px; }
+
+  footer {
+    padding: 18px 28px 40px;
+    font-size: 12.5px;
+    color: #94A3B8;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>ZoomZoom — Atlante di funzionamento <span>· __GENERATED__</span></h1>
+  <p>Seleziona un diagramma, analizzalo e — se vuoi cambiarlo — apri <strong>Modifica sorgente</strong>:
+  l'anteprima si aggiorna subito. Quando il risultato ti piace, usa <strong>Copia codice</strong> e
+  incollamelo in chat con la scritta «applica questo»: lo applicherò al documento e rigenererò tutto.
+  Fonte di verità: <strong>zoomzoom-diagrammi.md</strong>. Serve connessione internet per la libreria Mermaid.</p>
+</header>
+
+<nav id="nav"></nav>
+
+<main>
+  <h2 id="title"></h2>
+  <p id="subtitle"></p>
+  <div id="toolbar">
+    <button class="act primary" id="btn-edit">Modifica sorgente</button>
+    <button class="act" id="btn-copy">Copia codice</button>
+    <button class="act" id="btn-download">Scarica .mmd</button>
+    <button class="act" id="btn-reset">Ripristina originale</button>
+    <span id="status"></span>
+  </div>
+  <div id="diagramWrap"><div id="diagram"><div class="placeholder">Caricamento…</div></div></div>
+  <div id="editorBox">
+    <label for="src">Sorgente Mermaid (modificabile)</label>
+    <textarea id="src" spellcheck="false"></textarea>
+    <p id="editorHint">Sintassi rapida: <code>A["testo"]</code> nodo · <code>A -->|"etichetta"| B</code> freccia ·
+      <code>A -.-> B</code> tratteggiata · <code>A{"domanda?"}</code> decisione · <code>subgraph G["Titolo"] … end</code> gruppo ·
+      <code>:::ui</code> colore (ui / api / dati / ext / staff / esito / blocco / bivio) · <code>%%</code> commento.
+      Ogni nodo ha un ID breve (es. <code>CONF</code>): usalo quando mi scrivi.</p>
+  </div>
+</main>
+
+<footer>Generato da scripts/diagrammi/render_diagrammi.py a partire da zoomzoom-diagrammi.md — v1.0</footer>
+
+<script>
+const DATA = __DATA__;
+
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  themeVariables: {
+    primaryColor: "#EFF6FF",
+    primaryBorderColor: "#3B82F6",
+    primaryTextColor: "#1E293B",
+    lineColor: "#94A3B8",
+    secondaryColor: "#F0FDF4",
+    tertiaryColor: "#FFF7ED",
+    fontSize: "14px",
+    fontFamily: "Helvetica, Arial, DejaVu Sans, sans-serif"
+  },
+  flowchart: { curve: "basis", padding: 20, nodeSpacing: 55, rankSpacing: 65, htmlLabels: true }
+});
+
+let current = 0;
+let renderSeq = 0;
+
+const nav = document.getElementById("nav");
+DATA.forEach((d, i) => {
+  const b = document.createElement("button");
+  b.className = "chip";
+  b.textContent = d.code + " — " + d.title;
+  b.onclick = () => select(i);
+  nav.appendChild(b);
+});
+
+function select(i) {
+  current = i;
+  document.querySelectorAll(".chip").forEach((c, j) => c.classList.toggle("active", j === i));
+  document.getElementById("title").textContent = DATA[i].code + " — " + DATA[i].title;
+  document.getElementById("subtitle").textContent =
+    "Immagine corrispondente: diagrammi/" + DATA[i].png;
+  document.getElementById("src").value = DATA[i].src;
+  document.getElementById("editorBox").classList.remove("open");
+  render(DATA[i].src);
+}
+
+async function render(src) {
+  const seq = ++renderSeq;
+  const status = document.getElementById("status");
+  status.textContent = "Rendering…";
+  status.classList.remove("err");
+  try {
+    const { svg } = await mermaid.render("g" + seq, src);
+    if (seq !== renderSeq) return;
+    document.getElementById("diagram").innerHTML = svg;
+    status.textContent = "";
+  } catch (e) {
+    if (seq !== renderSeq) return;
+    document.getElementById("diagram").innerHTML =
+      '<div class="placeholder">Errore nel sorgente Mermaid — controlla la sintassi nella casella qui sotto.</div>';
+    status.textContent = "Errore: " + (e.message || e);
+    status.classList.add("err");
+    document.getElementById("editorBox").classList.add("open");
+  }
+}
+
+document.getElementById("btn-edit").onclick = () => {
+  const box = document.getElementById("editorBox");
+  box.classList.toggle("open");
+  if (box.classList.contains("open")) document.getElementById("src").focus();
+};
+
+document.getElementById("src").addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); update(); }
+});
+
+function update() {
+  const src = document.getElementById("src").value;
+  render(src);
+}
+
+document.getElementById("btn-copy").onclick = async () => {
+  const src = document.getElementById("src").value;
+  try {
+    await navigator.clipboard.writeText(src);
+    flash("Codice copiato: incollamelo in chat per applicarlo");
+  } catch {
+    const ta = document.getElementById("src");
+    ta.select();
+    document.execCommand("copy");
+    flash("Codice copiato");
+  }
+};
+
+document.getElementById("btn-download").onclick = () => {
+  const src = document.getElementById("src").value;
+  const blob = new Blob([src], { type: "text/plain" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = DATA[current].code + ".mmd";
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+document.getElementById("btn-reset").onclick = () => {
+  document.getElementById("src").value = DATA[current].src;
+  render(DATA[current].src);
+  flash("Sorgente originale ripristinato");
+};
+
+function flash(msg) {
+  const status = document.getElementById("status");
+  status.textContent = msg;
+  status.classList.remove("err");
+  setTimeout(() => { if (status.textContent === msg) status.textContent = ""; }, 4000);
+}
+
+select(0);
+</script>
+</body>
+</html>

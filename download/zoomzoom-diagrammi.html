@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ZoomZoom — Atlante di funzionamento</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #F8FAFC;
+    color: #1E293B;
+    line-height: 1.55;
+  }
+  header {
+    background: #FFFFFF;
+    border-bottom: 1px solid #E2E8F0;
+    padding: 20px 28px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  header h1 { font-size: 19px; font-weight: 700; }
+  header h1 span { color: #64748B; font-weight: 500; }
+  header p { font-size: 13px; color: #64748B; margin-top: 4px; max-width: 900px; }
+  header p strong { color: #334155; }
+
+  #nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 14px 28px;
+    background: #FFFFFF;
+    border-bottom: 1px solid #E2E8F0;
+    position: sticky;
+    top: 73px;
+    z-index: 9;
+  }
+  .chip {
+    border: 1px solid #CBD5E1;
+    background: #FFFFFF;
+    border-radius: 999px;
+    padding: 5px 13px;
+    font-size: 13px;
+    cursor: pointer;
+    color: #334155;
+    font-variant-numeric: tabular-nums;
+  }
+  .chip:hover { border-color: #3B82F6; color: #1D4ED8; }
+  .chip.active { background: #EFF6FF; border-color: #3B82F6; color: #1D4ED8; font-weight: 600; }
+
+  main { padding: 24px 28px 60px; }
+  #title { font-size: 17px; margin-bottom: 4px; }
+  #subtitle { font-size: 13px; color: #64748B; margin-bottom: 16px; }
+  #toolbar { margin-bottom: 14px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  button.act {
+    border: 1px solid #CBD5E1;
+    background: #FFFFFF;
+    border-radius: 8px;
+    padding: 7px 14px;
+    font-size: 13px;
+    cursor: pointer;
+    color: #1E293B;
+  }
+  button.act:hover { background: #F1F5F9; }
+  button.act.primary { background: #1E293B; border-color: #1E293B; color: #FFFFFF; }
+  button.act.primary:hover { background: #334155; }
+  #status { font-size: 13px; color: #64748B; }
+  #status.err { color: #DC2626; }
+
+  #diagramWrap {
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
+    padding: 24px;
+    overflow: auto;
+    min-height: 200px;
+  }
+  #diagram { width: fit-content; min-width: 100%; }
+  #diagram svg { max-width: none; }
+  #diagram .placeholder { color: #94A3B8; font-size: 14px; padding: 40px; }
+
+  #editorBox {
+    margin-top: 18px;
+    display: none;
+  }
+  #editorBox.open { display: block; }
+  #editorBox label { font-size: 13px; font-weight: 600; display: block; margin-bottom: 6px; }
+  #src {
+    width: 100%;
+    min-height: 340px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12.5px;
+    border: 1px solid #CBD5E1;
+    border-radius: 10px;
+    padding: 14px;
+    background: #FFFFFF;
+    color: #0F172A;
+    resize: vertical;
+    white-space: pre;
+    tab-size: 4;
+  }
+  #src:focus { outline: 2px solid #BFDBFE; border-color: #3B82F6; }
+  #editorHint { font-size: 12.5px; color: #64748B; margin-top: 8px; }
+  #editorHint code { background: #F1F5F9; border-radius: 4px; padding: 1px 6px; font-size: 12px; }
+
+  footer {
+    padding: 18px 28px 40px;
+    font-size: 12.5px;
+    color: #94A3B8;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>ZoomZoom — Atlante di funzionamento <span>· v1.0 · 22/11/2026</span></h1>
+  <p>Seleziona un diagramma, analizzalo e — se vuoi cambiarlo — apri <strong>Modifica sorgente</strong>:
+  l'anteprima si aggiorna subito. Quando il risultato ti piace, usa <strong>Copia codice</strong> e
+  incollamelo in chat con la scritta «applica questo»: lo applicherò al documento e rigenererò tutto.
+  Fonte di verità: <strong>zoomzoom-diagrammi.md</strong>. Serve connessione internet per la libreria Mermaid.</p>
+</header>
+
+<nav id="nav"></nav>
+
+<main>
+  <h2 id="title"></h2>
+  <p id="subtitle"></p>
+  <div id="toolbar">
+    <button class="act primary" id="btn-edit">Modifica sorgente</button>
+    <button class="act" id="btn-copy">Copia codice</button>
+    <button class="act" id="btn-download">Scarica .mmd</button>
+    <button class="act" id="btn-reset">Ripristina originale</button>
+    <span id="status"></span>
+  </div>
+  <div id="diagramWrap"><div id="diagram"><div class="placeholder">Caricamento…</div></div></div>
+  <div id="editorBox">
+    <label for="src">Sorgente Mermaid (modificabile)</label>
+    <textarea id="src" spellcheck="false"></textarea>
+    <p id="editorHint">Sintassi rapida: <code>A["testo"]</code> nodo · <code>A -->|"etichetta"| B</code> freccia ·
+      <code>A -.-> B</code> tratteggiata · <code>A{"domanda?"}</code> decisione · <code>subgraph G["Titolo"] … end</code> gruppo ·
+      <code>:::ui</code> colore (ui / api / dati / ext / staff / esito / blocco / bivio) · <code>%%</code> commento.
+      Ogni nodo ha un ID breve (es. <code>CONF</code>): usalo quando mi scrivi.</p>
+  </div>
+</main>
+
+<footer>Generato da scripts/diagrammi/render_diagrammi.py a partire da zoomzoom-diagrammi.md — v1.0</footer>
+
+<script>
+const DATA = [
+ {
+  "code": "D1",
+  "title": "Architettura generale",
+  "src": "---\ntitle: \"D1 — Architettura generale di ZoomZoom\"\nconfig:\n  theme: base\n  themeVariables:\n    primaryColor: \"#EFF6FF\"\n    primaryBorderColor: \"#3B82F6\"\n    primaryTextColor: \"#1E293B\"\n    lineColor: \"#94A3B8\"\n    secondaryColor: \"#F0FDF4\"\n    tertiaryColor: \"#FFF7ED\"\n    fontSize: \"14px\"\n    fontFamily: \"Helvetica, Arial, DejaVu Sans, sans-serif\"\n  flowchart:\n    curve: basis\n    padding: 20\n    nodeSpacing: 55\n    rankSpacing: 65\n    htmlLabels: true\n---\nflowchart TB\n\n    %% ═══ BROWSER ═══\n    subgraph CLIENT[\"Browser — client\"]\n        direction LR\n        SPA[\"App ZoomZoom<br>pagina unica / con hash router<br>33 viste — src/app/page.tsx\"]:::ui\n        MAPPA[\"Mappa Leaflet<br>src/components/map.tsx\"]:::ui\n        MEMO[\"localStorage<br>zoomzoom.miaZona + consensi cookie\"]:::ui\n    end\n\n    %% ═══ SERVER ═══\n    subgraph SERV[\"Server Next.js — API routes (src/app/api)\"]\n        direction TB\n        PUB[\"/api/public<br>bootstrap, search, rankings, entity,<br>photo, map, geocode, geocode/reverse\"]:::api\n        AUTH[\"/api/auth<br>register, login, login-2fa, 2fa,<br>verify-email, change-password, google\"]:::api\n        CONTR[\"Contributo aperto (Fase 1)<br>/api/entities, /api/zones,<br>/api/reviews + rettifica + vote\"]:::api\n        PERS[\"Persona, soggetti, verifica<br>/api/me, /api/subject,<br>/api/invitations, /api/experiences\"]:::api\n        CIV[\"Segnala e contatta<br>/api/reports, /api/disputes, /api/proposals,<br>/api/contact, /api/consent, /api/diagnostica\"]:::api\n        CONS[\"Consulente Tecnico<br>/api/consulente<br>apply, me, docs, photo, requests, action, pdf\"]:::api\n        ADM[\"Back office staff<br>/api/admin<br>login, data (17 sezioni), action (29 azioni)\"]:::staff\n    end\n\n    %% ═══ DATI ═══\n    subgraph DATI[\"Dati\"]\n        direction LR\n        DB[(\"Prisma 6 + SQLite<br>db/custom.db — 25 modelli\")]:::dati\n        FILE[\"Area privata file system<br>db/uploads — documenti di verifica\"]:::dati\n    end\n\n    %% ═══ SERVIZI ESTERNI ═══\n    subgraph EST[\"Servizi esterni\"]\n        direction LR\n        NOM[\"Nominatim / OpenStreetMap<br>geocoding + reverse<br>rate 20/min, cache 15 min / 1 h\"]:::ext\n        TILES[\"Tile mappa OpenStreetMap<br>richiesti direttamente dal browser\"]:::ext\n        SMTP[\"SMTP via nodemailer<br>se configurato, altrimenti coda EmailLog\"]:::ext\n        GOOG[\"Google OAuth 2.0<br>opzionale, variabili d'ambiente\"]:::ext\n        ADS[\"Google AdSense<br>solo con consenso marketing\"]:::ext\n        IBANV[\"Verifica intestatario IBAN<br>opzionale (TrueLayer, Tink, Fabrick…)\"]:::ext\n    end\n\n    %% collegamenti\n    SPA --> MAPPA\n    SPA -->|\"fetch HTTPS + cookie zz_session\"| SERV\n    MAPPA -->|\"tile della mappa\"| TILES\n    SPA -.->|\"script annunci (solo con consenso)\"| ADS\n    SERV -->|\"Prisma ORM\"| DB\n    PERS -->|\"upload documenti\"| FILE\n    PUB -->|\"geocoding / reverse\"| NOM\n    CONTR -->|\"geocoding / reverse\"| NOM\n    AUTH -->|\"invio email\"| SMTP\n    AUTH -->|\"OAuth 2.0\"| GOOG\n    CONS -->|\"verifica intestatario\"| IBANV\n\n    classDef ui fill:#EFF6FF,stroke:#3B82F6,stroke-width:1.5px,color:#1E293B\n    classDef api fill:#F0FDF4,stroke:#10B981,stroke-width:1.5px,color:#1E293B\n    classDef dati fill:#F8FAFC,stroke:#64748B,stroke-width:1.5px,color:#1E293B\n    classDef ext fill:#FFF7ED,stroke:#F59E0B,stroke-width:1.5px,color:#1E293B\n    classDef staff fill:#F5F3FF,stroke:#8B5CF6,stroke-width:1.5px,color:#1E293B\n    style CLIENT fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px\n    style SERV fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px\n    style DATI fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px\n    style EST fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px",
+  "png": "D1-architettura-generale.png"
+ },
+ {
+  "code": "D2",
+  "title": "Contributo aperto (1/2): wizard, target e luogo",
+  "src": "---\ntitle: \"D2 — Contributo aperto (1/2): scelta del target e del luogo\"\nconfig:\n  theme: base\n  themeVariables:\n    primaryColor: \"#EFF6FF\"\n    primaryBorderColor: \"#3B82F6\"\n    primaryTextColor: \"#1E293B\"\n    lineColor: \"#94A3B8\"\n    fontSize: \"14px\"\n    fontFamily: \"Helvetica, Arial, DejaVu Sans, sans-serif\"\n  flowchart:\n    curve: basis\n    padding: 20\n    nodeSpacing: 55\n    rankSpacing: 65\n    htmlLabels: true\n---\nflowchart TB\n\n    %% ═══ PASSO 1: target ═══\n    subgraph P1[\"PASSO 1 — Scelta del target (#/recensione)\"]\n        direction LR\n        IN([\"CTA «Scrivi una recensione»<br>dal menu o da una scheda\"]):::ui\n        TGT{\"Che cosa vuoi recensire?\"}:::bivio\n        IN --> TGT\n        TIP[\"Immobile<br>(casa, appartamento, negozio…)\"]:::ui\n        TZN[\"Zona o città<br>(quartiere, comune)\"]:::ui\n        PRP[\"Altro soggetto<br>(persona, agenzia, ditta…)\"]:::ui\n        TGT -->|\"immobile\"| TIP\n        TGT -->|\"zona / città\"| TZN\n        TGT -->|\"altro\"| PRP\n    end\n\n    %% proposta di scheda (per soggetti non geografici)\n    PRP -->|\"POST /api/proposals\"| PROP[\"EntityProposal: received<br>in revisione allo staff\"]:::api\n    PROP -->|\"staff: proposal.approve\"| ENTP[\"Entity pubblicata<br>(poi modificabile con entity.toggle)\"]:::esito\n\n    %% ═══ PASSO 2: luogo ═══\n    subgraph P2[\"PASSO 2 — Trova o aggiungi il luogo (fino alla conferma della città)\"]\n        RIC[\"Ricerca: PlaceSearch (città)<br>o AddressSearch (indirizzo)\"]:::ui\n        GEO[\"GET /api/public/geocode<br>proxy Nominatim — solo Italia\"]:::api\n        NOM[\"Nominatim / OpenStreetMap<br>cache 15 min, rate 20/min per IP\"]:::ext\n        RIC -->|\"testo digitato\"| GEO\n        GEO --> NOM\n        GPS[\"Bottone GPS<br>posizione del browser\"]:::ui\n        RGEO[\"GET /api/public/geocode/reverse<br>via + civico + comune + provincia<br>(cache 1 h, arrotondata ~100 m)\"]:::api\n        GPS -->|\"coordinate\"| RGEO\n        RGEO --> NOM\n        PIN[\"Pin sulla mappa<br>LocationPicker\"]:::ui\n        PIN -->|\"coordinate\"| RGEO\n        CAMPI[\"Modulo compilato:<br>via + civico + città + posizione\"]:::ui\n        RIC --> CAMPI\n        GPS --> CAMPI\n        PIN --> CAMPI\n        CONF{\"Città confermata?<br>pulsante «Conferma» / «Cambia»<br>(stato zoneOk)\"}:::bivio\n        CAMPI --> CONF\n        CONF -->|\"no: correggi\"| CAMPI\n    end\n\n    TIP -->|\"vai al passo 2\"| RIC\n    TZN -->|\"vai al passo 2\"| RIC\n    CONF -->|\"sì\"| GO([\"Città confermata:<br>si passa al salvataggio (D3)\"]):::esito\n\n    classDef ui fill:#EFF6FF,stroke:#3B82F6,stroke-width:1.5px,color:#1E293B\n    classDef api fill:#F0FDF4,stroke:#10B981,stroke-width:1.5px,color:#1E293B\n    classDef ext fill:#FFF7ED,stroke:#F59E0B,stroke-width:1.5px,color:#1E293B\n    classDef staff fill:#F5F3FF,stroke:#8B5CF6,stroke-width:1.5px,color:#1E293B\n    classDef esito fill:#D1FAE5,stroke:#059669,stroke-width:1.5px,color:#1E293B\n    classDef bivio fill:#FFF7ED,stroke:#F59E0B,stroke-width:2px,color:#1E293B\n    style P1 fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px\n    style P2 fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px",
+  "png": "D2-contributo-aperto-1-2-wizard-target-e-lu.png"
+ },
+ {
+  "code": "D3",
+  "title": "Contributo aperto (2/2): salvataggio scheda e recensione",
+  "src": "---\ntitle: \"D3 — Contributo aperto (2/2): salvataggio della scheda e pubblicazione\"\nconfig:\n  theme: base\n  themeVariables:\n    primaryColor: \"#EFF6FF\"\n    primaryBorderColor: \"#3B82F6\"\n    primaryTextColor: \"#1E293B\"\n    lineColor: \"#94A3B8\"\n    fontSize: \"14px\"\n    fontFamily: \"Helvetica, Arial, DejaVu Sans, sans-serif\"\n  flowchart:\n    curve: basis\n    padding: 20\n    nodeSpacing: 55\n    rankSpacing: 65\n    htmlLabels: true\n---\nflowchart TB\n\n    %% ═══ PASSO 3: salvataggio ═══\n    subgraph P3[\"PASSO 3 — Salvataggio della scheda\"]\n        SENT[\"POST /api/entities<br>indirizzo + zona + coordinate<br>richiede email verificata\"]:::api\n        RISOL[\"Risoluzione della città a gradini:<br>1) zoneId già noto  2) nome + coordinate<br>3) coordinate del pin\"]:::api\n        ENSZ[\"ensureZone (dedup):<br>nome + provincia + distanza max 30 km<br>crea la scheda zona se manca\"]:::api\n        DEDI{\"Indirizzo già presente<br>nella stessa città?\"}:::bivio\n        E409([\"409 + existingId:<br>riusa la scheda esistente\"]):::blocco\n        NEW[\"Entity immobile pubblicata subito<br>proposta da «user:id», audit log\"]:::esito\n        SENTZ[\"POST /api/zones<br>target zona: attiva la località\"]:::api\n        ZNEW[\"Scheda zona recensibile<br>ent_z_ + slug\"]:::esito\n        SENT --> RISOL\n        RISOL --> ENSZ\n        SENTZ --> ENSZ\n        ENSZ -->|\"per immobile\"| DEDI\n        ENSZ -->|\"per zona\"| ZNEW\n        DEDI -->|\"sì\"| E409\n        DEDI -->|\"no\"| NEW\n    end\n\n    %% ═══ PASSO 4: recensione ═══\n    subgraph P4[\"PASSO 4 — Pubblicazione della recensione\"]\n        FRM[\"ReviewFields: voto 0–10 (passo 0,5),<br>criteri della categoria → criteriaJson,<br>pro (obbligatori) e contro, testo min 100 caratteri,<br>dichiarazione di onestà, prezzo\"]:::ui\n        FOTO[\"PhotoInput: max 3 foto<br>compresse nel browser + sharp<br>EXIF e GPS rimossi, JPEG max 1280 px\"]:::ui\n        POSTR[\"POST /api/reviews\"]:::api\n        DUP{\"Recensione già presente dello<br>stesso utente per la stessa scheda?\"}:::bivio\n        R409([\"409 — una recensione<br>per utente per scheda\"]):::blocco\n        VIA{\"Quale via?\"}:::bivio\n        VER[\"RECENSIONE VERIFICATA (badge verde)<br>da esperienza attiva: invito del soggetto<br>o verifica documentale — UNIQUE experienceId\"]:::esito\n        DIC[\"RECENSIONE DICHIARATA (badge ambra)<br>contributo aperto: crea<br>esperienza origin «self»\"]:::ui\n        FRM --> POSTR\n        FOTO --> POSTR\n        POSTR --> DUP\n        DUP -->|\"sì\"| R409\n        DUP -->|\"no\"| VIA\n        VIA -->|\"esperienza attiva\"| VER\n        VIA -->|\"contributo aperto\"| DIC\n    end\n\n    NEW -->|\"apri il modulo\"| FRM\n    ZNEW -->|\"apri il modulo\"| FRM\n    E409 -.->|\"recensisci la scheda esistente\"| FRM\n\n    ESIT[\"Scheda aggiornata: score medio,<br>medie per criterio, prezzi, mappa, classifiche\"]:::esito\n    PREM[\"PremiumGrant (Fase 2):<br>es. 30 giorni, cap 365, audit log\"]:::esito\n    RETT[\"Rettifica: #/rettifica/[id] → PUT /api/reviews/[id]<br>solo autore, motivo min 10 caratteri,<br>entro la finestra configurabile (rettificaDays)\"]:::ui\n    VER --> ESIT\n    DIC --> ESIT\n    ESIT --> PREM\n    ESIT -.->|\"rettifica\"| RETT\n\n    classDef ui fill:#EFF6FF,stroke:#3B82F6,stroke-width:1.5px,color:#1E293B\n    classDef api fill:#F0FDF4,stroke:#10B981,stroke-width:1.5px,color:#1E293B\n    classDef esito fill:#D1FAE5,stroke:#059669,stroke-width:1.5px,color:#1E293B\n    classDef blocco fill:#FEF2F2,stroke:#EF4444,stroke-width:1.5px,color:#1E293B\n    classDef bivio fill:#FFF7ED,stroke:#F59E0B,stroke-width:2px,color:#1E293B\n    style P3 fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px\n    style P4 fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px",
+  "png": "D3-contributo-aperto-2-2-salvataggio-scheda.png"
+ },
+ {
+  "code": "D4",
+  "title": "Browsing e scheda: gating Premium (Fase 2) e voti (Fase 3)",
+  "src": "---\ntitle: \"D4 — Browsing, scheda e gating Premium\"\nconfig:\n  theme: base\n  themeVariables:\n    primaryColor: \"#EFF6FF\"\n    primaryBorderColor: \"#3B82F6\"\n    primaryTextColor: \"#1E293B\"\n    lineColor: \"#94A3B8\"\n    fontSize: \"14px\"\n    fontFamily: \"Helvetica, Arial, DejaVu Sans, sans-serif\"\n  flowchart:\n    curve: basis\n    padding: 20\n    nodeSpacing: 55\n    rankSpacing: 65\n    htmlLabels: true\n---\nflowchart TB\n\n    %% ═══ NAVIGAZIONE ═══\n    HOME[\"Home #/ — ricerca, anteprima mappa,<br>classifiche, CTA\"]:::ui\n    CERCA[\"#/cerca — filtri categoria, zona, prezzo,<br>ordinamento — GET /api/public/search\"]:::ui\n    MAPP[\"#/mappa — GET /api/public/map<br>marker immobili + aggregati per zona<br>(soppressione sotto la soglia)\"]:::ui\n    CLAS[\"#/classifiche — GET /api/public/rankings<br>punteggio = (n·M + m·C) / (n+m)\"]:::ui\n    CATV[\"#/categoria/[id] — elenco schede\"]:::ui\n    SCH[\"#/scheda/[id] — EntityView<br>GET /api/public/entity/[id]\"]:::ui\n\n    HOME --> CERCA\n    HOME --> MAPP\n    HOME --> CLAS\n    HOME --> CATV\n    CERCA -->|\"apri scheda\"| SCH\n    CATV -->|\"apri scheda\"| SCH\n    CLAS -->|\"apri scheda\"| SCH\n    MAPP -->|\"apri scheda\"| SCH\n\n    %% ═══ SEMPRE PUBBLICO ═══\n    subgraph PUBB[\"Sempre visibile a tutti\"]\n        direction LR\n        SCORE[\"score medio /10, stelle,<br>numero recensioni\"]:::dati\n        MED[\"mediana prezzi dichiarati\"]:::dati\n        BARS[\"CriteriaBars — medie per criterio\"]:::dati\n        VCOUNT[\"conteggio voti utili<br>per ogni recensione\"]:::dati\n    end\n    SCH --> PUBB\n\n    %% ═══ GATING PREMIUM ═══\n    GATE{\"Lettore Premium, staff<br>o autore della recensione?\"}:::bivio\n    SCH --> GATE\n    GATE -->|\"sì\"| FULL[\"testi integrali delle recensioni<br>+ foto: GET /api/public/photo/[id]<br>(Cache-Control: private)\"]:::esito\n    GATE -->|\"no\"| TEAS[\"3 teaser offuscati + conteggio<br>delle bloccate (premium.lockedCount)<br>+ le proprie recensioni in chiaro\"]:::ui\n    TEAS --> PREML[\"PremiumLockedBox — invito a #/premium<br>foto: 403 per non Premium\"]:::blocco\n    PREML --> PREM[\"#/premium — il Premium si guadagna:<br>recensioni (grant 30 gg), admin, seed<br>premiumUntil = scadenza più alta dei grant\"]:::esito\n\n    %% ═══ VOTI COMMUNITY (FASE 3) ═══\n    VOTE{\"Può votare le recensioni?<br>solo Premium o staff\"}:::bivio\n    SCH --> VOTE\n    VOTE -->|\"sì\"| VOK[\"pollice su/giù — POST /api/reviews/[id]/vote<br>mai sulla propria · click ripetuto = rimuovi<br>UNIQUE (recensione, utente)\"]:::esito\n    VOTE -->|\"no\"| VNO[\"votazione disattivata / nascosta\"]:::ui\n\n    %% ═══ AZIONI DALLA SCHEDA ═══\n    ZON[\"#/zona/[id] — top 3 per categoria<br>nella città\"]:::ui\n    SEGN[\"Segnala (ReportModal)<br>POST /api/reports — 8 motivi,<br>solo utenti registrati\"]:::ui\n    DISP[\"Contesta associazione (DisputeModal)<br>POST /api/disputes — anche anonima\"]:::ui\n    CTAR[\"CTA «Scrivi una recensione»<br>→ #/recensione?entity=[id] (D2)\"]:::ui\n    SCH --> ZON\n    SCH --> SEGN\n    SCH --> DISP\n    SCH --> CTAR\n\n    classDef ui fill:#EFF6FF,stroke:#3B82F6,stroke-width:1.5px,color:#1E293B\n    classDef dati fill:#F8FAFC,stroke:#64748B,stroke-width:1.5px,color:#1E293B\n    classDef esito fill:#D1FAE5,stroke:#059669,stroke-width:1.5px,color:#1E293B\n    classDef blocco fill:#FEF2F2,stroke:#EF4444,stroke-width:1.5px,color:#1E293B\n    classDef bivio fill:#FFF7ED,stroke:#F59E0B,stroke-width:2px,color:#1E293B\n    style PUBB fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px",
+  "png": "D4-browsing-e-scheda-gating-premium-fase-2-.png"
+ },
+ {
+  "code": "D5",
+  "title": "Autenticazione e account",
+  "src": "---\ntitle: \"D5 — Autenticazione, verifica email, 2FA e account\"\nconfig:\n  theme: base\n  themeVariables:\n    primaryColor: \"#EFF6FF\"\n    primaryBorderColor: \"#3B82F6\"\n    primaryTextColor: \"#1E293B\"\n    lineColor: \"#94A3B8\"\n    fontSize: \"14px\"\n    fontFamily: \"Helvetica, Arial, DejaVu Sans, sans-serif\"\n  flowchart:\n    curve: basis\n    padding: 20\n    nodeSpacing: 55\n    rankSpacing: 65\n    htmlLabels: true\n---\nflowchart TB\n\n    %% ═══ REGISTRAZIONE ═══\n    subgraph REG[\"Registrazione e verifica email\"]\n        REGV[\"#/registrati — email, nickname, password,<br>accettazione termini, honey-pot\"]:::ui\n        POSTR[\"POST /api/auth/register<br>hash scrypt + EmailVerifyToken<br>(hashato, scade in 48 h)\"]:::api\n        MAIL{\"SMTP configurato?\"}:::bivio\n        SENT[\"email reale via nodemailer<br>con link #/verifica-email/[token]\"]:::ext\n        QUEUED[\"email in coda su EmailLog<br>l'interfaccia lo dichiara\"]:::dati\n        DEMO[\"DEMO_MODE: leggi il link nella<br>casella demo #/casella-demo (staff)<br>o back office → demo\"]:::staff\n        VLNK[\"#/verifica-email/[token]<br>riscatto monouso — POST verify-email\"]:::ui\n        OKV[\"email verificata: sblocca i contributi<br>(recensioni, schede, perizie, consulente)\"]:::esito\n        REGV --> POSTR\n        POSTR --> MAIL\n        MAIL -->|\"sì\"| SENT\n        MAIL -->|\"no\"| QUEUED\n        QUEUED --> DEMO\n        DEMO -.->|\"apri il link manualmente\"| VLNK\n        SENT --> VLNK\n        VLNK --> OKV\n    end\n\n    %% ═══ ACCESSO ═══\n    subgraph LOG[\"Accesso — #/accedi\"]\n        LOGV[\"email + password\"]:::ui\n        POSTL[\"POST /api/auth/login\"]:::api\n        LOCK[\"lockout: 5 tentativi falliti → 60 s<br>di blocco (SecurityLog)\"]:::blocco\n        N2FA{\"2FA attiva<br>sull'account?\"}:::bivio\n        TOTP[\"POST /api/auth/login-2fa<br>codice TOTP dall'app autenticatore\"]:::api\n        QR[\"primo accesso con 2FA mai completata:<br>QR di iscrizione mostrato una sola volta\"]:::staff\n        BKP[\"POST /api/auth/2fa/backup-login<br>8 codici monouso (hashati)\"]:::api\n        GOOG[\"Accedi con Google (opzionale)<br>/api/auth/google/start e /callback<br>senza env: 503\"]:::ext\n        SESS[\"SESSIONE — cookie zz_session, 7 giorni<br>token da 256 bit, solo hashato in tabella\"]:::dati\n        LOGV --> POSTL\n        POSTL --> N2FA\n        POSTL -.->|\"credenziali errate\"| LOCK\n        N2FA -->|\"sì\"| TOTP\n        TOTP -->|\"codice valido\"| SESS\n        TOTP -.->|\"prima volta\"| QR\n        N2FA -->|\"sì, ma codice TOTP perso\"| BKP\n        BKP -->|\"codice monouso valido\"| SESS\n        N2FA -->|\"no\"| SESS\n        LOGV -->|\"oppure\"| GOOG\n        GOOG -->|\"crea o collega l'account\"| SESS\n    end\n\n    %% ═══ STAFF ═══\n    subgraph STAFFA[\"Staff\"]\n        STFR[\"il login pubblico rifiuta gli account staff<br>(staffOnly)\"]:::blocco\n        ADM[\"#/admin — password + TOTP obbligatorio<br>sessione separata 30 minuti (sliding)\"]:::staff\n        STFR -->|\"usa invece\"| ADM\n    end\n\n    %% ═══ AREA PERSONALE E CHI È CHI ═══\n    subgraph PROFI[\"Area personale e chi è chi\"]\n        PROF[\"#/profilo — panoramica: card Premium<br>con storico grant, esperienze, recensioni,<br>segnalazioni, card Consulente\"]:::ui\n        IMPO[\"#/profilo-impostazioni — attiva/disattiva 2FA<br>(QR + 8 codici backup), cambio password,<br>cambio nickname, export dati GDPR,<br>richiesta di cancellazione\"]:::ui\n        RUOLI[\"RUOLI (tabella User.role):<br>user · moderator · admin · superadmin<br>permessi per voce (PERMS)\"]:::staff\n        PREM[\"PREMIUM: non è un ruolo — stato derivato<br>premiumUntil = max scadenze dei grant\"]:::esito\n        CONS[\"CONSULENTE TECNICO: non è un ruolo —<br>ConsultantProfile approvato collegato all'utente\"]:::ui\n        PROF --> IMPO\n    end\n\n    OKV -.->|\"poi accedi\"| LOGV\n    LOG -.->|\"account staff: rifiutato qui\"| STAFFA\n    SESS --> PROF\n\n    classDef ui fill:#EFF6FF,stroke:#3B82F6,stroke-width:1.5px,color:#1E293B\n    classDef api fill:#F0FDF4,stroke:#10B981,stroke-width:1.5px,color:#1E293B\n    classDef dati fill:#F8FAFC,stroke:#64748B,stroke-width:1.5px,color:#1E293B\n    classDef ext fill:#FFF7ED,stroke:#F59E0B,stroke-width:1.5px,color:#1E293B\n    classDef staff fill:#F5F3FF,stroke:#8B5CF6,stroke-width:1.5px,color:#1E293B\n    classDef esito fill:#D1FAE5,stroke:#059669,stroke-width:1.5px,color:#1E293B\n    classDef blocco fill:#FEF2F2,stroke:#EF4444,stroke-width:1.5px,color:#1E293B\n    classDef bivio fill:#FFF7ED,stroke:#F59E0B,stroke-width:2px,color:#1E293B\n    style REG fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px\n    style LOG fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px\n    style STAFFA fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px\n    style PROFI fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px",
+  "png": "D5-autenticazione-e-account.png"
+ },
+ {
+  "code": "D6",
+  "title": "Consulente Tecnico: iscrizione e approvazione",
+  "src": "---\ntitle: \"D6 — Consulente Tecnico: iscrizione e approvazione\"\nconfig:\n  theme: base\n  themeVariables:\n    primaryColor: \"#EFF6FF\"\n    primaryBorderColor: \"#3B82F6\"\n    primaryTextColor: \"#1E293B\"\n    lineColor: \"#94A3B8\"\n    fontSize: \"14px\"\n    fontFamily: \"Helvetica, Arial, DejaVu Sans, sans-serif\"\n  flowchart:\n    curve: basis\n    padding: 20\n    nodeSpacing: 55\n    rankSpacing: 65\n    htmlLabels: true\n---\nflowchart TB\n\n    START([\"Utente vuole diventare<br>Consulente Tecnico\"]):::ui\n    CK2FA{\"2FA attiva?\"}:::bivio\n    IMP2[\"#/profilo-impostazioni<br>attiva la 2FA, poi torna qui\"]:::ui\n    CKE{\"Email verificata e funzione<br>consulenti abilitata?\"}:::bivio\n    STOP([\"Completa la verifica email<br>o attendi l'attivazione\"]):::blocco\n    FORM[\"#/consulente — domanda di iscrizione\"]:::ui\n\n    START --> CK2FA\n    CK2FA -->|\"no\"| IMP2\n    CK2FA -->|\"sì\"| CKE\n    CKE -->|\"no\"| STOP\n    CKE -->|\"sì\"| FORM\n\n    %% ═══ DATI DELLA DOMANDA ═══\n    subgraph DATIF[\"Dati della domanda — POST /api/consulente/apply\"]\n        ANAG[\"anagrafica: nome e cognome, foto profilo<br>(ridotta a 800 px), professione (7 valori),<br>titolo di studio, bio\"]:::ui\n        ZONR[\"zona di esercizio via geocoding<br>+ raggio 5–300 km\"]:::ui\n        ECO[\"tariffa (o «su richiesta»), P.IVA,<br>IBAN + dichiarazione di intestazione<br>(validazione struttura + mod-97)\"]:::ui\n        DOC[\"documenti: qualifica + documento d'identità<br>(obbligatori), max 8 file, controllo magic byte\"]:::ui\n    end\n    FORM --> DATIF\n\n    %% ═══ VERIFICA IBAN ═══\n    IBANV{\"Verifica esterna dell'intestatario<br>(se configurata)\"}:::bivio\n    ECO --> IBANV\n    IBOK[\"ibanCheck: confirmed\"]:::esito\n    IBKO[\"400 — intestatario diverso:<br>correggi l'IBAN e riprova\"]:::blocco\n    IBSL[\"non attiva: autocertificazione<br>+ conferma manuale dello staff<br>(consultant.ibanConfirm)\"]:::staff\n    IBANV -->|\"match\"| IBOK\n    IBANV -->|\"mismatch\"| IBKO\n    IBANV -->|\"non attiva\"| IBSL\n\n    PEND[\"ConsultantProfile: stato pending<br>documenti privati, visibili solo allo staff\"]:::dati\n    IBOK --> PEND\n    IBSL --> PEND\n\n    %% ═══ DECISIONE STAFF ═══\n    STAFFD{\"Staff — #/admin/consulenti\"}:::staff\n    APPR[\"consultant.approve: ricontrollo 2FA,<br>crea/aggiorna la Entity categoria «consulente»<br>con verifiedBusiness\"]:::esito\n    REJ[\"consultant.reject (motivo min 10 caratteri)<br>oppure ibanMismatch\"]:::blocco\n    REAP[\"ri-domanda: torna al modulo #/consulente<br>conservando i documenti indicati\"]:::ui\n    PEND --> STAFFD\n    STAFFD -->|\"approva\"| APPR\n    STAFFD -->|\"rifiuta\"| REJ\n    REJ --> REAP\n\n    APPROVED[\"CONSULENTE APPROVATO<br>scheda pubblica con foto, zona, raggio e tariffa<br>GET /api/consulente/photo/[id] (pubblica)\"]:::esito\n    DASH[\"ConsultantDashboard: richieste ricevute<br>accetta / rifiuta / consegna (D7)\"]:::ui\n    PATCH[\"modifiche dopo l'approvazione:<br>bio, tariffa, raggio, telefono — PATCH me<br>gestione documenti: docs\"]:::ui\n    APPR --> APPROVED\n    APPROVED --> DASH\n    APPROVED --> PATCH\n\n    classDef ui fill:#EFF6FF,stroke:#3B82F6,stroke-width:1.5px,color:#1E293B\n    classDef api fill:#F0FDF4,stroke:#10B981,stroke-width:1.5px,color:#1E293B\n    classDef dati fill:#F8FAFC,stroke:#64748B,stroke-width:1.5px,color:#1E293B\n    classDef staff fill:#F5F3FF,stroke:#8B5CF6,stroke-width:1.5px,color:#1E293B\n    classDef esito fill:#D1FAE5,stroke:#059669,stroke-width:1.5px,color:#1E293B\n    classDef blocco fill:#FEF2F2,stroke:#EF4444,stroke-width:1.5px,color:#1E293B\n    classDef bivio fill:#FFF7ED,stroke:#F59E0B,stroke-width:2px,color:#1E293B\n    style DATIF fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px",
+  "png": "D6-consulente-tecnico-iscrizione-e-approvaz.png"
+ },
+ {
+  "code": "D7",
+  "title": "Consulente Tecnico: ciclo della perizia (macchina a stati)",
+  "src": "---\ntitle: \"D7 — Ciclo di vita di una perizia (PeriziaRequest)\"\nconfig:\n  theme: base\n  themeVariables:\n    primaryColor: \"#EFF6FF\"\n    primaryBorderColor: \"#3B82F6\"\n    primaryTextColor: \"#1E293B\"\n    lineColor: \"#94A3B8\"\n    fontSize: \"14px\"\n    fontFamily: \"Helvetica, Arial, DejaVu Sans, sans-serif\"\n  flowchart:\n    curve: basis\n    padding: 20\n    nodeSpacing: 55\n    rankSpacing: 65\n    htmlLabels: true\n---\nflowchart TB\n\n    %% stati principali (percorso felice)\n    START([\"richiedente invia la richiesta<br>POST /api/consulente/requests — max 5/giorno\"]):::ui\n    REQ[\"requested<br>richiesta inviata\"]:::dati\n    ACC[\"accepted<br>accettata\"]:::dati\n    PAID[\"paid<br>pagata\"]:::dati\n    DEL[\"delivered<br>relazione consegnata\"]:::dati\n    CLO([\"closed<br>chiusa\"]):::esito\n\n    %% uscite\n    REJ([\"rejected<br>rifiutata\"]):::blocco\n    CAN([\"cancelled<br>annullata\"]):::blocco\n\n    START --> REQ\n    REQ -->|\"consulente accetta,<br>conferma la tariffa\"| ACC\n    REQ -->|\"consulente rifiuta,<br>con motivo\"| REJ\n    REQ -->|\"utente annulla\"| CAN\n    ACC -->|\"utente annulla\"| CAN\n    ACC -->|\"superadmin registra<br>il pagamento\"| PAID\n    PAID -->|\"consulente consegna<br>la relazione\"| DEL\n    DEL -->|\"superadmin accredita<br>il payout\"| CLO\n\n    %% note operative\n    NOTEP[\"pagamento manuale su platformIban (settings)<br>nessun gateway di pagamento nella v1\"]:::staff\n    NOTED[\"alla consegna: payout 90% e commissione 10%<br>PDF per richiedente, consulente e staff<br>GET /api/consulente/requests/[id]/pdf\"]:::staff\n    NOTEP -.-> PAID\n    NOTED -.-> DEL\n\n    classDef ui fill:#EFF6FF,stroke:#3B82F6,stroke-width:1.5px,color:#1E293B\n    classDef dati fill:#F8FAFC,stroke:#64748B,stroke-width:1.5px,color:#1E293B\n    classDef staff fill:#F5F3FF,stroke:#8B5CF6,stroke-width:1.5px,color:#1E293B\n    classDef esito fill:#D1FAE5,stroke:#059669,stroke-width:1.5px,color:#1E293B\n    classDef blocco fill:#FEF2F2,stroke:#EF4444,stroke-width:1.5px,color:#1E293B",
+  "png": "D7-consulente-tecnico-ciclo-della-perizia-m.png"
+ },
+ {
+  "code": "D8",
+  "title": "Moderazione e back office",
+  "src": "---\ntitle: \"D8 — Moderazione e back office staff\"\nconfig:\n  theme: base\n  themeVariables:\n    primaryColor: \"#EFF6FF\"\n    primaryBorderColor: \"#3B82F6\"\n    primaryTextColor: \"#1E293B\"\n    lineColor: \"#94A3B8\"\n    fontSize: \"14px\"\n    fontFamily: \"Helvetica, Arial, DejaVu Sans, sans-serif\"\n  flowchart:\n    curve: basis\n    padding: 20\n    nodeSpacing: 55\n    rankSpacing: 65\n    htmlLabels: true\n---\nflowchart TB\n\n    %% ═══ CODE IN INGRESSO ═══\n    subgraph ING[\"Code in ingresso (dal sito pubblico)\"]\n        direction LR\n        REP[\"POST /api/reports — 8 motivi<br>solo utenti registrati\"]:::api\n        DIS[\"POST /api/disputes — contestazione<br>associazione scheda, anche anonima\"]:::api\n        PROP[\"POST /api/proposals — proposta<br>di nuova scheda\"]:::api\n        EXPP[\"esperienze pending:<br>verifica documentale o inviti oltre soglia\"]:::api\n        CONP[\"domande consulenti pending\"]:::api\n        PERZ[\"perizie da pagare / accreditare\"]:::api\n    end\n\n    %% ═══ BACK OFFICE ═══\n    subgraph BO[\"Back office — #/admin/[sezione]\"]\n        LOGIN[\"login: password + TOTP<br>sessione separata 30 minuti<br>2FA obbligatoria per lo staff\"]:::staff\n        SEZ[\"17 sezioni: dashboard, segnalazioni, contestazioni,<br>recensioni, foto, esperienze, inviti, utenti, entità,<br>consulenti, perizie, contenuti, impostazioni, log,<br>sicurezza, ruoli, demo\"]:::staff\n        LOGIN --> SEZ\n    end\n    ING -->|\"lavorate da\"| BO\n\n    %% ═══ AZIONI ═══\n    subgraph AZ[\"Azioni principali (29 — tutte con AuditLog)\"]\n        direction LR\n        ACT1[\"report.take / decide / appeal<br>review.hide / restore — hide toglie il<br>Premium guadagnato con quella recensione<br>photo.remove · dispute.take / decide\"]:::staff\n        ACT2[\"experience.approve / reject<br>invite.revoke · user.toggle<br>premium.grant / revoke · privacy.done\"]:::staff\n        ACT3[\"proposal.approve / reject<br>entity.toggle · consultant.approve /<br>reject / ibanConfirm / ibanMismatch\"]:::staff\n        ACT4[\"contents.update · settings.update<br>(flag e limiti) · role.set (solo superadmin,<br>richiede 2FA) · demo.wipe / demo.reseed\"]:::staff\n    end\n    BO --> AZ\n\n    %% ═══ CICLO SEGNALAZIONE ═══\n    subgraph CICLO[\"Ciclo di una segnalazione (Report)\"]\n        direction LR\n        R1[\"received\"]:::dati --> R2[\"reviewing<br>(presa in carico)\"]:::dati\n        R2 --> R3[\"decided:<br>mantieni / nascondi / ripristina\"]:::dati\n        R3 -->|\"appello entro 15 giorni<br>(autore o segnalatore)\"| R4[\"appeal\"]:::dati\n        R3 --> R5[\"closed\"]:::dati\n        R4 --> R5\n    end\n    REP -.->|\"entra nel ciclo\"| CICLO\n\n    SEC[\"SecurityLog: login, lockout,<br>azioni sensibili, errori auth\"]:::dati\n    AZ --> SEC\n\n    classDef api fill:#F0FDF4,stroke:#10B981,stroke-width:1.5px,color:#1E293B\n    classDef dati fill:#F8FAFC,stroke:#64748B,stroke-width:1.5px,color:#1E293B\n    classDef staff fill:#F5F3FF,stroke:#8B5CF6,stroke-width:1.5px,color:#1E293B\n    style ING fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px\n    style BO fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px\n    style AZ fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px\n    style CICLO fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px",
+  "png": "D8-moderazione-e-back-office.png"
+ },
+ {
+  "code": "D9",
+  "title": "Modello dati (1/2): catalogo e recensioni",
+  "src": "---\ntitle: \"D9 — Modello dati (1/2): catalogo e recensioni\"\nconfig:\n  theme: base\n  themeVariables:\n    primaryColor: \"#EFF6FF\"\n    primaryBorderColor: \"#3B82F6\"\n    primaryTextColor: \"#1E293B\"\n    lineColor: \"#94A3B8\"\n    fontSize: \"14px\"\n    fontFamily: \"Helvetica, Arial, DejaVu Sans, sans-serif\"\n  flowchart:\n    curve: basis\n    padding: 20\n    nodeSpacing: 55\n    rankSpacing: 65\n    htmlLabels: true\n---\nflowchart LR\n\n    %% ═══ TASSONOMIA ═══\n    CAT[\"Category<br>8 categorie: immobile, zona, proprietario,<br>affittuario, amministratore, agenzia, ditta, consulente\"]:::dati\n    CRI[\"Criterion<br>i criteri di voto della categoria\"]:::dati\n    CVER[\"CategoryVersion<br>snapshot storico dei criteri<br>(per recensioni passate)\"]:::dati\n    CAT -->|\"1:N definisce\"| CRI\n    CAT -->|\"1:N versiona\"| CVER\n\n    ZON[\"Zone<br>comune, provincia, regione,<br>coordinate, raggio\"]:::dati\n    USR[\"User<br>l'autore della recensione\"]:::dati\n\n    %% ═══ NUCLEO ═══\n    ENT[\"Entity — la scheda recensibile<br>nome, sottotitolo, indirizzo, stato,<br>coordinate (solo categorie mappate)\"]:::dati\n        EXP[\"Experience<br>origine: business / verification-request / self / seed<br>stato: pending / active / rejected\"]:::dati\n        REV[\"Review — la recensione<br>score 0–10 (passo 0,5) · criteriaJson {criterio: voto}<br>verified (badge) · pro e contro · testo · prezzo · retifica\"]:::dati\n    ENT -->|\"1:N esperienze\"| EXP\n    EXP -->|\"1:1 — UNIQUE experienceId\"| REV\n    ENT -.->|\"1:N riceve\"| REV\n\n    %% ═══ ALLEGATI ═══\n    INV[\"Invite<br>invito email: token hashato,<br>monouso, scadenza\"]:::dati\n        VDOC[\"VerificationDoc<br>documento caricato<br>in area privata (db/uploads)\"]:::dati\n        PHO[\"ReviewPhoto<br>max 3 per recensione,<br>JPEG senza EXIF\"]:::dati\n    VOT[\"ReviewVote — Fase 3<br>pollice su/giù · UNIQUE (recensione, utente)\"]:::dati\n\n    CAT -->|\"1:N classifica\"| ENT\n    ZON -->|\"1:N localizza\"| ENT\n    USR -->|\"1:N scrive\"| REV\n    EXP -->|\"1:N inviti\"| INV\n    EXP -->|\"1:N allega\"| VDOC\n    REV -->|\"1:3 foto\"| PHO\n    REV -->|\"1:N voti utili\"| VOT\n\n    classDef dati fill:#F8FAFC,stroke:#64748B,stroke-width:1.5px,color:#1E293B",
+  "png": "D9-modello-dati-1-2-catalogo-e-recensioni.png"
+ },
+ {
+  "code": "D10",
+  "title": "Modello dati (2/2): utenti, premium e consulenza",
+  "src": "---\ntitle: \"D10 — Modello dati (2/2): utenti, premium e consulenza\"\nconfig:\n  theme: base\n  themeVariables:\n    primaryColor: \"#EFF6FF\"\n    primaryBorderColor: \"#3B82F6\"\n    primaryTextColor: \"#1E293B\"\n    lineColor: \"#94A3B8\"\n    fontSize: \"14px\"\n    fontFamily: \"Helvetica, Arial, DejaVu Sans, sans-serif\"\n---\nerDiagram\n    USER ||--o{ SESSION : \"cookie pubblico / admin\"\n    USER ||--o{ PREMIUM_GRANT : \"riceve\"\n    USER ||--o| CONSULTANT_PROFILE : \"1 a 1, se consulente\"\n    USER ||--o{ PERIZIA_REQUEST : \"richiedente\"\n    CONSULTANT_PROFILE ||--|| ENTITY : \"scheda pubblica\"\n    CONSULTANT_PROFILE ||--o{ CONSULTANT_DOC : \"documenti privati\"\n    CONSULTANT_PROFILE ||--o{ PERIZIA_REQUEST : \"consulente\"\n\n    USER {\n        string email UK\n        string role \"user / moderator / admin / superadmin\"\n        boolean totpEnabled\n        datetime premiumUntil \"derivato dai grant\"\n    }\n    PREMIUM_GRANT {\n        int days\n        string origin \"review / admin / seed\"\n        datetime expiresAt\n    }\n    CONSULTANT_PROFILE {\n        string status \"pending / approved / rejected\"\n        string ibanCheck \"self / confirmed / mismatch\"\n        int feeCents \"0 = su richiesta\"\n    }\n    PERIZIA_REQUEST {\n        string status \"requested / accepted / paid / delivered / closed\"\n        int payoutCents \"90 percento\"\n        int commissionCents \"10 percento\"\n    }",
+  "png": "D10-modello-dati-2-2-utenti-premium-e-consul.png"
+ }
+];
+
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  themeVariables: {
+    primaryColor: "#EFF6FF",
+    primaryBorderColor: "#3B82F6",
+    primaryTextColor: "#1E293B",
+    lineColor: "#94A3B8",
+    secondaryColor: "#F0FDF4",
+    tertiaryColor: "#FFF7ED",
+    fontSize: "14px",
+    fontFamily: "Helvetica, Arial, DejaVu Sans, sans-serif"
+  },
+  flowchart: { curve: "basis", padding: 20, nodeSpacing: 55, rankSpacing: 65, htmlLabels: true }
+});
+
+let current = 0;
+let renderSeq = 0;
+
+const nav = document.getElementById("nav");
+DATA.forEach((d, i) => {
+  const b = document.createElement("button");
+  b.className = "chip";
+  b.textContent = d.code + " — " + d.title;
+  b.onclick = () => select(i);
+  nav.appendChild(b);
+});
+
+function select(i) {
+  current = i;
+  document.querySelectorAll(".chip").forEach((c, j) => c.classList.toggle("active", j === i));
+  document.getElementById("title").textContent = DATA[i].code + " — " + DATA[i].title;
+  document.getElementById("subtitle").textContent =
+    "Immagine corrispondente: diagrammi/" + DATA[i].png;
+  document.getElementById("src").value = DATA[i].src;
+  document.getElementById("editorBox").classList.remove("open");
+  render(DATA[i].src);
+}
+
+async function render(src) {
+  const seq = ++renderSeq;
+  const status = document.getElementById("status");
+  status.textContent = "Rendering…";
+  status.classList.remove("err");
+  try {
+    const { svg } = await mermaid.render("g" + seq, src);
+    if (seq !== renderSeq) return;
+    document.getElementById("diagram").innerHTML = svg;
+    status.textContent = "";
+  } catch (e) {
+    if (seq !== renderSeq) return;
+    document.getElementById("diagram").innerHTML =
+      '<div class="placeholder">Errore nel sorgente Mermaid — controlla la sintassi nella casella qui sotto.</div>';
+    status.textContent = "Errore: " + (e.message || e);
+    status.classList.add("err");
+    document.getElementById("editorBox").classList.add("open");
+  }
+}
+
+document.getElementById("btn-edit").onclick = () => {
+  const box = document.getElementById("editorBox");
+  box.classList.toggle("open");
+  if (box.classList.contains("open")) document.getElementById("src").focus();
+};
+
+document.getElementById("src").addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); update(); }
+});
+
+function update() {
+  const src = document.getElementById("src").value;
+  render(src);
+}
+
+document.getElementById("btn-copy").onclick = async () => {
+  const src = document.getElementById("src").value;
+  try {
+    await navigator.clipboard.writeText(src);
+    flash("Codice copiato: incollamelo in chat per applicarlo");
+  } catch {
+    const ta = document.getElementById("src");
+    ta.select();
+    document.execCommand("copy");
+    flash("Codice copiato");
+  }
+};
+
+document.getElementById("btn-download").onclick = () => {
+  const src = document.getElementById("src").value;
+  const blob = new Blob([src], { type: "text/plain" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = DATA[current].code + ".mmd";
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+document.getElementById("btn-reset").onclick = () => {
+  document.getElementById("src").value = DATA[current].src;
+  render(DATA[current].src);
+  flash("Sorgente originale ripristinato");
+};
+
+function flash(msg) {
+  const status = document.getElementById("status");
+  status.textContent = msg;
+  status.classList.remove("err");
+  setTimeout(() => { if (status.textContent === msg) status.textContent = ""; }, 4000);
+}
+
+select(0);
+</script>
+</body>
+</html>

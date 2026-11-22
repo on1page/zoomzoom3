@@ -1,0 +1,97 @@
+---
+title: "D5 — Autenticazione, verifica email, 2FA e account"
+config:
+  theme: base
+  themeVariables:
+    primaryColor: "#EFF6FF"
+    primaryBorderColor: "#3B82F6"
+    primaryTextColor: "#1E293B"
+    lineColor: "#94A3B8"
+    fontSize: "14px"
+    fontFamily: "Helvetica, Arial, DejaVu Sans, sans-serif"
+  flowchart:
+    curve: basis
+    padding: 20
+    nodeSpacing: 55
+    rankSpacing: 65
+    htmlLabels: true
+---
+flowchart TB
+
+    %% ═══ REGISTRAZIONE ═══
+    subgraph REG["Registrazione e verifica email"]
+        REGV["#/registrati — email, nickname, password,<br>accettazione termini, honey-pot"]:::ui
+        POSTR["POST /api/auth/register<br>hash scrypt + EmailVerifyToken<br>(hashato, scade in 48 h)"]:::api
+        MAIL{"SMTP configurato?"}:::bivio
+        SENT["email reale via nodemailer<br>con link #/verifica-email/[token]"]:::ext
+        QUEUED["email in coda su EmailLog<br>l'interfaccia lo dichiara"]:::dati
+        DEMO["DEMO_MODE: leggi il link nella<br>casella demo #/casella-demo (staff)<br>o back office → demo"]:::staff
+        VLNK["#/verifica-email/[token]<br>riscatto monouso — POST verify-email"]:::ui
+        OKV["email verificata: sblocca i contributi<br>(recensioni, schede, perizie, consulente)"]:::esito
+        REGV --> POSTR
+        POSTR --> MAIL
+        MAIL -->|"sì"| SENT
+        MAIL -->|"no"| QUEUED
+        QUEUED --> DEMO
+        DEMO -.->|"apri il link manualmente"| VLNK
+        SENT --> VLNK
+        VLNK --> OKV
+    end
+
+    %% ═══ ACCESSO ═══
+    subgraph LOG["Accesso — #/accedi"]
+        LOGV["email + password"]:::ui
+        POSTL["POST /api/auth/login"]:::api
+        LOCK["lockout: 5 tentativi falliti → 60 s<br>di blocco (SecurityLog)"]:::blocco
+        N2FA{"2FA attiva<br>sull'account?"}:::bivio
+        TOTP["POST /api/auth/login-2fa<br>codice TOTP dall'app autenticatore"]:::api
+        QR["primo accesso con 2FA mai completata:<br>QR di iscrizione mostrato una sola volta"]:::staff
+        BKP["POST /api/auth/2fa/backup-login<br>8 codici monouso (hashati)"]:::api
+        GOOG["Accedi con Google (opzionale)<br>/api/auth/google/start e /callback<br>senza env: 503"]:::ext
+        SESS["SESSIONE — cookie zz_session, 7 giorni<br>token da 256 bit, solo hashato in tabella"]:::dati
+        LOGV --> POSTL
+        POSTL --> N2FA
+        POSTL -.->|"credenziali errate"| LOCK
+        N2FA -->|"sì"| TOTP
+        TOTP -->|"codice valido"| SESS
+        TOTP -.->|"prima volta"| QR
+        N2FA -->|"sì, ma codice TOTP perso"| BKP
+        BKP -->|"codice monouso valido"| SESS
+        N2FA -->|"no"| SESS
+        LOGV -->|"oppure"| GOOG
+        GOOG -->|"crea o collega l'account"| SESS
+    end
+
+    %% ═══ STAFF ═══
+    subgraph STAFFA["Staff"]
+        STFR["il login pubblico rifiuta gli account staff<br>(staffOnly)"]:::blocco
+        ADM["#/admin — password + TOTP obbligatorio<br>sessione separata 30 minuti (sliding)"]:::staff
+        STFR -->|"usa invece"| ADM
+    end
+
+    %% ═══ AREA PERSONALE E CHI È CHI ═══
+    subgraph PROFI["Area personale e chi è chi"]
+        PROF["#/profilo — panoramica: card Premium<br>con storico grant, esperienze, recensioni,<br>segnalazioni, card Consulente"]:::ui
+        IMPO["#/profilo-impostazioni — attiva/disattiva 2FA<br>(QR + 8 codici backup), cambio password,<br>cambio nickname, export dati GDPR,<br>richiesta di cancellazione"]:::ui
+        RUOLI["RUOLI (tabella User.role):<br>user · moderator · admin · superadmin<br>permessi per voce (PERMS)"]:::staff
+        PREM["PREMIUM: non è un ruolo — stato derivato<br>premiumUntil = max scadenze dei grant"]:::esito
+        CONS["CONSULENTE TECNICO: non è un ruolo —<br>ConsultantProfile approvato collegato all'utente"]:::ui
+        PROF --> IMPO
+    end
+
+    OKV -.->|"poi accedi"| LOGV
+    LOG -.->|"account staff: rifiutato qui"| STAFFA
+    SESS --> PROF
+
+    classDef ui fill:#EFF6FF,stroke:#3B82F6,stroke-width:1.5px,color:#1E293B
+    classDef api fill:#F0FDF4,stroke:#10B981,stroke-width:1.5px,color:#1E293B
+    classDef dati fill:#F8FAFC,stroke:#64748B,stroke-width:1.5px,color:#1E293B
+    classDef ext fill:#FFF7ED,stroke:#F59E0B,stroke-width:1.5px,color:#1E293B
+    classDef staff fill:#F5F3FF,stroke:#8B5CF6,stroke-width:1.5px,color:#1E293B
+    classDef esito fill:#D1FAE5,stroke:#059669,stroke-width:1.5px,color:#1E293B
+    classDef blocco fill:#FEF2F2,stroke:#EF4444,stroke-width:1.5px,color:#1E293B
+    classDef bivio fill:#FFF7ED,stroke:#F59E0B,stroke-width:2px,color:#1E293B
+    style REG fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px
+    style LOG fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px
+    style STAFFA fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px
+    style PROFI fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px

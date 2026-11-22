@@ -1,0 +1,70 @@
+---
+title: "D8 — Moderazione e back office staff"
+config:
+  theme: base
+  themeVariables:
+    primaryColor: "#EFF6FF"
+    primaryBorderColor: "#3B82F6"
+    primaryTextColor: "#1E293B"
+    lineColor: "#94A3B8"
+    fontSize: "14px"
+    fontFamily: "Helvetica, Arial, DejaVu Sans, sans-serif"
+  flowchart:
+    curve: basis
+    padding: 20
+    nodeSpacing: 55
+    rankSpacing: 65
+    htmlLabels: true
+---
+flowchart TB
+
+    %% ═══ CODE IN INGRESSO ═══
+    subgraph ING["Code in ingresso (dal sito pubblico)"]
+        direction LR
+        REP["POST /api/reports — 8 motivi<br>solo utenti registrati"]:::api
+        DIS["POST /api/disputes — contestazione<br>associazione scheda, anche anonima"]:::api
+        PROP["POST /api/proposals — proposta<br>di nuova scheda"]:::api
+        EXPP["esperienze pending:<br>verifica documentale o inviti oltre soglia"]:::api
+        CONP["domande consulenti pending"]:::api
+        PERZ["perizie da pagare / accreditare"]:::api
+    end
+
+    %% ═══ BACK OFFICE ═══
+    subgraph BO["Back office — #/admin/[sezione]"]
+        LOGIN["login: password + TOTP<br>sessione separata 30 minuti<br>2FA obbligatoria per lo staff"]:::staff
+        SEZ["17 sezioni: dashboard, segnalazioni, contestazioni,<br>recensioni, foto, esperienze, inviti, utenti, entità,<br>consulenti, perizie, contenuti, impostazioni, log,<br>sicurezza, ruoli, demo"]:::staff
+        LOGIN --> SEZ
+    end
+    ING -->|"lavorate da"| BO
+
+    %% ═══ AZIONI ═══
+    subgraph AZ["Azioni principali (29 — tutte con AuditLog)"]
+        direction LR
+        ACT1["report.take / decide / appeal<br>review.hide / restore — hide toglie il<br>Premium guadagnato con quella recensione<br>photo.remove · dispute.take / decide"]:::staff
+        ACT2["experience.approve / reject<br>invite.revoke · user.toggle<br>premium.grant / revoke · privacy.done"]:::staff
+        ACT3["proposal.approve / reject<br>entity.toggle · consultant.approve /<br>reject / ibanConfirm / ibanMismatch"]:::staff
+        ACT4["contents.update · settings.update<br>(flag e limiti) · role.set (solo superadmin,<br>richiede 2FA) · demo.wipe / demo.reseed"]:::staff
+    end
+    BO --> AZ
+
+    %% ═══ CICLO SEGNALAZIONE ═══
+    subgraph CICLO["Ciclo di una segnalazione (Report)"]
+        direction LR
+        R1["received"]:::dati --> R2["reviewing<br>(presa in carico)"]:::dati
+        R2 --> R3["decided:<br>mantieni / nascondi / ripristina"]:::dati
+        R3 -->|"appello entro 15 giorni<br>(autore o segnalatore)"| R4["appeal"]:::dati
+        R3 --> R5["closed"]:::dati
+        R4 --> R5
+    end
+    REP -.->|"entra nel ciclo"| CICLO
+
+    SEC["SecurityLog: login, lockout,<br>azioni sensibili, errori auth"]:::dati
+    AZ --> SEC
+
+    classDef api fill:#F0FDF4,stroke:#10B981,stroke-width:1.5px,color:#1E293B
+    classDef dati fill:#F8FAFC,stroke:#64748B,stroke-width:1.5px,color:#1E293B
+    classDef staff fill:#F5F3FF,stroke:#8B5CF6,stroke-width:1.5px,color:#1E293B
+    style ING fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px
+    style BO fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px
+    style AZ fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px
+    style CICLO fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px

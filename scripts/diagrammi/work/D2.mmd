@@ -1,0 +1,72 @@
+---
+title: "D2 — Contributo aperto (1/2): scelta del target e del luogo"
+config:
+  theme: base
+  themeVariables:
+    primaryColor: "#EFF6FF"
+    primaryBorderColor: "#3B82F6"
+    primaryTextColor: "#1E293B"
+    lineColor: "#94A3B8"
+    fontSize: "14px"
+    fontFamily: "Helvetica, Arial, DejaVu Sans, sans-serif"
+  flowchart:
+    curve: basis
+    padding: 20
+    nodeSpacing: 55
+    rankSpacing: 65
+    htmlLabels: true
+---
+flowchart TB
+
+    %% ═══ PASSO 1: target ═══
+    subgraph P1["PASSO 1 — Scelta del target (#/recensione)"]
+        direction LR
+        IN(["CTA «Scrivi una recensione»<br>dal menu o da una scheda"]):::ui
+        TGT{"Che cosa vuoi recensire?"}:::bivio
+        IN --> TGT
+        TIP["Immobile<br>(casa, appartamento, negozio…)"]:::ui
+        TZN["Zona o città<br>(quartiere, comune)"]:::ui
+        PRP["Altro soggetto<br>(persona, agenzia, ditta…)"]:::ui
+        TGT -->|"immobile"| TIP
+        TGT -->|"zona / città"| TZN
+        TGT -->|"altro"| PRP
+    end
+
+    %% proposta di scheda (per soggetti non geografici)
+    PRP -->|"POST /api/proposals"| PROP["EntityProposal: received<br>in revisione allo staff"]:::api
+    PROP -->|"staff: proposal.approve"| ENTP["Entity pubblicata<br>(poi modificabile con entity.toggle)"]:::esito
+
+    %% ═══ PASSO 2: luogo ═══
+    subgraph P2["PASSO 2 — Trova o aggiungi il luogo (fino alla conferma della città)"]
+        RIC["Ricerca: PlaceSearch (città)<br>o AddressSearch (indirizzo)"]:::ui
+        GEO["GET /api/public/geocode<br>proxy Nominatim — solo Italia"]:::api
+        NOM["Nominatim / OpenStreetMap<br>cache 15 min, rate 20/min per IP"]:::ext
+        RIC -->|"testo digitato"| GEO
+        GEO --> NOM
+        GPS["Bottone GPS<br>posizione del browser"]:::ui
+        RGEO["GET /api/public/geocode/reverse<br>via + civico + comune + provincia<br>(cache 1 h, arrotondata ~100 m)"]:::api
+        GPS -->|"coordinate"| RGEO
+        RGEO --> NOM
+        PIN["Pin sulla mappa<br>LocationPicker"]:::ui
+        PIN -->|"coordinate"| RGEO
+        CAMPI["Modulo compilato:<br>via + civico + città + posizione"]:::ui
+        RIC --> CAMPI
+        GPS --> CAMPI
+        PIN --> CAMPI
+        CONF{"Città confermata?<br>pulsante «Conferma» / «Cambia»<br>(stato zoneOk)"}:::bivio
+        CAMPI --> CONF
+        CONF -->|"no: correggi"| CAMPI
+    end
+
+    TIP -->|"vai al passo 2"| RIC
+    TZN -->|"vai al passo 2"| RIC
+    CONF -->|"sì"| GO(["Città confermata:<br>si passa al salvataggio (D3)"]):::esito
+
+    classDef ui fill:#EFF6FF,stroke:#3B82F6,stroke-width:1.5px,color:#1E293B
+    classDef api fill:#F0FDF4,stroke:#10B981,stroke-width:1.5px,color:#1E293B
+    classDef ext fill:#FFF7ED,stroke:#F59E0B,stroke-width:1.5px,color:#1E293B
+    classDef staff fill:#F5F3FF,stroke:#8B5CF6,stroke-width:1.5px,color:#1E293B
+    classDef esito fill:#D1FAE5,stroke:#059669,stroke-width:1.5px,color:#1E293B
+    classDef bivio fill:#FFF7ED,stroke:#F59E0B,stroke-width:2px,color:#1E293B
+    style P1 fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px
+    style P2 fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px

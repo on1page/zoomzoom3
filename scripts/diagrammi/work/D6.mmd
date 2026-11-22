@@ -1,0 +1,81 @@
+---
+title: "D6 — Consulente Tecnico: iscrizione e approvazione"
+config:
+  theme: base
+  themeVariables:
+    primaryColor: "#EFF6FF"
+    primaryBorderColor: "#3B82F6"
+    primaryTextColor: "#1E293B"
+    lineColor: "#94A3B8"
+    fontSize: "14px"
+    fontFamily: "Helvetica, Arial, DejaVu Sans, sans-serif"
+  flowchart:
+    curve: basis
+    padding: 20
+    nodeSpacing: 55
+    rankSpacing: 65
+    htmlLabels: true
+---
+flowchart TB
+
+    START(["Utente vuole diventare<br>Consulente Tecnico"]):::ui
+    CK2FA{"2FA attiva?"}:::bivio
+    IMP2["#/profilo-impostazioni<br>attiva la 2FA, poi torna qui"]:::ui
+    CKE{"Email verificata e funzione<br>consulenti abilitata?"}:::bivio
+    STOP(["Completa la verifica email<br>o attendi l'attivazione"]):::blocco
+    FORM["#/consulente — domanda di iscrizione"]:::ui
+
+    START --> CK2FA
+    CK2FA -->|"no"| IMP2
+    CK2FA -->|"sì"| CKE
+    CKE -->|"no"| STOP
+    CKE -->|"sì"| FORM
+
+    %% ═══ DATI DELLA DOMANDA ═══
+    subgraph DATIF["Dati della domanda — POST /api/consulente/apply"]
+        ANAG["anagrafica: nome e cognome, foto profilo<br>(ridotta a 800 px), professione (7 valori),<br>titolo di studio, bio"]:::ui
+        ZONR["zona di esercizio via geocoding<br>+ raggio 5–300 km"]:::ui
+        ECO["tariffa (o «su richiesta»), P.IVA,<br>IBAN + dichiarazione di intestazione<br>(validazione struttura + mod-97)"]:::ui
+        DOC["documenti: qualifica + documento d'identità<br>(obbligatori), max 8 file, controllo magic byte"]:::ui
+    end
+    FORM --> DATIF
+
+    %% ═══ VERIFICA IBAN ═══
+    IBANV{"Verifica esterna dell'intestatario<br>(se configurata)"}:::bivio
+    ECO --> IBANV
+    IBOK["ibanCheck: confirmed"]:::esito
+    IBKO["400 — intestatario diverso:<br>correggi l'IBAN e riprova"]:::blocco
+    IBSL["non attiva: autocertificazione<br>+ conferma manuale dello staff<br>(consultant.ibanConfirm)"]:::staff
+    IBANV -->|"match"| IBOK
+    IBANV -->|"mismatch"| IBKO
+    IBANV -->|"non attiva"| IBSL
+
+    PEND["ConsultantProfile: stato pending<br>documenti privati, visibili solo allo staff"]:::dati
+    IBOK --> PEND
+    IBSL --> PEND
+
+    %% ═══ DECISIONE STAFF ═══
+    STAFFD{"Staff — #/admin/consulenti"}:::staff
+    APPR["consultant.approve: ricontrollo 2FA,<br>crea/aggiorna la Entity categoria «consulente»<br>con verifiedBusiness"]:::esito
+    REJ["consultant.reject (motivo min 10 caratteri)<br>oppure ibanMismatch"]:::blocco
+    REAP["ri-domanda: torna al modulo #/consulente<br>conservando i documenti indicati"]:::ui
+    PEND --> STAFFD
+    STAFFD -->|"approva"| APPR
+    STAFFD -->|"rifiuta"| REJ
+    REJ --> REAP
+
+    APPROVED["CONSULENTE APPROVATO<br>scheda pubblica con foto, zona, raggio e tariffa<br>GET /api/consulente/photo/[id] (pubblica)"]:::esito
+    DASH["ConsultantDashboard: richieste ricevute<br>accetta / rifiuta / consegna (D7)"]:::ui
+    PATCH["modifiche dopo l'approvazione:<br>bio, tariffa, raggio, telefono — PATCH me<br>gestione documenti: docs"]:::ui
+    APPR --> APPROVED
+    APPROVED --> DASH
+    APPROVED --> PATCH
+
+    classDef ui fill:#EFF6FF,stroke:#3B82F6,stroke-width:1.5px,color:#1E293B
+    classDef api fill:#F0FDF4,stroke:#10B981,stroke-width:1.5px,color:#1E293B
+    classDef dati fill:#F8FAFC,stroke:#64748B,stroke-width:1.5px,color:#1E293B
+    classDef staff fill:#F5F3FF,stroke:#8B5CF6,stroke-width:1.5px,color:#1E293B
+    classDef esito fill:#D1FAE5,stroke:#059669,stroke-width:1.5px,color:#1E293B
+    classDef blocco fill:#FEF2F2,stroke:#EF4444,stroke-width:1.5px,color:#1E293B
+    classDef bivio fill:#FFF7ED,stroke:#F59E0B,stroke-width:2px,color:#1E293B
+    style DATIF fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px

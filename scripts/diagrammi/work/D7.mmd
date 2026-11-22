@@ -1,0 +1,52 @@
+---
+title: "D7 — Ciclo di vita di una perizia (PeriziaRequest)"
+config:
+  theme: base
+  themeVariables:
+    primaryColor: "#EFF6FF"
+    primaryBorderColor: "#3B82F6"
+    primaryTextColor: "#1E293B"
+    lineColor: "#94A3B8"
+    fontSize: "14px"
+    fontFamily: "Helvetica, Arial, DejaVu Sans, sans-serif"
+  flowchart:
+    curve: basis
+    padding: 20
+    nodeSpacing: 55
+    rankSpacing: 65
+    htmlLabels: true
+---
+flowchart TB
+
+    %% stati principali (percorso felice)
+    START(["richiedente invia la richiesta<br>POST /api/consulente/requests — max 5/giorno"]):::ui
+    REQ["requested<br>richiesta inviata"]:::dati
+    ACC["accepted<br>accettata"]:::dati
+    PAID["paid<br>pagata"]:::dati
+    DEL["delivered<br>relazione consegnata"]:::dati
+    CLO(["closed<br>chiusa"]):::esito
+
+    %% uscite
+    REJ(["rejected<br>rifiutata"]):::blocco
+    CAN(["cancelled<br>annullata"]):::blocco
+
+    START --> REQ
+    REQ -->|"consulente accetta,<br>conferma la tariffa"| ACC
+    REQ -->|"consulente rifiuta,<br>con motivo"| REJ
+    REQ -->|"utente annulla"| CAN
+    ACC -->|"utente annulla"| CAN
+    ACC -->|"superadmin registra<br>il pagamento"| PAID
+    PAID -->|"consulente consegna<br>la relazione"| DEL
+    DEL -->|"superadmin accredita<br>il payout"| CLO
+
+    %% note operative
+    NOTEP["pagamento manuale su platformIban (settings)<br>nessun gateway di pagamento nella v1"]:::staff
+    NOTED["alla consegna: payout 90% e commissione 10%<br>PDF per richiedente, consulente e staff<br>GET /api/consulente/requests/[id]/pdf"]:::staff
+    NOTEP -.-> PAID
+    NOTED -.-> DEL
+
+    classDef ui fill:#EFF6FF,stroke:#3B82F6,stroke-width:1.5px,color:#1E293B
+    classDef dati fill:#F8FAFC,stroke:#64748B,stroke-width:1.5px,color:#1E293B
+    classDef staff fill:#F5F3FF,stroke:#8B5CF6,stroke-width:1.5px,color:#1E293B
+    classDef esito fill:#D1FAE5,stroke:#059669,stroke-width:1.5px,color:#1E293B
+    classDef blocco fill:#FEF2F2,stroke:#EF4444,stroke-width:1.5px,color:#1E293B
