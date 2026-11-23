@@ -518,6 +518,10 @@ export function ZoneView({ entityId }: { entityId: string }) {
   const [sections, setSections] = useState<Array<{ category: { id: string; shortName: string; hexColor: string; icon: string }; rows: Array<{ entityId: string; name: string; zoneId: string | null; isDemo: boolean; n: number; mean: number | null; sufficient: boolean }> }>>([]);
 
   useEffect(() => {
+    // Reset dello stato per il nuovo id: senza questo, una scheda non
+    // trovata restava "Pagina non trovata" anche dopo aver cambiato zona.
+    setNotFound(false);
+    setData(null);
     void api<EntityPayload>(`/api/public/entity/${entityId}`).then(res => {
       if (res.ok) setData(res); else setNotFound(true);
     });

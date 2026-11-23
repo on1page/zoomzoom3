@@ -23,9 +23,17 @@ import { handleError } from "@/lib/server/http";
 
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
-    const { id } = await ctx.params;
+    const { id: rawId } = await ctx.params;
     const [settings, user] = await Promise.all([getSettings(), getCurrentUser()]);
-    const ent = await db.entity.findUnique({ where: { id } });
+    let ent = await db.entity.findUnique({ where: { id: rawId } });
+    // Fallback per i link alle zone che usano lo slug (es. #/zona/milano):
+    // se l'id non corrisponde a nessuna scheda, prova a risolvere la scheda
+    // città della zona con quell'id (una sola scheda "zona" pubblicata per
+    // zona); da qui in avanti si usa l'id RISOLTO della scheda trovata.
+    if (!ent) {
+      ent = await db.entity.findFirst({ where: { zoneId: rawId, categoryId: "zona", status: "published" } });
+    }
+    const id = ent?.id ?? rawId;
     if (!ent || ent.status !== "published") {
       return NextResponse.json({ ok: false, error: "Scheda non trovata." }, { status: 404 });
     }

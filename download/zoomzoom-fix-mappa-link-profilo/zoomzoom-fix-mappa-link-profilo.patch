@@ -1,0 +1,155 @@
+diff --git a/src/app/api/auth/me/profile/route.ts b/src/app/api/me/profile/route.ts
+similarity index 100%
+rename from src/app/api/auth/me/profile/route.ts
+rename to src/app/api/me/profile/route.ts
+diff --git a/src/app/api/public/entity/[id]/route.ts b/src/app/api/public/entity/[id]/route.ts
+index f09ae36..99bf878 100644
+--- a/src/app/api/public/entity/[id]/route.ts
++++ b/src/app/api/public/entity/[id]/route.ts
+@@ -23,9 +23,17 @@ import { handleError } from "@/lib/server/http";
+ 
+ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
+   try {
+-    const { id } = await ctx.params;
++    const { id: rawId } = await ctx.params;
+     const [settings, user] = await Promise.all([getSettings(), getCurrentUser()]);
+-    const ent = await db.entity.findUnique({ where: { id } });
++    let ent = await db.entity.findUnique({ where: { id: rawId } });
++    // Fallback per i link alle zone che usano lo slug (es. #/zona/milano):
++    // se l'id non corrisponde a nessuna scheda, prova a risolvere la scheda
++    // città della zona con quell'id (una sola scheda "zona" pubblicata per
++    // zona); da qui in avanti si usa l'id RISOLTO della scheda trovata.
++    if (!ent) {
++      ent = await db.entity.findFirst({ where: { zoneId: rawId, categoryId: "zona", status: "published" } });
++    }
++    const id = ent?.id ?? rawId;
+     if (!ent || ent.status !== "published") {
+       return NextResponse.json({ ok: false, error: "Scheda non trovata." }, { status: 404 });
+     }
+diff --git a/src/app/globals.css b/src/app/globals.css
+index e9dc0f1..7e86fe8 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -136,6 +136,10 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 1.5em 0; }
+ .grid-side { grid-template-columns: 300px 1fr; align-items: start; gap: 26px; }
+ .grid-entity { grid-template-columns: 1fr 320px; align-items: start; gap: 26px; }
+ .grid-zone { grid-template-columns: 1fr 340px; align-items: start; gap: 26px; }
++/* la mappa nell'aside ha una larghezza minima intrinseca (aspect-ratio +
++   min-height): senza min-width:0 la colonna del grid non può scendere
++   sotto quella larghezza e sui telefoni la sidebar esce dallo schermo */
++.grid-zone > aside { min-width: 0; }
+ @media (max-width: 1020px) { .grid-entity, .grid-zone { grid-template-columns: 1fr; } }
+ 
+ /* ---------- Card ---------- */
+@@ -314,25 +318,33 @@ table.table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+ .leg-dot { width: 13px; height: 13px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px var(--line); display: inline-block; }
+ 
+ /* ---------- Mappa delle reputazioni (MapLibre GL + MapTiler OMT) ---------- */
+-.map-viewport { position: relative; overflow: hidden; aspect-ratio: 1000 / 640; min-height: 340px; outline: none; border-radius: 0; background: #DCE6EA; }
++/* width:100% impedisce al min-height di trasformarsi in larghezza minima
++   attraverso l'aspect-ratio: sotto ~530px di contenitore il box veniva
++   allargato a 531px e la mappa usciva dallo schermo (veniva troncata) */
++.map-viewport { position: relative; overflow: hidden; width: 100%; aspect-ratio: 1000 / 640; min-height: 340px; outline: none; border-radius: 0; background: #DCE6EA; }
+ .map-viewport:focus-visible { box-shadow: inset 0 0 0 3px rgba(51,101,138,.35); }
+ .map-viewport .map-holder { position: absolute; inset: 0; }
+ .map-viewport .maplibregl-map { background: #DCE6EA; font-family: var(--font-sans); }
+ .map-viewport .maplibregl-canvas { outline: none; }
+ .map-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; margin: 0; color: var(--ink-soft); font-size: .9rem; }
+-.map-loc { position: absolute; top: 10px; left: 10px; z-index: 650; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; background: rgba(255,255,255,.94); border: 1px solid var(--line); border-radius: 999px; padding: 4px 6px 4px 12px; box-shadow: var(--shadow-1); font-size: .78rem; }
++/* ricerca città e pulsanti Criterio impilati in colonna in alto a sinistra:
++   il pannello ricerca può andare a capo e allargarsi quanto serve, i pulsanti
++   Criterio restano sempre SOTTO di lui — mai sovrapposti o coperti */
++.map-topleft { position: absolute; top: 10px; left: 10px; z-index: 650; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; max-width: min(76%, 700px); pointer-events: none; }
++.map-topleft > * { pointer-events: auto; }
++.map-loc { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; background: rgba(255,255,255,.94); border: 1px solid var(--line); border-radius: 999px; padding: 4px 6px 4px 12px; box-shadow: var(--shadow-1); font-size: .78rem; }
+ .map-zone-select { border: 1px solid var(--line); border-radius: 999px; padding: 3px 6px; font-size: .78rem; background: var(--surface); max-width: 190px; }
+ .map-italy-btn { position: absolute; top: 10px; right: 60px; z-index: 650; }
+ .map-italy-btn button { border: 1px solid var(--line); background: rgba(255,255,255,.94); border-radius: 8px; padding: 6px 11px; font: 700 .74rem var(--font-sans); color: var(--ink); cursor: pointer; box-shadow: var(--shadow-1); }
+ .map-italy-btn button:hover { background: #fff; }
+ /* filtri per criterio: ricolorano regioni, province, comuni e pin */
+-.map-crit { position: absolute; top: 50px; left: 10px; z-index: 648; display: flex; gap: 5px; align-items: center; flex-wrap: wrap; max-width: min(74%, 680px); background: rgba(255,255,255,.94); border: 1px solid var(--line); border-radius: 12px; padding: 5px 8px; box-shadow: var(--shadow-1); }
++.map-crit { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; max-width: 100%; background: rgba(255,255,255,.94); border: 1px solid var(--line); border-radius: 12px; padding: 5px 8px; box-shadow: var(--shadow-1); }
+ .map-crit-lab { font: 700 .72rem var(--font-sans); color: var(--ink-soft); }
+ .map-crit-chip { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 3px 10px; font: 600 .72rem var(--font-sans); color: var(--ink); cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
+ .map-crit-chip:hover { background: #fff; border-color: #33658A; }
+ .map-crit-chip.on { background: #33658A; border-color: #33658A; color: #fff; }
+ .map-crit-chip:focus-visible { outline: 2px solid #33658A; outline-offset: 1px; }
+-@media (max-width: 820px) { .map-zone-select { max-width: 130px; } .map-italy-btn { right: 56px; } .map-crit { top: 48px; max-width: calc(100% - 20px); } }
++@media (max-width: 820px) { .map-zone-select { max-width: 130px; } .map-italy-btn { right: 56px; } .map-topleft { max-width: calc(100% - 20px); } }
+ 
+ /* pin delle città: chip leggibile + punto colorato */
+ .zz-zone-pin-wrap { background: none; border: none; pointer-events: none; }
+diff --git a/src/components/map.tsx b/src/components/map.tsx
+index d373f36..dca2040 100644
+--- a/src/components/map.tsx
++++ b/src/components/map.tsx
+@@ -760,24 +760,10 @@ export function MapViewport({ mode = "immobili", activeZone }: { mode?: "immobil
+     <div className="map-viewport" role="application"
+       aria-label="Mappa delle reputazioni del territorio italiano (cartografia MapTiler/OpenStreetMap). Trascina per esplorare, usa la rotella o i pulsanti per lo zoom. A livello nazionale le regioni sono colorate per reputazione; zoomando passano province e comuni. I pulsanti Criterio colorano regioni, province e comuni in base ai singoli criteri di valutazione delle zone. I pin delle città aprono la loro scheda, i punti immobile aprono una scheda sintetica.">
+       <div className="map-holder" ref={holderRef}></div>
+-      <div className="map-crit" role="group"
+-        aria-label="Colora la mappa in base ai criteri di valutazione delle zone">
+-        <span className="map-crit-lab" aria-hidden="true">Criterio:</span>
+-        <button type="button" className={`map-crit-chip${critSel.length ? "" : " on"}`}
+-          aria-pressed={critSel.length === 0}
+-          title="Reputazione complessiva: media di tutte le recensioni delle schede del territorio"
+-          onClick={() => setCritSel([])}>Complessiva</button>
+-        {(data.criteriaList || []).map(c => {
+-          const on = critSel.includes(c.key);
+-          return (
+-            <button type="button" key={c.key} className={`map-crit-chip${on ? " on" : ""}`}
+-              aria-pressed={on} title={`Colora per: ${c.label} (secondo clic per disattivare; più criteri = media ponderata)`}
+-              onClick={() => setCritSel(s => (s.includes(c.key) ? s.filter(x => x !== c.key) : [...s, c.key]))}>
+-              {criterionShortLabel(c.key, c.label)}
+-            </button>
+-          );
+-        })}
+-      </div>
++      {/* pannello ricerca città + pulsanti Criterio IMPILATI in una colonna:
++          qualunque altezza assuma l'uno (su schermi stretti va a capo), i
++          pulsanti restano sempre SOTTO il pannello, mai coperti */}
++      <div className="map-topleft">
+       <div className="map-loc">
+         <span aria-hidden="true">◎</span>
+         <select className="map-zone-select" aria-label="La tua città di riferimento"
+@@ -799,6 +785,25 @@ export function MapViewport({ mode = "immobili", activeZone }: { mode?: "immobil
+         <button className="btn btn-ghost btn-xs" onClick={useGps}
+           title="Usa la mia posizione: le coordinate servono solo al momento e non vengono salvate">GPS</button>
+       </div>
++      <div className="map-crit" role="group"
++        aria-label="Colora la mappa in base ai criteri di valutazione delle zone">
++        <span className="map-crit-lab" aria-hidden="true">Criterio:</span>
++        <button type="button" className={`map-crit-chip${critSel.length ? "" : " on"}`}
++          aria-pressed={critSel.length === 0}
++          title="Reputazione complessiva: media di tutte le recensioni delle schede del territorio"
++          onClick={() => setCritSel([])}>Complessiva</button>
++        {(data.criteriaList || []).map(c => {
++          const on = critSel.includes(c.key);
++          return (
++            <button type="button" key={c.key} className={`map-crit-chip${on ? " on" : ""}`}
++              aria-pressed={on} title={`Colora per: ${c.label} (secondo clic per disattivare; più criteri = media ponderata)`}
++              onClick={() => setCritSel(s => (s.includes(c.key) ? s.filter(x => x !== c.key) : [...s, c.key]))}>
++              {criterionShortLabel(c.key, c.label)}
++            </button>
++          );
++        })}
++      </div>
++      </div>
+       <div className="map-italy-btn">
+         <button type="button" onClick={italyView} title="Torna alla vista dell'Italia intera: regioni colorate per reputazione">Vista Italia</button>
+       </div>
+diff --git a/src/components/views/entity-zone.tsx b/src/components/views/entity-zone.tsx
+index ebc639d..5366292 100644
+--- a/src/components/views/entity-zone.tsx
++++ b/src/components/views/entity-zone.tsx
+@@ -518,6 +518,10 @@ export function ZoneView({ entityId }: { entityId: string }) {
+   const [sections, setSections] = useState<Array<{ category: { id: string; shortName: string; hexColor: string; icon: string }; rows: Array<{ entityId: string; name: string; zoneId: string | null; isDemo: boolean; n: number; mean: number | null; sufficient: boolean }> }>>([]);
+ 
+   useEffect(() => {
++    // Reset dello stato per il nuovo id: senza questo, una scheda non
++    // trovata restava "Pagina non trovata" anche dopo aver cambiato zona.
++    setNotFound(false);
++    setData(null);
+     void api<EntityPayload>(`/api/public/entity/${entityId}`).then(res => {
+       if (res.ok) setData(res); else setNotFound(true);
+     });

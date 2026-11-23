@@ -1,0 +1,169 @@
+ZoomZoom — Fix: mappa (controlli e mobile), link delle città, rotta profilo
+==========================================================================
+
+PERCHÉ QUESTO PACCHETTO
+-----------------------
+Dal confronto tra il mio ambiente e la tua repository (richiesto e fatto
+sul codice vero, file per file) sono emersi TRE difetti, e un QUARTO è
+saltato fuori durante le prove di verifica. Due sono colpa mia (fix
+preparato ma mai consegnato; link delle città sbagliati nell'ultimo
+aggiornamento), due erano preesistenti. Questo pacchetto li risolve
+tutti e quattro. Nessuno tocca il database o lo schema: solo codice.
+
+FIX 1 — CONTROLLI DELLA MAPPA: MAI PIÙ SOVRAPPOSTI (mio errore)
+---------------------------------------------------------------
+Sul tuo sito il pannello «La tua città…» sta a top:10px e la barra
+«Criterio» a top:50px: due posizioni FISSE. Funziona finché il pannello
+sta su una riga; appena va a capo (schermi stretti, testo lungo) la
+barra Criterio finisce SOPRA il pannello, sovrapposta. Il fix (pronto
+nella mia sandbox subito dopo la consegna della mappa per criterio —
+una svista non avertelo inviato, mea culpa) mette i due controlli in
+una colonna flex (.map-topleft): il pannello ricerca può allargarsi e
+andare a capo quanto serve, la barra Criterio resta sempre SOTTO di
+lui, a 8 px di distanza, qualsiasi cosa succeda. Il menu a destra
+(«Vista Italia») e i controlli MapLibre non si toccano.
+
+FIX 2 — MAPPA CHE USCIVA DALLO SCHERMO SUI TELEFONI (preesistente)
+------------------------------------------------------------------
+Verificando il fix 1 ho scoperto un difetto più serio, presente da
+sempre: .map-viewport ha aspect-ratio 1000/640 e min-height 340px; sotto
+~530px di larghezza il browser «trasferisce» il min-height in una
+larghezza minima di 531px — la mappa diventava larga 531px anche su uno
+schermo da 360px e venva TRONCATA (si vedeva solo la parte sinistra,
+gli ultimi pulsanti «Criterio» tagliati fuori). Capitava in home, nella
+pagina mappa e nella pagina zona. Il fix: width:100% esplicito su
+.map-viewport (la larghezza segue il contenitore, l'altezza resta 340px)
+più min-width:0 sull'aside della pagina zona (dove la colonna laterale
+del grid non poteva scendere sotto i 531px per lo stesso meccanismo).
+Risultato misurato: su schermo 360px la mappa ora è 318px e sta tutta
+nello schermo; a 780px e sopra NON CAMBIA NULLA (identica al pixel).
+
+FIX 3 — LINK DELLE CITTÀ CHE PORTAVANO A «PAGINA NON TROVATA» (mio errore)
+--------------------------------------------------------------------------
+Le card e i chip delle città Zoom della nuova home (e la pagina «Cerca
+casa») puntano a #/zona/roma, #/zona/milano… cioè allo SLUG della zona.
+Ma la pagina zona si apre con l'ID della SCHEDA (es. #/zona/ent_z_roma):
+cliccando Roma dalla home si cadeva su «Pagina non trovata». Il fix,
+lato server, insegna alla API /api/public/entity/[id] a risolvere anche
+lo slug: se l'id non corrisponde a nessuna scheda, prova con la scheda
+città pubblicata di quella zona e da lì in avanti usa l'id risolto.
+Così funzionano entrambe le forme (#/zona/roma e #/zona/ent_z_roma) e
+nessun collegamento esistente si rompe. In più: la pagina zona non
+azzerava lo stato al cambio di zona — dopo UNA pagina non trovata,
+restava «Pagina non trovata» anche navigando su una zona valida
+(compariva per esempio cliccando Catania «in arrivo»... e poi una città
+buona). Ora lo stato si resetta a ogni cambio.
+
+FIX 4 — ROTTA PROFILO AL PERCORSO GIUSTO (preesistente, dalla consegna identità-privacy)
+----------------------------------------------------------------------------------------
+src/app/api/auth/me/profile/route.ts era finito nel percorso sbagliato:
+il client chiama /api/me/profile, la rotta rispondeva a
+/api/auth/me/profile → 404. Effetto: nella pagina profilo la
+dichiarazione d'identità (categoria, foto, scheda personale) e la
+rimozione della foto non si salvavano. Il file (contenuto invariato,
+identico alla consegna collaudata) ora è in src/app/api/me/profile/ e
+la vecchia cartella va eliminata (la patch lo fa da sola).
+
+FILE DEL PACCHETTO
+------------------
+  AGGIORNAMENTO-fix-mappa-link-profilo.txt   questa nota
+  LEGGIMI.md                                 guida sintetica
+  zoomzoom-fix-mappa-link-profilo.patch      le modifiche in patch git
+  src/components/map.tsx                     fix 1 — colonna controlli
+  src/app/globals.css                        fix 1, 2 — .map-topleft,
+                                             width mappa, aside zona
+  src/app/api/public/entity/[id]/route.ts    fix 3 — fallback slug zona
+  src/components/views/entity-zone.tsx       fix 3 — reset stato zona
+  src/app/api/me/profile/route.ts            fix 4 — rotta al percorso
+                                             giusto (file spostato)
+  anteprime/                                 3 screenshot (1440, 780,
+                                             420 px) del collaudo
+
+COME APPLICARLO (5 minuti)
+--------------------------
+Opzione A — patch git (consigliata), dalla cartella del progetto con
+branch pulito all'ultimo commit («patch home»):
+       cd C:\Users\Carlo\sito\zoomzoom
+       git apply --stat percorso\zoomzoom-fix-mappa-link-profilo.patch
+       git apply percorso\zoomzoom-fix-mappa-link-profilo.patch
+
+Opzione B — copia dei file da src\ del pacchetto a src\ del progetto e
+POI eliminazione della vecchia cartella (PowerShell):
+       Copy-Item -Force -Recurse "src\*" "C:\Users\Carlo\sito\zoomzoom\src\"
+       Remove-Item -Recurse -Force "C:\Users\Carlo\sito\zoomzoom\src\app\api\auth\me\profile"
+
+Poi in locale:
+       npm run dev        # o: bun run dev
+       # controlla: home, #/mappa, #/cerca-casa, #/zona/milano, profilo
+
+Se tutto va bene:
+       git add -A
+       git commit -m "fix: controlli e mobile della mappa, link città, rotta profilo"
+       git push
+Vercel ridistribuisce da solo. Nessuna migrazione, nessun db push.
+
+VERIFICA FATTA SU QUESTA VERSIONE (con esattamente questi file)
+---------------------------------------------------------------
+- Build di produzione completa sulla TUA repository con i fix applicati
+  («next build», la stessa pipeline di Vercel): compilata senza errori,
+  47/47 pagine.
+- Server di produzione avviato e interrogato: POST /api/me/profile → 401
+  senza sessione (la rotta esiste e chiede l'accesso: prima era 404),
+  /api/auth/me/profile → 404 (vecchia posizione rimossa), /api/auth/me
+  → 200 (la rotta legittima resta intatta).
+- Collaudo browser su 21 combinazioni (3 pagine × 7 larghezze da 1440 a
+  360 px): mappa sempre dentro il contenitore, barra Criterio sempre
+  sotto il pannello ricerca (gap costante 8 px), nessun controllo fuori
+  schermo, canvas MapLibre largo come il contenitore.
+- Link zona: #/zona/milano e #/zona/roma caricano la pagina zona con
+  mappa; #/zona/ent_z_milano (id diretto) funziona come prima; id
+  inesistente → «Pagina non trovata» e da lì una zona valida si apre
+  regolarmente (reset funzionante).
+- A 780 px e sopra la mappa è IDENTICA a prima: i fix agiscono solo
+  sotto ~530px di contenitore (e nell'impilamento dei controlli).
+
+VERIFICA RAPIDA DOPO IL DEPLOY
+------------------------------
+1. Telefono (o finestra stretta): apri la home e #/mappa — la mappa sta
+   tutta nello schermo, i pulsanti «Criterio» si vedono interi.
+2. In #/mappa restringi la finestra: il pannello «La tua città…» va a
+   capo e la barra Criterio scende sotto, mai sopra.
+3. Home: clicca Roma, Milano, Napoli e i chip delle altre città — si
+   apre la pagina della zona, non «Pagina non trovata». Anche da
+   #/cerca-casa.
+4. Profilo: dichiara la categoria / carica o rimuovi la foto — si salva.
+5. Console del browser (F12): nessun errore rosso.
+
+NOTA DI SICUREZZA — IL FILE .env È DENTRO LA REPOSITORY PUBBLICA (URGENTE)
+--------------------------------------------------------------------------
+Nel confronto ho trovato il file .env tracciato in GitHub (dal 17
+novembre) con dentro valori REALI: le stringhe di connessione al
+database Supabase (DATABASE_URL e DIRECT_URL, password compresa),
+APP_SECRET e altre chiavi. La repository è pubblica: chiunque può
+leggere quelle stringhe e collegarsi al tuo database. Cosa fare, in
+ordine:
+
+  1. SUBITO — cambia la password del database: pannello Supabase →
+     Project Settings → Database → «Reset database password». Le due
+     stringhe di connessione cambiano (nuova password): aggiornale dove
+     servono (variabili in Vercel e .env locale). Questo INVALIDA
+     all'istante le credenziali esposte.
+  2. APP_SECRET — è usata solo per cifrare i segreti 2FA (TOTP) a
+     riposo: cambiarla richiede agli utenti con 2FA attivo di
+     riattivarla. Fallo quando vuoi (seconda priorità: da sola non dà
+     accesso al database).
+  3. AUTH_SECRET e APP_ENCRYPTION_KEY — non sono usate da nessuna parte
+     del codice: nessuna azione, spariranno con il punto 4.
+  4. Rimuovi .env dalla repository: PRIMA controlla che in Vercel
+     (Project → Settings → Environment Variables) ci siano tutte le
+     variabili (DATABASE_URL, DIRECT_URL, APP_SECRET, APP_BASE_URL,
+     NEXT_PUBLIC_*…), POI:
+       git rm --cached .env
+       echo ".env" >> .gitignore
+       git add .gitignore && git commit -m "sicurezza: .env fuori dalla repository" && git push
+     (lo storico GitHub conserva comunque le vecchie versioni: è il
+     punto 1, la rotazione, che le rende inoffensive.)
+
+Nota: il ripiego OSM nei miei screenshot — la grafica del tuo sito con
+la chiave MapTiler resta quella di sempre (maschera dell'estero, stile
+minimale): era già documentato nella nota della mappa per criterio.
