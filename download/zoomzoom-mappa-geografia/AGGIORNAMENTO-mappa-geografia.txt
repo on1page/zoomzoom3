@@ -1,0 +1,210 @@
+ZoomZoom — Mappa delle reputazioni: causa vera trovata e risolta + allineamento verificabile
+==========================================================================================
+
+LO SCOPO
+--------
+Questa volta la causa l'ho cercata dove finora nessuno l'aveva cercata: NON nei
+file, ma nei DATI del database del tuo sito pubblico. Ho interrogato
+direttamente le API di zoomzoom-1.vercel.app (le stesse che usa la mappa) e il
+quadro è finalmente completo:
+
+  1. IL CODICE SUL SITO È AGGIORNATO E FUNZIONA. /api/diagnostica risponde
+     tutto verde (client aggiornato, tabella Zone aggiornata); la rotta
+     /api/public/map risponde regolarmente. Tutti i pacchetti che hai
+     applicato (mappa, filtri, criteri, fix) sono LÌ e fanno il loro lavoro.
+
+  2. LE RECENSIONI CI SONO TUTTE. Milano 46, Torino 23, Bologna 21, Napoli
+     20, Roma 14, Firenze 7, Palermo 6, Bari 4, Venezia 4, Genova 3: i dati
+     per colorare la mappa esistono e superano la soglia di soppressione.
+
+  3. MA LE CITTÀ NON HANNO PROVINCIA E REGIONE. Delle 13 zone del tuo
+     database, 12 (quelle nate con il vecchio seed) hanno i campi
+     province/region VUOTI: solo Laveno-Mombello, aggiunta dopo con la
+     conferma della città, li ha. E senza provincia/regione la mappa non può
+     aggregare nulla: "regions" e "provinces" nella risposta sono liste vuote
+     → nessun coropletico può colorarsi → la mappa resta neutra ovunque.
+
+Questo è il motivo per cui "Aggiornamento Reputazione su Mappa non funziona":
+NON è un difetto del codice, e nessuna patch poteva risolverlo, perché una
+patch cambia file, non righe del database. I campi provincia/regione vengono
+riempiti dal flusso "conferma la città" (geocodifica), che è arrivato DOPO la
+nascita di quelle città: le righe esistenti sono rimaste indietro. Colpa mia
+è semmai non aver verificato prima il dato sul sito reale: la mappa in
+sandbox funzionava perché il mio database di sviluppo ha le province compilate.
+
+COSA CAMBIA
+-----------
+Un pulsante nel back office, sezione «Schede e proposte», in fondo alla pagina:
+
+    «Geografia delle città (mappa delle reputazioni)»
+    [ Completa provincia e regione delle città ]
+
+Un click e il server completa SOLO i campi mancanti di ogni città:
+  - prima con l'elenco interno dei capoluoghi (tutti i capoluoghi di
+    provincia, deterministico, zero rete);
+  - poi, per le città non capoluogo, chiedendo al geocoder pubblico
+    (Nominatim) usando le coordinate GIÀ presenti nella città — stesse regole
+    già usate dal sito: solo Italia, una richiesta al secondo, al massimo 8
+    città per giro (per la policy del servizio pubblico: se restano città da
+    completare, si preme di nuovo).
+Non tocca recensioni, schede o altro; non riscrive mai i campi già compilati;
+l'azione è ripetibile e registrata nel log di moderazione. Al termine mostra
+un rapporto: quante completate (e da quale fonte), quante già complete,
+quante non risolte e perché.
+
+In più il pacchetto porta a termine la pulizia della consegna scorsa:
+elimina la vecchia rotta finita nel percorso sbagliato
+(src/app/api/auth/me/profile/route.ts), rimasta nella repository.
+
+L'ERRORE «Can't resolve 'maplibre-gl'» CHE VEDI IN LOCALE (tua ultima segnalazione)
+-----------------------------------------------------------------------------------
+Sì, risolverlo è necessario — e spiega molto. Cosa significa: la libreria
+maplibre-gl è registrata in package.json e bun.lock (commit «fix vercel
+build»), ma nella cartella node_modules DEL TUO COMPUTER non è installata:
+quell'aggiornamento cambiava l'elenco delle dipendenze e le dipendenze vanno
+scaricate quando cambiano. Senza la libreria, il server di sviluppo non riesce
+a compilare location-picker.tsx, che è importato dal flusso recensione, che è
+importato dalla pagina principale: in locale si rompe TUTTO il sito (home
+compresa), non solo la mappa. Su Vercel invece funziona perché Vercel esegue
+l'installazione a ogni build (verificato: il sito pubblico risponde).
+
+La soluzione è un comando solo, dalla cartella del progetto, con il server di
+sviluppo FERMO (Ctrl+C):
+
+    cd C:\Users\Carlo\sito\zoomzoom
+    bun install
+
+(e poi, per sicurezza, elimina la cartella .next e riavvia con bun run dev).
+Nota: questo risolve il sito IN LOCALE. Il sito pubblico non ne ha bisogno:
+là il problema era solo la geografia delle città, che si risolve col
+pulsante di questo pacchetto.
+
+FILE DEL PACCHETTO
+------------------
+  AGGIORNAMENTO-mappa-geografia.txt   questa nota
+  LEGGIMI.md                          guida sintetica
+  MANIFEST-src.sha256                 impronta SHA-256 di TUTTI i 169 file
+                                      di src\ della versione collaudata
+  verifica-allineamento.ps1           confronto automatico progetto↔versione
+                                      collaudata (risponde alla tua domanda
+                                      «come renderlo completamente uguale»)
+  zoomzoom-mappa-geografia.patch      le modifiche in patch git
+  src/lib/server/zone-geo.ts          NUOVO — elenco capoluoghi + geocoder
+                                      + funzione di completamento
+  src/app/api/admin/action/route.ts   azione zone.geoBackfill (permesso
+                                      admin.entities, audit log)
+  src/components/admin/admin.tsx      pulsante e rapporto nella sezione
+                                      «Schede e proposte»
+  (la patch elimina anche src/app/api/auth/me/profile/route.ts)
+  anteprime/                          4 screenshot del collaudo (mappa
+                                      prima/dopo, pulsante, rapporto)
+
+COME APPLICARLO (5 minuti)
+--------------------------
+Opzione A — patch git (consigliata), dalla cartella del progetto pulita
+all'ultimo commit («fix mappa»):
+
+    cd C:\Users\Carlo\sito\zoomzoom
+    git apply --stat percorso\zoomzoom-mappa-geografia.patch
+    git apply percorso\zoomzoom-mappa-geografia.patch
+
+Se avessi già cancellato a mano la vecchia cartella auth\me\profile, applica
+escludendo quella parte:
+
+    git apply --exclude=src/app/api/auth/me/profile/route.ts percorso\zoomzoom-mappa-geografia.patch
+
+Opzione B — copia dei file:
+
+    Copy-Item -Force "percorso\src\lib\server\zone-geo.ts" "C:\Users\Carlo\sito\zoomzoom\src\lib\server\"
+    Copy-Item -Force "percorso\src\app\api\admin\action\route.ts" "C:\Users\Carlo\sito\zoomzoom\src\app\api\admin\action\"
+    Copy-Item -Force "percorso\src\components\admin\admin.tsx" "C:\Users\Carlo\sito\zoomzoom\src\components\admin\"
+    Remove-Item -Recurse -Force "C:\Users\Carlo\sito\zoomzoom\src\app\api\auth\me\profile"
+
+Poi (server di sviluppo fermo):
+
+    bun install          # installa le dipendenze dichiarate: risolve
+                         # l'errore «Can't resolve 'maplibre-gl'» in locale
+    bun run dev          # verifica: home, #/mappa, #/admin/entita
+
+Se tutto va bene:
+
+    git add -A
+    git commit -m "mappa: completamento geografia delle città (pulsante admin) e pulizia rotta profilo"
+    git push
+
+Nessuna migrazione, nessun db push: la geografia si completa col pulsante
+DOPO il deploy, direttamente sul database di produzione.
+
+VERIFICA FATTA SU QUESTA VERSIONE (con esattamente questi file)
+---------------------------------------------------------------
+- Build di produzione completa sulla TUA repository (base «fix mappa» +
+  pacchetto): «next build» senza errori, 47/47 pagine — la stessa pipeline
+  di Vercel.
+- Riproduzione fedele del problema del tuo sito: database di collaudo con
+  le province/regioni azzerate → /api/public/map risponde con regions e
+  provinces VUOTE (identico alla tua produzione) anche con tutte le
+  recensioni presenti.
+- Azione eseguita via HTTP come farebbe il pulsante: 17 città su 17
+  completate (12 dall'elenco capoluoghi, 5 dal geocoder: Alassio→Savona/
+  Liguria, Melzo→Milano/Lombardia, Moncenisio→Torino/Piemonte, Morterone→
+  Lecco/Lombardia, Vimodrone→Milano/Lombardia), 0 non risolte, 7 secondi.
+- Idempotenza: secondo giro → «17 già complete», 0 modifiche, 0 chiamate
+  in rete. Il pulsante non fa mai danno premuto due volte.
+- Mappa dopo il completamento: 10 regioni e 10 province con i valori reali
+  (Lombardia 7,8 · 46 recensioni, Piemonte 6,9 · 23, Emilia-Romagna 7,4 ·
+  21, Campania 6,2 · 20, Lazio 7,1 · 14, Toscana 8,0 · 7, …).
+- Collaudo visivo nel browser: PRIMA mappa neutra (solo pin), DOPO
+  regioni colorate secondo il punteggio (Toscana verde, Lombardia gialla —
+  coincide con i dati). Screenshot nelle anteprime.
+- Collaudo dell'interfaccia: pulsante cliccato nella pagina amministrativa
+  reale (login con 2FA), rapporto mostrato con pill «3 completate / 14 già
+  complete / 3 al geocoder» e tabella con fonte per ogni città.
+- Patch verificata: si applica pulita sul commit «fix mappa» e riproduce
+  la versione collaudata al BYTE (169/169 file identici).
+
+VERIFICA RAPIDA DOPO IL DEPLOY
+------------------------------
+1. Applica il pacchetto, fai push, attendi il redeploy di Vercel.
+2. Sul sito: area amministrativa → «Schede e proposte» → in fondo,
+   «Completa provincia e regione delle città». Un click: il rapporto elenca
+   le città completate (le 12 del vecchio seed, tutte capoluoghi: Roma,
+   Milano, Napoli, Torino, Bologna, Firenze, Genova, Bari, Cagliari,
+   Palermo, Venezia, Reggio Calabria).
+3. Apri #/mappa: le regioni sono colorate (Lombardia gialla ~7,8, Toscana
+   verde ~8,0…), e zoomando si colorano le province.
+4. Se qualche città risultasse «non risolta» (geocoder occupato), attendi
+   un minuto e premi di nuovo: il pulsante completa solo quello che manca.
+
+COME RENDERE I PROGETTI COMPLETAMENTE UGUALI (la tua domanda)
+------------------------------------------------------------
+D'ora in poi non serve più "fidarsi": lo si MISURA. In questo pacchetto c'è
+lo strumento:
+
+    powershell -ExecutionPolicy Bypass -File verifica-allineamento.ps1
+
+(lo lancia dalla cartella estratta; con -Progetto puoi indicare un percorso
+diverso da C:\Users\Carlo\sito\zoomzoom). Lo script confronta TUTTI i 169
+file di src\ del tuo progetto con il manifest SHA-256 della versione che ho
+compilato e collaudato, e dice: quanti identici, quali diversi, quali
+mancanti, quali extra. Se risponde «TUTTO ALLINEATO», il codice del tuo
+sito coincide AL BYTE con la versione verificata: qualsiasi differenza che
+vedrai riguarderà dati, ambiente o configurazione — mai i file.
+
+Le differenze che RESTANO (e devono restare) sono fuori da src\ e sono
+volontarie:
+  - prisma\schema.prisma: il tuo punta a Postgres (Supabase) con directUrl,
+    quello di collaudo a SQLite: il tuo è quello GIUSTO per la produzione;
+  - .env: i segreti (e resta valida la nota sicurezza della consegna
+    scorsa: cambia la password del database se non l'hai ancora fatto);
+  - package.json / bun.lock: identici nelle dipendenze; differisce solo la
+    riga "dev" del mio ambiente di collaudo (scrittura del log su file).
+
+Dopo il commit di questo pacchetto, la TUA repository diventa la copia di
+riferimento: il confronto futuro si fa col manifest di questo pacchetto.
+
+NOTA
+----
+Le anteprime mostrano la cartografia pubblica OpenStreetMap (il mio ambiente
+di collaudo non ha la chiave MapTiler): sul tuo sito la base resta quella di
+sempre (stile minimale, maschera dell'estero). I COLORI delle regioni sono
+indipendenti dalla base: quelli arrivano dai dati, che ora ci sono.
