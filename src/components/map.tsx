@@ -18,6 +18,13 @@
 //     - zoom intermedio → PROVINCE (tileset Countries, level 1 per IT);
 //     - zoom ravvicinato / città cercata → COMUNI del catalogo (contorni
 //       caricati on demand dal geocoder pubblico tramite il nostro proxy).
+//   FILTRI     la colorazione può seguire i SINGOLI CRITERI di valutazione
+//              della categoria zone (Servizi, Trasporti, Sicurezza, Verde,
+//              Costi): i pulsanti "Criterio" sopra la mappa attivano uno o
+//              più criteri e coropleti + pin si ricolorano con la media
+//              ponderata dei voti ricevuti su quei criteri; le aree senza
+//              voti per i criteri scelti restano neutre (mai il valore
+//              complessivo, che è un altro dato).
 //   PIN E PUNTI pin delle città con aggregato della scheda città; a zoom
 //              ravvicinato punti immobile cliccabili con popup.
 // Privacy: punti solo per immobili; zone solo con aggregati sopra soglia;
@@ -30,14 +37,18 @@ import { api, fmt1 } from "@/lib/client/api";
 import { useApp } from "@/lib/client/store";
 import { navigate } from "@/lib/client/router";
 import { normName, regionCanonical, tilerProvinceOf } from "@/lib/map-italy";
+import { critAggregate, criterionShortLabel, scoreBandColor, type CritMap } from "@/lib/map-criteria";
 
-type AdminRow = { name: string; mean: number; n: number };
+type AdminRow = { name: string; mean: number; n: number; criteria?: CritMap };
 type ZoneRow = {
   id: string; name: string; province: string | null; region: string | null;
   lat: number; lng: number; radiusM: number;
   aggregate: { mean: number; n: number; sufficient: boolean } | null;
-  // reputazione del COMUNE: tutte le schede della zona (per il coropleto)
-  place: { mean: number; n: number } | null;
+  // reputazione del COMUNE: tutte le schede della zona (per il coropleto),
+  // con gli aggregati per criterio (vengono dalle recensioni città)
+  place: { mean: number; n: number; criteria?: CritMap } | null;
+  // voti per criterio della SCHEDA CITTÀ: colorano pin e chip con i filtri
+  crit?: CritMap;
   suppressed: boolean; entityId: string | null;
 };
 type MapData = {
@@ -49,18 +60,14 @@ type MapData = {
     mean: number | null; n: number; isDemo: boolean;
   }>;
   admin: { regions: AdminRow[]; provinces: AdminRow[] };
+  // criteri della categoria zone: alimentano i pulsanti di filtro "Criterio"
+  criteriaList: Array<{ key: string; label: string }>;
   thresholds: { mapMinAggregate: number; minReviews: number };
 };
 
-export function scoreBandColor(v: number | null): string {
-  if (v == null) return "#9AA4AE";
-  if (v >= 8) return "#2C6E49";
-  if (v >= 6) return "#C9A227";
-  if (v >= 4) return "#C07A2D";
-  return "#A63A2B";
-}
-
 // chiave e stile MapTiler (OMT minimale): senza chiave si usa OSM raster
+// (il colore per fascia scoreBandColor arriva da lib/map-criteria: unica
+// formula condivisa con la rotta e i test)
 const MAPTILER_KEY = process.env.NEXT_PUBLIC_MAPTILER_KEY || "";
 const MAPTILER_STYLE = process.env.NEXT_PUBLIC_MAPTILER_STYLE || "backdrop-light";
 const COUNTRIES_TILES = `https://api.maptiler.com/tiles/countries/tiles.json?key=${MAPTILER_KEY}`;
@@ -124,15 +131,22 @@ function osmRasterStyle(): MapLibreNS.StyleSpecification {
 export function MapViewport({ mode = "immobili", activeZone }: { mode?: "immobili" | "zone"; activeZone?: string }) {
   const { myZone, setMyZone, toast } = useApp();
   const [data, setData] = useState<MapData | null>(null);
+  // criteri selezionati per la colorazione ([] = reputazione complessiva):
+  // se ne possono attivare più insieme (media ponderata dei voti)
+  const [critSel, setCritSel] = useState<string[]>([]);
   const holderRef = useRef<HTMLDivElement | null>(null);
   const MLRef = useRef<typeof MapLibreNS | null>(null);
   const mapRef = useRef<MapLibreNS.Map | null>(null);
   const markersRef = useRef<Array<MapLibreNS.Marker>>([]);
   const regioniRef = useRef<GeoJSON.FeatureCollection | null>(null);
+  // lo stile è pronto (evento style.load): unica condizione per ridipingere
+  // — map.isStyleLoaded() è inutilizzabile come guardia perché dipende dai
+  // tile in caricamento (vedi redraw)
+  const styleReadyRef = useRef(false);
   const comuniFeatRef = useRef<Map<string, GeoJSON.Feature>>(new Map());
   const comuniAskedRef = useRef<Set<string>>(new Set());
   // valori correnti per i ridisegni e i callback (niente closure stantie)
-  const live = useRef<{ data: MapData | null; mode: string; activeZone?: string; myZone: string | null }>({ data: null, mode, activeZone, myZone });
+  const live = useRef<{ data: MapData | null; mode: string; activeZone?: string; myZone: string | null; critSel: string[] }>({ data: null, mode, activeZone, myZone, critSel: [] });
 
   useEffect(() => {
     void api<MapData>("/api/public/map").then(res => { if (res.ok) setData(res); });
@@ -140,19 +154,33 @@ export function MapViewport({ mode = "immobili", activeZone }: { mode?: "immobil
 
   /* ---- espressioni colore dei coropleti (match sui nomi) ---- */
 
+  // valore da colorare per una riga di aggregato in funzione dei criteri
+  // selezionati: nessun filtro → media complessiva; filtri attivi → media
+  // ponderata dei criteri selezionati, null se non ci sono voti per quei
+  // criteri (l'area resta trasparente: NON cade sul complessivo, che è un
+  // dato diverso da quello richiesto)
+  function rowValue(row: { mean: number; n: number; criteria?: CritMap }): number | null {
+    if (live.current.critSel.length) {
+      const v = critAggregate(row.criteria, live.current.critSel);
+      return v ? v.mean : null;
+    }
+    return row.mean;
+  }
+
   // regioni: chiave = nome normalizzato (proprietà "n" del GeoJSON ISTAT)
   function regionMatch(): MapLibreNS.ExpressionSpecification | string {
     const d = live.current.data;
-    const byNorm = new Map<string, string>();
+    const byNorm = new Map<string, AdminRow>();
     for (const r of d?.admin.regions || []) {
       const c = regionCanonical(r.name);
-      if (c) byNorm.set(normName(c), scoreBandColor(r.mean));
+      if (c) byNorm.set(normName(c), r);
     }
     const pairs: Array<string> = [];
     for (const f of regioniRef.current?.features || []) {
       const n = String((f.properties as { n?: string } | null)?.n || "");
-      const col = byNorm.get(n);
-      if (n && col) pairs.push(n, col);
+      const row = n ? byNorm.get(n) : undefined;
+      const v = row ? rowValue(row) : null;
+      if (n && v != null) pairs.push(n, scoreBandColor(v));
     }
     // match senza coppie non è un'espressione valida: si usa il colore neutro
     return pairs.length
@@ -164,10 +192,15 @@ export function MapViewport({ mode = "immobili", activeZone }: { mode?: "immobil
   // (level 1 per l'Italia), tradotto dai nomi d'uso italiani
   function provinceMatch(): MapLibreNS.ExpressionSpecification | string {
     const d = live.current.data;
-    const pairs: Array<string> = [];
+    const byTiler = new Map<string, AdminRow>();
     for (const p of d?.admin.provinces || []) {
       const t = tilerProvinceOf(p.name);
-      if (t) pairs.push(t, scoreBandColor(p.mean));
+      if (t) byTiler.set(t, p);
+    }
+    const pairs: Array<string> = [];
+    for (const [t, row] of byTiler) {
+      const v = rowValue(row);
+      if (v != null) pairs.push(t, scoreBandColor(v));
     }
     return pairs.length
       ? ["match", ["get", "name"], ...pairs, "rgba(0,0,0,0)"] as unknown as MapLibreNS.ExpressionSpecification
@@ -179,7 +212,9 @@ export function MapViewport({ mode = "immobili", activeZone }: { mode?: "immobil
     const d = live.current.data;
     const pairs: Array<string> = [];
     for (const z of d?.zones || []) {
-      if (z.place) pairs.push(normName(z.name), scoreBandColor(z.place.mean));
+      if (!z.place) continue;
+      const v = rowValue({ mean: z.place.mean, n: z.place.n, criteria: z.place.criteria });
+      if (v != null) pairs.push(normName(z.name), scoreBandColor(v));
     }
     return pairs.length
       ? ["match", ["get", "n"], ...pairs, "rgba(0,0,0,0)"] as unknown as MapLibreNS.ExpressionSpecification
@@ -334,7 +369,12 @@ export function MapViewport({ mode = "immobili", activeZone }: { mode?: "immobil
     const ML = MLRef.current;
     const map = mapRef.current;
     const d = live.current.data;
-    if (!ML || !map || !d || !map.isStyleLoaded()) return;
+    // NON si usa map.isStyleLoaded() come guardia: resta false finché UN
+    // QUALSIASI tile della vista è in caricamento (con lo stile di ripiego
+    // OSM quasi sempre), e il ridisegno verrebbe saltato senza riprove.
+    // Basta che lo stile sia pronto (evento style.load → styleReadyRef):
+    // setPaintProperty/setData funzionano anche con i tile in arrivo.
+    if (!ML || !map || !d || !styleReadyRef.current) return;
     const az = live.current.activeZone, mz = live.current.myZone, md = live.current.mode;
     const zoom = map.getZoom();
     // a livello Italia i pin diventano compatti; a zoom cittadino la chip si
@@ -355,15 +395,26 @@ export function MapViewport({ mode = "immobili", activeZone }: { mode?: "immobil
       }
     }
 
+    // valore del pin/area di una città: con filtri per criterio attivi segue
+    // i voti della scheda città; senza filtri l'aggregato complessivo. Con
+    // filtro attivo ma nessun voto su quei criteri → null (pin "n. d.")
+    const pinValue = (z: MapData["zones"][number]) => {
+      if (live.current.critSel.length) return critAggregate(z.crit, live.current.critSel);
+      return z.aggregate ? { mean: z.aggregate.mean, n: z.aggregate.n, multi: false } : null;
+    };
+
     // marker: si ricostruiscono (sono pochi)
     for (const m of markersRef.current) m.remove();
     markersRef.current = [];
     for (const z of d.zones) {
-      const color = z.aggregate ? scoreBandColor(z.aggregate.mean) : "#9AA4AE";
+      const pv = pinValue(z);
+      const color = scoreBandColor(pv ? pv.mean : null);
       const isActive = az === z.id, isMine = mz === z.id;
-      const scoreHtml = z.aggregate
-        ? `${fmt1(z.aggregate.mean)}/10 · ${z.aggregate.n}`
-        : `<span class="zz-muted">${z.suppressed ? "aggregati sospesi" : "n. d."}</span>`;
+      const scoreHtml = pv
+        ? (pv.multi
+            ? `${fmt1(pv.mean)}/10 · ${live.current.critSel.length} criteri`
+            : `${fmt1(pv.mean)}/10 · ${pv.n}`)
+        : `<span class="zz-muted">${!live.current.critSel.length && z.suppressed ? "aggregati sospesi" : "n. d."}</span>`;
       const dotOnly = chipHidden || (compact && !labeledIds!.has(z.id));
       const el = document.createElement("div");
       el.className = "zz-zone-pin-wrap";
@@ -388,13 +439,14 @@ export function MapViewport({ mode = "immobili", activeZone }: { mode?: "immobil
     const areas: GeoJSON.FeatureCollection = {
       type: "FeatureCollection",
       features: d.zones.map(z => {
-        const color = z.aggregate ? scoreBandColor(z.aggregate.mean) : "#9AA4AE";
+        const pv = pinValue(z);
+        const color = scoreBandColor(pv ? pv.mean : null);
         const isActive = az === z.id, isMine = mz === z.id;
         return {
           type: "Feature",
           properties: {
-            color, suppressed: z.suppressed && !z.aggregate,
-            fillOp: z.aggregate ? 0.14 : 0.05,
+            color, suppressed: !pv,
+            fillOp: pv ? 0.14 : 0.05,
             lineColor: isActive ? "#33658A" : color,
             lineW: isActive ? 2.6 : isMine ? 2.1 : 1.2,
             lineOp: isActive || isMine ? 0.9 : 0.5,
@@ -445,7 +497,7 @@ export function MapViewport({ mode = "immobili", activeZone }: { mode?: "immobil
       if (res.ok && res.polygon) {
         comuniFeatRef.current.set(z.id, {
           type: "Feature",
-          properties: { id: z.id, nome: z.name, n: normName(z.name), mean: z.place!.mean, nrev: z.place!.n, entityId: z.entityId },
+          properties: { id: z.id, nome: z.name, n: normName(z.name), entityId: z.entityId },
           geometry: res.polygon as GeoJSON.Geometry,
         });
       }
@@ -530,10 +582,10 @@ export function MapViewport({ mode = "immobili", activeZone }: { mode?: "immobil
       map.once("load", () => fitItaly());
       // se il contenitore cambia dimensione prima del load (layout che si
       // assesta), l'inquadratura dell'Italia resta quella giusta
-      const roFitLocal = new ResizeObserver(() => { if (!fitted && map.isStyleLoaded()) fitItaly(); });
+      const roFitLocal = new ResizeObserver(() => { if (!fitted && styleReadyRef.current) fitItaly(); });
       roFit = roFitLocal;
       roFitLocal.observe(holder);
-      map.on("resize", () => { if (!fitted && map.isStyleLoaded()) fitItaly(); });
+      map.on("resize", () => { if (!fitted && styleReadyRef.current) fitItaly(); });
 
       // confini ISTAT delle regioni: GeoJSON locale semplificato (92 KB)
       void fetch("/regioni-italia.geojson").then(r => (r.ok ? r.json() : null)).then((gj: GeoJSON.FeatureCollection | null) => {
@@ -552,7 +604,7 @@ export function MapViewport({ mode = "immobili", activeZone }: { mode?: "immobil
         }
       });
 
-      map.on("style.load", () => { installLayers(); redraw(); });
+      map.on("style.load", () => { styleReadyRef.current = true; installLayers(); redraw(); });
       map.on("zoomend", () => { redraw(); });
       map.on("moveend", () => { redraw(); void fetchComuni(); });
 
@@ -575,20 +627,40 @@ export function MapViewport({ mode = "immobili", activeZone }: { mode?: "immobil
             </div>`)
           .addTo(map);
       });
-      // popup del comune (livello comunale)
+      // popup del comune (livello comunale): il punteggio segue i filtri
+      // per criterio attivi in quel momento (la feature porta l'id della
+      // zona, i valori si leggono dai dati vivi, non stantii)
       map.on("click", "zz-comuni-fill", e => {
         const f = e.features?.[0];
         if (!f) return;
-        const p = f.properties as { nome: string; mean: number; nrev: number; entityId: string | null };
+        const p = f.properties as { id?: string; nome: string; entityId: string | null };
+        const z = live.current.data?.zones.find(zz => zz.id === p.id);
+        const sel = live.current.critSel;
+        const selDefs = (live.current.data?.criteriaList || []).filter(c => sel.includes(c.key));
+        let sub = "Comune · reputazione del territorio";
+        let scoreHtml = "n. d.";
+        let meanNum: number | null = z?.place?.mean ?? null;
+        if (sel.length && z) {
+          const v = critAggregate(z.place?.criteria, sel);
+          // etichetta completa per un criterio, corte per più criteri
+          const lab = selDefs.length === 1
+            ? selDefs[0].label
+            : selDefs.map(c => criterionShortLabel(c.key, c.label)).join(" + ");
+          sub = `Comune · ${lab}`;
+          meanNum = v ? v.mean : null;
+          scoreHtml = v
+            ? `${fmt1(v.mean)}/10 · ${v.multi ? `media di ${sel.length} criteri` : `${v.n} ${v.n === 1 ? "recensione" : "recensioni"}`}`
+            : "Nessun voto per i criteri selezionati";
+        } else if (z?.place) {
+          scoreHtml = `${fmt1(z.place.mean)}/10 · ${z.place.n} ${z.place.n === 1 ? "recensione" : "recensioni"}`;
+        }
         new maplibregl.Popup({ className: "zz-popup", closeButton: true, maxWidth: "280px" })
           .setLngLat(e.lngLat)
           .setHTML(
             `<div class="zz-pop">
               <strong>${esc(p.nome)}</strong>
-              <div class="zz-pop-sub">Comune · reputazione del territorio</div>
-              <div class="zz-pop-score" style="color:${scoreBandColor(p.mean)}">
-                ${fmt1(p.mean)}/10 · ${p.nrev} ${p.nrev === 1 ? "recensione" : "recensioni"}
-              </div>
+              <div class="zz-pop-sub">${esc(sub)}</div>
+              <div class="zz-pop-score" style="color:${scoreBandColor(meanNum)}">${scoreHtml}</div>
               ${p.entityId ? `<a href="#/zona/${esc(p.entityId)}" class="zz-pop-link">Apri la scheda della città</a>` : ""}
             </div>`)
           .addTo(map);
@@ -609,6 +681,7 @@ export function MapViewport({ mode = "immobili", activeZone }: { mode?: "immobil
       disposed = true;
       ro?.disconnect();
       roFit?.disconnect();
+      styleReadyRef.current = false;
       for (const m of markersRef.current) m.remove();
       markersRef.current = [];
       mapRef.current?.remove();
@@ -619,16 +692,18 @@ export function MapViewport({ mode = "immobili", activeZone }: { mode?: "immobil
     };
   }, [data]);
 
-  // ridisegno quando cambiano dati, modalità, zona attiva o città di riferimento
+  // ridisegno quando cambiano dati, modalità, zona attiva, città di
+  // riferimento o FILTRO PER CRITERIO: i tre coropleti vengono ripitturati
+  // (installLayers aggiorna le espressioni colore) e pin/aree ricostruiti
   useEffect(() => {
-    live.current = { data, mode, activeZone, myZone };
+    live.current = { data, mode, activeZone, myZone, critSel };
     const map = mapRef.current;
     if (!map) return;
-    if (map.isStyleLoaded() && map.getStyle()) {
+    if (styleReadyRef.current) {
       installLayers();
       redraw();
     }
-  }, [data, mode, activeZone, myZone, installLayers, redraw]);
+  }, [data, mode, activeZone, myZone, critSel, installLayers, redraw]);
 
   const focusZone = useCallback((zoneId: string, animate = true) => {
     const map = mapRef.current;
@@ -683,8 +758,26 @@ export function MapViewport({ mode = "immobili", activeZone }: { mode?: "immobil
 
   return (
     <div className="map-viewport" role="application"
-      aria-label="Mappa delle reputazioni del territorio italiano (cartografia MapTiler/OpenStreetMap). Trascina per esplorare, usa la rotella o i pulsanti per lo zoom. A livello nazionale le regioni sono colorate per reputazione; zoomando passano province e comuni. I pin delle città aprono la loro scheda, i punti immobile aprono una scheda sintetica.">
+      aria-label="Mappa delle reputazioni del territorio italiano (cartografia MapTiler/OpenStreetMap). Trascina per esplorare, usa la rotella o i pulsanti per lo zoom. A livello nazionale le regioni sono colorate per reputazione; zoomando passano province e comuni. I pulsanti Criterio colorano regioni, province e comuni in base ai singoli criteri di valutazione delle zone. I pin delle città aprono la loro scheda, i punti immobile aprono una scheda sintetica.">
       <div className="map-holder" ref={holderRef}></div>
+      <div className="map-crit" role="group"
+        aria-label="Colora la mappa in base ai criteri di valutazione delle zone">
+        <span className="map-crit-lab" aria-hidden="true">Criterio:</span>
+        <button type="button" className={`map-crit-chip${critSel.length ? "" : " on"}`}
+          aria-pressed={critSel.length === 0}
+          title="Reputazione complessiva: media di tutte le recensioni delle schede del territorio"
+          onClick={() => setCritSel([])}>Complessiva</button>
+        {(data.criteriaList || []).map(c => {
+          const on = critSel.includes(c.key);
+          return (
+            <button type="button" key={c.key} className={`map-crit-chip${on ? " on" : ""}`}
+              aria-pressed={on} title={`Colora per: ${c.label} (secondo clic per disattivare; più criteri = media ponderata)`}
+              onClick={() => setCritSel(s => (s.includes(c.key) ? s.filter(x => x !== c.key) : [...s, c.key]))}>
+              {criterionShortLabel(c.key, c.label)}
+            </button>
+          );
+        })}
+      </div>
       <div className="map-loc">
         <span aria-hidden="true">◎</span>
         <select className="map-zone-select" aria-label="La tua città di riferimento"
@@ -720,7 +813,7 @@ export function MapLegend() {
       <span className="leg-dot" style={{ background: scoreBandColor(7) }}></span> 6–8 discreto
       <span className="leg-dot" style={{ background: scoreBandColor(5) }}></span> 4–6 criticità
       <span className="leg-dot" style={{ background: scoreBandColor(2) }}></span> 0–4 gravi criticità
-      <span className="small muted">Vista Italia: regioni colorate per reputazione · zoomando: province e comuni · fuori dall&apos;Italia oscurato · Cartografia © MapTiler, © OpenStreetMap contributors</span>
+      <span className="small muted">Vista Italia: regioni colorate per reputazione · zoomando: province e comuni · pulsanti «Criterio»: colora per Servizi, Trasporti, Sicurezza, Verde e aria, Costi della vita (anche più criteri insieme) · fuori dall&apos;Italia oscurato · Cartografia © MapTiler, © OpenStreetMap contributors</span>
     </div>
   );
 }

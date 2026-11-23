@@ -26,7 +26,7 @@ export function MapView() {
       <div className="section-head" style={{ paddingTop: 26 }}>
         <div>
           <h1>Mappa delle reputazioni</h1>
-          <p className="sub">L&apos;intero territorio italiano su cartografia MapTiler minimale, con l&apos;estero oscurato. La reputazione si legge a prima vista: regioni colorate nella vista Italia, province e comuni zoomando. Punteggi aggregati: la mappa non rivela mai chi ha scritto una recensione né quando.</p>
+          <p className="sub">L&apos;intero territorio italiano su cartografia MapTiler minimale, con l&apos;estero oscurato. La reputazione si legge a prima vista: regioni colorate nella vista Italia, province e comuni zoomando, e i pulsanti «Criterio» ricolorano il territorio per Servizi, Trasporti, Sicurezza, Verde e aria o Costi della vita. Punteggi aggregati: la mappa non rivela mai chi ha scritto una recensione né quando.</p>
         </div>
       </div>
       <div className="map-wrap" style={{ position: "relative" }}>
@@ -35,7 +35,7 @@ export function MapView() {
           <button className={`chip chip-filter${mode !== "zone" ? " on" : ""}`} onClick={() => setMode("immobili")}>Immobili</button>
           <button className={`chip chip-filter${mode === "zone" ? " on" : ""}`} onClick={() => setMode("zone")}>Solo aggregati di città</button>
           <span className="spacer"></span>
-          <span className="small muted">Vista Italia: regioni per reputazione · zoom/città: province e comuni · clicca una città o un punto per i dettagli · «Vista Italia» per tornare all&apos;insieme</span>
+          <span className="small muted">Vista Italia: regioni per reputazione · zoom/città: province e comuni · pulsanti «Criterio»: colora per singolo criterio · clicca una città o un punto per i dettagli · «Vista Italia» per tornare all&apos;insieme</span>
         </div>
         <MapViewport mode={mode} />
         <MapLegend />

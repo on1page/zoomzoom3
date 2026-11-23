@@ -1,0 +1,727 @@
+     1→"use client";
+     2→// ZoomZoom — mappa delle reputazioni del territorio italiano (MapLibre GL +
+     3→// cartografia MapTiler OMT minimale): la reputazione si legge a prima vista.
+     4→//
+     5→//   BASEMAP    stile MapTiler "backdrop" (OpenMapTiles, minimale); senza la
+     6→//              chiave NEXT_PUBLIC_MAPTILER_KEY ripiega sui tile raster
+     7→//              pubblici di OpenStreetMap (la mappa resta pienamente usabile).
+     8→//   MASCHERA   tutto ciò che è fuori dall'Italia viene oscurato: livello di
+     9→//              poligoni dei Paesi (tileset Countries di MapTiler, layer
+    10→//              "administrative", level 0) filtrato ESCLUDENDO l'Italia, con
+    11→//              riempimento scuro semitrasparente — l'approccio di
+    12→//              mascheratura descritto nella guida MapTiler. Il confine
+    13→//              nazionale è evidenziato da una linea luminosa.
+    14→//   COROPLETI  il colore è la reputazione aggregata (media delle recensioni
+    15→//              presenti, con soglia minima di pubblicazione):
+    16→//     - vista Italia  → REGIONI (confini ISTAT in GeoJSON locale: il tileset
+    17→//       Countries per l'Italia non contiene le regioni);
+    18→//     - zoom intermedio → PROVINCE (tileset Countries, level 1 per IT);
+    19→//     - zoom ravvicinato / città cercata → COMUNI del catalogo (contorni
+    20→//       caricati on demand dal geocoder pubblico tramite il nostro proxy).
+    21→//   PIN E PUNTI pin delle città con aggregato della scheda città; a zoom
+    22→//              ravvicinato punti immobile cliccabili con popup.
+    23→// Privacy: punti solo per immobili; zone solo con aggregati sopra soglia;
+    24→// mai persone geolocalizzate, mai dati di autori o date; GPS solo su
+    25→// richiesta esplicita (le coordinate servono al momento e vengono scartate).
+    26→import { useCallback, useEffect, useRef, useState } from "react";
+    27→import type * as MapLibreNS from "maplibre-gl";
+    28→import "maplibre-gl/dist/maplibre-gl.css";
+    29→import { api, fmt1 } from "@/lib/client/api";
+    30→import { useApp } from "@/lib/client/store";
+    31→import { navigate } from "@/lib/client/router";
+    32→import { normName, regionCanonical, tilerProvinceOf } from "@/lib/map-italy";
+    33→
+    34→type AdminRow = { name: string; mean: number; n: number };
+    35→type ZoneRow = {
+    36→  id: string; name: string; province: string | null; region: string | null;
+    37→  lat: number; lng: number; radiusM: number;
+    38→  aggregate: { mean: number; n: number; sufficient: boolean } | null;
+    39→  // reputazione del COMUNE: tutte le schede della zona (per il coropleto)
+    40→  place: { mean: number; n: number } | null;
+    41→  suppressed: boolean; entityId: string | null;
+    42→};
+    43→type MapData = {
+    44→  demoMode: boolean;
+    45→  notice: string;
+    46→  zones: ZoneRow[];
+    47→  markers: Array<{
+    48→    id: string; name: string; lat: number; lng: number; zoneId: string | null;
+    49→    mean: number | null; n: number; isDemo: boolean;
+    50→  }>;
+    51→  admin: { regions: AdminRow[]; provinces: AdminRow[] };
+    52→  thresholds: { mapMinAggregate: number; minReviews: number };
+    53→};
+    54→
+    55→export function scoreBandColor(v: number | null): string {
+    56→  if (v == null) return "#9AA4AE";
+    57→  if (v >= 8) return "#2C6E49";
+    58→  if (v >= 6) return "#C9A227";
+    59→  if (v >= 4) return "#C07A2D";
+    60→  return "#A63A2B";
+    61→}
+    62→
+    63→// chiave e stile MapTiler (OMT minimale): senza chiave si usa OSM raster
+    64→const MAPTILER_KEY = process.env.NEXT_PUBLIC_MAPTILER_KEY || "";
+    65→const MAPTILER_STYLE = process.env.NEXT_PUBLIC_MAPTILER_STYLE || "backdrop-light";
+    66→const COUNTRIES_TILES = `https://api.maptiler.com/tiles/countries/tiles.json?key=${MAPTILER_KEY}`;
+    67→const MAPTILER_STYLE_URL = `https://api.maptiler.com/maps/${MAPTILER_STYLE}/style.json?key=${MAPTILER_KEY}`;
+    68→
+    69→// worker di MapLibre servito dal progetto: con i bundler (Next/Turbopack)
+    70→// l'URL derivato da import.meta.url non è raggiungibile, quindi lo si
+    71→// espone da /public e lo si dichiara una volta per tutte
+    72→const MAPLIBRE_WORKER_URL = "/maplibre-gl-worker.mjs";
+    73→function setupMapLibre(ML: typeof MapLibreNS): void {
+    74→  try { ML.setWorkerUrl(MAPLIBRE_WORKER_URL); } catch { /* già impostato */ }
+    75→}
+    76→
+    77→// estensione dell'Italia (Sicilia, Sardegna e isole minori comprese):
+    78→// è la vista di insieme iniziale della mappa
+    79→const ITALY: MapLibreNS.LngLatBoundsLike = [[6.6, 35.3], [18.6, 47.1]];
+    80→
+    81→// soglie di zoom dei livelli amministrativi (il colore segue la reputazione)
+    82→const Z_REGIONE_MAX = 6.5;   // fino a qui: coropleto delle regioni
+    83→const Z_PROVINCIA_MIN = 5.9; // da qui: province del tileset Countries
+    84→const Z_PROVINCIA_MAX = 9.6;
+    85→const Z_COMUNE_FETCH = 8.8;  // da qui si chiedono i contorni dei comuni
+    86→const Z_COMUNE_MIN = 8.4;    // il livello comunale è disegnato da qui
+    87→
+    88→function esc(s: string): string {
+    89→  return s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] as string);
+    90→}
+    91→
+    92→/** Cerchio geodetico approssimato (WGS84) intorno a un centro: serve per
+    93→ *  l'area indicativa della città, come faceva L.circle di Leaflet. */
+    94→function circlePolygon(lat: number, lng: number, radiusM: number, segments = 48): GeoJSON.Polygon {
+    95→  const dLat = radiusM / 111_320;
+    96→  const dLng = radiusM / (111_320 * Math.max(0.2, Math.cos((lat * Math.PI) / 180)));
+    97→  const ring: Array<[number, number]> = [];
+    98→  for (let i = 0; i <= segments; i++) {
+    99→    const a = (i / segments) * 2 * Math.PI;
+   100→    ring.push([lng + dLng * Math.cos(a), lat + dLat * Math.sin(a)]);
+   101→  }
+   102→  return { type: "Polygon", coordinates: [ring] };
+   103→}
+   104→
+   105→const EMPTY_FC: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
+   106→
+   107→/** Ripiego senza chiave MapTiler: tile raster pubblici OpenStreetMap. */
+   108→function osmRasterStyle(): MapLibreNS.StyleSpecification {
+   109→  return {
+   110→    version: 8,
+   111→    sources: {
+   112→      osm: {
+   113→        type: "raster",
+   114→        tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+   115→        tileSize: 256,
+   116→        maxzoom: 19,
+   117→        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
+   118→      },
+   119→    },
+   120→    layers: [{ id: "osm", type: "raster", source: "osm" }],
+   121→  };
+   122→}
+   123→
+   124→export function MapViewport({ mode = "immobili", activeZone }: { mode?: "immobili" | "zone"; activeZone?: string }) {
+   125→  const { myZone, setMyZone, toast } = useApp();
+   126→  const [data, setData] = useState<MapData | null>(null);
+   127→  const holderRef = useRef<HTMLDivElement | null>(null);
+   128→  const MLRef = useRef<typeof MapLibreNS | null>(null);
+   129→  const mapRef = useRef<MapLibreNS.Map | null>(null);
+   130→  const markersRef = useRef<Array<MapLibreNS.Marker>>([]);
+   131→  const regioniRef = useRef<GeoJSON.FeatureCollection | null>(null);
+   132→  const comuniFeatRef = useRef<Map<string, GeoJSON.Feature>>(new Map());
+   133→  const comuniAskedRef = useRef<Set<string>>(new Set());
+   134→  // valori correnti per i ridisegni e i callback (niente closure stantie)
+   135→  const live = useRef<{ data: MapData | null; mode: string; activeZone?: string; myZone: string | null }>({ data: null, mode, activeZone, myZone });
+   136→
+   137→  useEffect(() => {
+   138→    void api<MapData>("/api/public/map").then(res => { if (res.ok) setData(res); });
+   139→  }, []);
+   140→
+   141→  /* ---- espressioni colore dei coropleti (match sui nomi) ---- */
+   142→
+   143→  // regioni: chiave = nome normalizzato (proprietà "n" del GeoJSON ISTAT)
+   144→  function regionMatch(): MapLibreNS.ExpressionSpecification | string {
+   145→    const d = live.current.data;
+   146→    const byNorm = new Map<string, string>();
+   147→    for (const r of d?.admin.regions || []) {
+   148→      const c = regionCanonical(r.name);
+   149→      if (c) byNorm.set(normName(c), scoreBandColor(r.mean));
+   150→    }
+   151→    const pairs: Array<string> = [];
+   152→    for (const f of regioniRef.current?.features || []) {
+   153→      const n = String((f.properties as { n?: string } | null)?.n || "");
+   154→      const col = byNorm.get(n);
+   155→      if (n && col) pairs.push(n, col);
+   156→    }
+   157→    // match senza coppie non è un'espressione valida: si usa il colore neutro
+   158→    return pairs.length
+   159→      ? ["match", ["get", "n"], ...pairs, "rgba(0,0,0,0)"] as unknown as MapLibreNS.ExpressionSpecification
+   160→      : "rgba(0,0,0,0)";
+   161→  }
+   162→
+   163→  // province: chiave = nome ESATTO del poligono nel tileset Countries
+   164→  // (level 1 per l'Italia), tradotto dai nomi d'uso italiani
+   165→  function provinceMatch(): MapLibreNS.ExpressionSpecification | string {
+   166→    const d = live.current.data;
+   167→    const pairs: Array<string> = [];
+   168→    for (const p of d?.admin.provinces || []) {
+   169→      const t = tilerProvinceOf(p.name);
+   170→      if (t) pairs.push(t, scoreBandColor(p.mean));
+   171→    }
+   172→    return pairs.length
+   173→      ? ["match", ["get", "name"], ...pairs, "rgba(0,0,0,0)"] as unknown as MapLibreNS.ExpressionSpecification
+   174→      : "rgba(0,0,0,0)";
+   175→  }
+   176→
+   177→  // comuni: chiave = nome normalizzato del comune (proprietà "n")
+   178→  function comuneMatch(): MapLibreNS.ExpressionSpecification | string {
+   179→    const d = live.current.data;
+   180→    const pairs: Array<string> = [];
+   181→    for (const z of d?.zones || []) {
+   182→      if (z.place) pairs.push(normName(z.name), scoreBandColor(z.place.mean));
+   183→    }
+   184→    return pairs.length
+   185→      ? ["match", ["get", "n"], ...pairs, "rgba(0,0,0,0)"] as unknown as MapLibreNS.ExpressionSpecification
+   186→      : "rgba(0,0,0,0)";
+   187→  }
+   188→
+   189→  /* ---- installazione di sorgenti e livelli (idempotente) ---- */
+   190→  const installLayers = useCallback(() => {
+   191→    const map = mapRef.current;
+   192→    const ML = MLRef.current;
+   193→    if (!map || !ML || !live.current.data) return;
+   194→    // con stile ancora non caricato getStyle() può essere undefined: si
+   195→    // riproverà al prossimo evento style.load / cambio dati
+   196→    const style = map.getStyle();
+   197→    if (!style) return;
+   198→    const hasCountries = !!MAPTILER_KEY;
+   199→    // i coropleti vanno SOTTO le etichette della cartografia di base
+   200→    const symbol = style.layers?.find(l => l.type === "symbol")?.id;
+   201→
+   202→    // sorgenti
+   203→    if (!map.getSource("zz-regioni")) {
+   204→      map.addSource("zz-regioni", { type: "geojson", data: regioniRef.current || EMPTY_FC });
+   205→    } else if (regioniRef.current) {
+   206→      (map.getSource("zz-regioni") as MapLibreNS.GeoJSONSource).setData(regioniRef.current);
+   207→    }
+   208→    if (hasCountries && !map.getSource("zz-countries")) {
+   209→      map.addSource("zz-countries", { type: "vector", url: COUNTRIES_TILES });
+   210→    }
+   211→    if (!map.getSource("zz-zone-areas")) map.addSource("zz-zone-areas", { type: "geojson", data: EMPTY_FC });
+   212→    if (!map.getSource("zz-comuni")) map.addSource("zz-comuni", { type: "geojson", data: EMPTY_FC });
+   213→    if (!map.getSource("zz-props")) map.addSource("zz-props", { type: "geojson", data: EMPTY_FC });
+   214→
+   215→    // REGIONI — coropleto (vista Italia)
+   216→    if (!map.getLayer("zz-regioni-fill")) {
+   217→      map.addLayer({
+   218→        id: "zz-regioni-fill", type: "fill", source: "zz-regioni",
+   219→        maxzoom: Z_REGIONE_MAX,
+   220→        paint: { "fill-color": regionMatch(), "fill-opacity": 0.55 },
+   221→      }, symbol);
+   222→      map.addLayer({
+   223→        id: "zz-regioni-line", type: "line", source: "zz-regioni",
+   224→        maxzoom: Z_REGIONE_MAX,
+   225→        paint: { "line-color": "#ffffff", "line-opacity": 0.45, "line-width": 1.2 },
+   226→      }, symbol);
+   227→    } else {
+   228→      map.setPaintProperty("zz-regioni-fill", "fill-color", regionMatch());
+   229→    }
+   230→
+   231→    // PROVINCE — coropleto dal tileset Countries (zoom intermedio)
+   232→    if (hasCountries && map.getSource("zz-countries")) {
+   233→      if (!map.getLayer("zz-province-fill")) {
+   234→        map.addLayer({
+   235→          id: "zz-province-fill", type: "fill",
+   236→          source: "zz-countries", "source-layer": "administrative",
+   237→          minzoom: Z_PROVINCIA_MIN, maxzoom: Z_PROVINCIA_MAX,
+   238→          filter: ["all", ["==", ["get", "level"], 1], ["==", ["get", "iso_a2"], "IT"]] as unknown as MapLibreNS.FilterSpecification,
+   239→          paint: { "fill-color": provinceMatch(), "fill-opacity": 0.55 },
+   240→        }, symbol);
+   241→        map.addLayer({
+   242→          id: "zz-province-line", type: "line",
+   243→          source: "zz-countries", "source-layer": "administrative",
+   244→          minzoom: Z_PROVINCIA_MIN, maxzoom: Z_PROVINCIA_MAX,
+   245→          filter: ["all", ["==", ["get", "level"], 1], ["==", ["get", "iso_a2"], "IT"]] as unknown as MapLibreNS.FilterSpecification,
+   246→          paint: { "line-color": "#ffffff", "line-opacity": 0.4, "line-width": 0.9 },
+   247→        }, symbol);
+   248→      } else {
+   249→        map.setPaintProperty("zz-province-fill", "fill-color", provinceMatch());
+   250→      }
+   251→    }
+   252→
+   253→    // COMUNI — coropleto dei comuni del catalogo (zoom ravvicinato)
+   254→    if (!map.getLayer("zz-comuni-fill")) {
+   255→      map.addLayer({
+   256→        id: "zz-comuni-fill", type: "fill", source: "zz-comuni",
+   257→        minzoom: Z_COMUNE_MIN,
+   258→        paint: { "fill-color": comuneMatch(), "fill-opacity": 0.5 },
+   259→      }, symbol);
+   260→      map.addLayer({
+   261→        id: "zz-comuni-line", type: "line", source: "zz-comuni",
+   262→        minzoom: Z_COMUNE_MIN,
+   263→        paint: { "line-color": "#ffffff", "line-opacity": 0.55, "line-width": 1.4 },
+   264→      }, symbol);
+   265→    } else {
+   266→      map.setPaintProperty("zz-comuni-fill", "fill-color", comuneMatch());
+   267→    }
+   268→
+   269→    // AREE CITTÀ (cerchi indicativi, decorativi) + PUNTI IMMOBILE
+   270→    if (!map.getLayer("zz-zone-areas-fill")) {
+   271→      map.addLayer({
+   272→        id: "zz-zone-areas-fill", type: "fill", source: "zz-zone-areas",
+   273→        paint: {
+   274→          "fill-color": ["get", "color"] as unknown as MapLibreNS.ExpressionSpecification,
+   275→          "fill-opacity": ["get", "fillOp"] as unknown as MapLibreNS.ExpressionSpecification,
+   276→        },
+   277→      }, symbol);
+   278→      map.addLayer({
+   279→        id: "zz-zone-areas-line", type: "line", source: "zz-zone-areas",
+   280→        filter: ["!", ["get", "suppressed"]] as unknown as MapLibreNS.FilterSpecification,
+   281→        paint: {
+   282→          "line-color": ["get", "lineColor"] as unknown as MapLibreNS.ExpressionSpecification,
+   283→          "line-width": ["get", "lineW"] as unknown as MapLibreNS.ExpressionSpecification,
+   284→          "line-opacity": ["get", "lineOp"] as unknown as MapLibreNS.ExpressionSpecification,
+   285→        },
+   286→      }, symbol);
+   287→      map.addLayer({
+   288→        id: "zz-zone-areas-line-off", type: "line", source: "zz-zone-areas",
+   289→        filter: ["get", "suppressed"] as unknown as MapLibreNS.FilterSpecification,
+   290→        paint: { "line-color": "#8B95A0", "line-width": 1.2, "line-opacity": 0.6, "line-dasharray": [3, 2] },
+   291→      }, symbol);
+   292→      map.addLayer({
+   293→        id: "zz-props", type: "circle", source: "zz-props",
+   294→        minzoom: 6,
+   295→        paint: {
+   296→          "circle-radius": [
+   297→            "interpolate", ["linear"], ["zoom"],
+   298→            6, ["+", 5, ["min", 4, ["get", "n"]]],
+   299→            10, ["+", 8, ["min", 7, ["get", "n"]]],
+   300→          ] as unknown as MapLibreNS.ExpressionSpecification,
+   301→          "circle-color": [
+   302→            "case", [">=", ["coalesce", ["get", "mean"], -1], 0],
+   303→            ["step", ["coalesce", ["get", "mean"], 0], "#A63A2B", 4, "#C07A2D", 6, "#C9A227", 8, "#2C6E49"],
+   304→            "#9AA4AE",
+   305→          ] as unknown as MapLibreNS.ExpressionSpecification,
+   306→          "circle-stroke-color": "#ffffff", "circle-stroke-width": 2, "circle-stroke-opacity": 0.95,
+   307→          "circle-opacity": 0.96,
+   308→        },
+   309→      }, symbol);
+   310→    }
+   311→
+   312→    // MASCHERA: fuori dall'Italia tutto scuro (livello PAESI, level 0,
+   313→    // escludendo IT) — sopra ogni etichetta estera, come da guida MapTiler
+   314→    if (hasCountries && map.getSource("zz-countries")) {
+   315→      if (!map.getLayer("zz-mask")) {
+   316→        map.addLayer({
+   317→          id: "zz-mask", type: "fill",
+   318→          source: "zz-countries", "source-layer": "administrative",
+   319→          filter: ["all", ["==", ["get", "level"], 0], ["!=", ["get", "iso_a2"], "IT"]] as unknown as MapLibreNS.FilterSpecification,
+   320→          paint: { "fill-color": "#1B2A38", "fill-opacity": 0.62 },
+   321→        });
+   322→        map.addLayer({
+   323→          id: "zz-italy-border", type: "line",
+   324→          source: "zz-countries", "source-layer": "administrative",
+   325→          filter: ["all", ["==", ["get", "level"], 0], ["==", ["get", "iso_a2"], "IT"]] as unknown as MapLibreNS.FilterSpecification,
+   326→          paint: { "line-color": "#274B6D", "line-width": 1.8, "line-blur": 2, "line-opacity": 0.9 },
+   327→        });
+   328→      }
+   329→    }
+   330→  }, []);
+   331→
+   332→  /* ---- pin delle città, aree, punti: ridisegno a zoom/dati ---- */
+   333→  const redraw = useCallback(() => {
+   334→    const ML = MLRef.current;
+   335→    const map = mapRef.current;
+   336→    const d = live.current.data;
+   337→    if (!ML || !map || !d || !map.isStyleLoaded()) return;
+   338→    const az = live.current.activeZone, mz = live.current.myZone, md = live.current.mode;
+   339→    const zoom = map.getZoom();
+   340→    // a livello Italia i pin diventano compatti; a zoom cittadino la chip si
+   341→    // nasconde (il nome della città è già nella cartografia di base)
+   342→    const compact = zoom < 7;
+   343→    const chipHidden = zoom >= 10;
+   344→    const showProps = md !== "zone" && zoom >= 6;
+   345→    // etichettatura anti-collisione a zoom nazionale
+   346→    let labeledIds: Set<string> | null = null;
+   347→    if (compact) {
+   348→      labeledIds = new Set<string>();
+   349→      const placed: Array<{ x: number; y: number }> = [];
+   350→      const byReviews = [...d.zones].sort((a, b) => (b.place?.n ?? b.aggregate?.n ?? -1) - (a.place?.n ?? a.aggregate?.n ?? -1));
+   351→      for (const z of byReviews) {
+   352→        const pt = map.project([z.lng, z.lat]);
+   353→        const collides = placed.some(p => Math.abs(p.x - pt.x) < 98 && Math.abs(p.y - pt.y) < 26);
+   354→        if (!collides) { placed.push({ x: pt.x, y: pt.y }); labeledIds.add(z.id); }
+   355→      }
+   356→    }
+   357→
+   358→    // marker: si ricostruiscono (sono pochi)
+   359→    for (const m of markersRef.current) m.remove();
+   360→    markersRef.current = [];
+   361→    for (const z of d.zones) {
+   362→      const color = z.aggregate ? scoreBandColor(z.aggregate.mean) : "#9AA4AE";
+   363→      const isActive = az === z.id, isMine = mz === z.id;
+   364→      const scoreHtml = z.aggregate
+   365→        ? `${fmt1(z.aggregate.mean)}/10 · ${z.aggregate.n}`
+   366→        : `<span class="zz-muted">${z.suppressed ? "aggregati sospesi" : "n. d."}</span>`;
+   367→      const dotOnly = chipHidden || (compact && !labeledIds!.has(z.id));
+   368→      const el = document.createElement("div");
+   369→      el.className = "zz-zone-pin-wrap";
+   370→      el.innerHTML = `<div class="zz-zone-pin${compact ? " compact" : ""}${dotOnly ? " dotonly" : ""}${isActive ? " active" : ""}${isMine ? " mine" : ""}" style="--pin:${color}">
+   371→          <span class="zz-pin-chip">
+   372→            <span class="zz-pin-name">${esc(z.name)}</span>
+   373→            <span class="zz-pin-score">${scoreHtml}</span>
+   374→          </span>
+   375→          <span class="zz-pin-dot"></span>
+   376→        </div>`;
+   377→      if (z.entityId) {
+   378→        el.style.cursor = "pointer";
+   379→        el.addEventListener("click", () => { navigate(`#/zona/${z.entityId}`); });
+   380→      }
+   381→      const marker = new ML.Marker({ element: el, anchor: dotOnly ? "center" : "bottom" })
+   382→        .setLngLat([z.lng, z.lat])
+   383→        .addTo(map);
+   384→      markersRef.current.push(marker);
+   385→    }
+   386→
+   387→    // aree città: cerchi indicativi con le stesse regole di prima
+   388→    const areas: GeoJSON.FeatureCollection = {
+   389→      type: "FeatureCollection",
+   390→      features: d.zones.map(z => {
+   391→        const color = z.aggregate ? scoreBandColor(z.aggregate.mean) : "#9AA4AE";
+   392→        const isActive = az === z.id, isMine = mz === z.id;
+   393→        return {
+   394→          type: "Feature",
+   395→          properties: {
+   396→            color, suppressed: z.suppressed && !z.aggregate,
+   397→            fillOp: z.aggregate ? 0.14 : 0.05,
+   398→            lineColor: isActive ? "#33658A" : color,
+   399→            lineW: isActive ? 2.6 : isMine ? 2.1 : 1.2,
+   400→            lineOp: isActive || isMine ? 0.9 : 0.5,
+   401→          },
+   402→          geometry: circlePolygon(z.lat, z.lng, z.radiusM),
+   403→        };
+   404→      }),
+   405→    };
+   406→    (map.getSource("zz-zone-areas") as MapLibreNS.GeoJSONSource | undefined)?.setData(areas);
+   407→
+   408→    // punti immobile (solo a zoom ravvicinato, modalità immobili)
+   409→    const propsFc: GeoJSON.FeatureCollection = {
+   410→      type: "FeatureCollection",
+   411→      features: showProps ? d.markers.map(mk => {
+   412→        const city = d.zones.find(z => z.id === mk.zoneId)?.name || "";
+   413→        return {
+   414→          type: "Feature",
+   415→          properties: { id: mk.id, name: mk.name, mean: mk.mean, n: mk.n, isDemo: mk.isDemo, city },
+   416→          geometry: { type: "Point", coordinates: [mk.lng, mk.lat] },
+   417→        };
+   418→      }) : [],
+   419→    };
+   420→    (map.getSource("zz-props") as MapLibreNS.GeoJSONSource | undefined)?.setData(propsFc);
+   421→  }, []);
+   422→
+   423→  /* ---- comuni: contorni on demand quando si zooma/cerca ---- */
+   424→  const fetchComuni = useCallback(async () => {
+   425→    const map = mapRef.current;
+   426→    const d = live.current.data;
+   427→    if (!map || !d || map.getZoom() < Z_COMUNE_FETCH) return;
+   428→    // margine intorno alla vista (~15%): si chiedono i comuni visibili o in
+   429→    // arrivo, senza il metodo .pad() che LngLatBounds non ha
+   430→    const b = map.getBounds();
+   431→    const latSpan = Math.max(0.02, b.getNorth() - b.getSouth());
+   432→    const lngSpan = Math.max(0.02, b.getEast() - b.getWest());
+   433→    const margin = (v: number) => v * 0.15;
+   434→    const inView = (lng: number, lat: number) =>
+   435→      lng >= b.getWest() - margin(lngSpan) && lng <= b.getEast() + margin(lngSpan) &&
+   436→      lat >= b.getSouth() - margin(latSpan) && lat <= b.getNorth() + margin(latSpan);
+   437→    const pending = d.zones
+   438→      .filter(z => z.place && !comuniAskedRef.current.has(z.id))
+   439→      .filter(z => inView(z.lng, z.lat))
+   440→      .slice(0, 6);
+   441→    for (const z of pending) {
+   442→      comuniAskedRef.current.add(z.id);
+   443→      const q = new URLSearchParams({ name: z.name, province: z.province || "", region: z.region || "" });
+   444→      const res = await api<{ polygon: { type: string; coordinates: unknown } | null }>(`/api/public/zone-outline?${q.toString()}`);
+   445→      if (res.ok && res.polygon) {
+   446→        comuniFeatRef.current.set(z.id, {
+   447→          type: "Feature",
+   448→          properties: { id: z.id, nome: z.name, n: normName(z.name), mean: z.place!.mean, nrev: z.place!.n, entityId: z.entityId },
+   449→          geometry: res.polygon as GeoJSON.Geometry,
+   450→        });
+   451→      }
+   452→    }
+   453→    if (pending.length) {
+   454→      (map.getSource("zz-comuni") as MapLibreNS.GeoJSONSource | undefined)
+   455→        ?.setData({ type: "FeatureCollection", features: [...comuniFeatRef.current.values()] });
+   456→      // il match dei colori cambia solo se arrivano nuovi comuni
+   457→      if (map.getLayer("zz-comuni-fill")) {
+   458→        map.setPaintProperty("zz-comuni-fill", "fill-color", comuneMatch());
+   459→      }
+   460→    }
+   461→  }, []);
+   462→
+   463→  // inizializzazione MapLibre (una sola volta, all'arrivo dei dati)
+   464→  useEffect(() => {
+   465→    if (!data || !holderRef.current || mapRef.current) return;
+   466→    const holder = holderRef.current;
+   467→    let disposed = false;
+   468→    let ro: ResizeObserver | null = null;
+   469→    let roFit: ResizeObserver | null = null;
+   470→    void (async () => {
+   471→      const maplibregl = await import("maplibre-gl");
+   472→      if (disposed || !holderRef.current) return;
+   473→      MLRef.current = maplibregl as unknown as typeof MapLibreNS;
+   474→      setupMapLibre(MLRef.current);
+   475→
+   476→      // base: stile MapTiler OMT minimale se c'è la chiave (verificato con
+   477→      // una richiesta: chiave errata o stile assente → ripiego OSM raster)
+   478→      let style: string | MapLibreNS.StyleSpecification = osmRasterStyle();
+   479→      if (MAPTILER_KEY) {
+   480→        try {
+   481→          const ctrl = new AbortController();
+   482→          const timer = setTimeout(() => ctrl.abort(), 6000);
+   483→          const r = await fetch(MAPTILER_STYLE_URL, { signal: ctrl.signal });
+   484→          clearTimeout(timer);
+   485→          if (!r.ok) throw new Error("stile MapTiler non disponibile");
+   486→          style = (await r.json()) as MapLibreNS.StyleSpecification;
+   487→        } catch {
+   488→          // nessun problema: la mappa funziona con i tile pubblici OSM
+   489→        }
+   490→      }
+   491→
+   492→      const map = new maplibregl.Map({
+   493→        container: holder,
+   494→        style,
+   495→        // vista di ripiego già sull'Italia: se il contenitore non fosse
+   496→        // ancora dimensionato, la mappa non finirebbe mai altrove
+   497→        center: [12.5, 42.5],
+   498→        zoom: 4.6,
+   499→        attributionControl: false,
+   500→        maxZoom: 19,
+   501→        minZoom: 3.6,
+   502→        dragRotate: false,
+   503→        pitchWithRotate: false,
+   504→        touchPitch: false,
+   505→      });
+   506→      mapRef.current = map;
+   507→      map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), "top-right");
+   508→      map.addControl(new maplibregl.ScaleControl({ unit: "metric", maxWidth: 110 }), "bottom-left");
+   509→      map.addControl(new maplibregl.AttributionControl({
+   510→        compact: true,
+   511→        customAttribution: MAPTILER_KEY
+   512→          ? '<a href="https://www.maptiler.com/copyright/" target="_blank" rel="noopener">© MapTiler</a> <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>'
+   513→          : undefined,
+   514→      }));
+   515→      // inquadra l'Italia quando la mappa è davvero pronta (contenitore
+   516→      // dimensionato e stile caricato): un fitBounds troppo presto, con il
+   517→      // contenitore ancora a zero pixel, porterebbe la camera altrove
+   518→      let fitted = false;
+   519→      const fitItaly = () => {
+   520→        if (fitted || !data) return;
+   521→        fitted = true;
+   522→        const initial = activeZone || myZone;
+   523→        if (initial && data.zones.some(z => z.id === initial)) {
+   524→          const z = data.zones.find(zz => zz.id === initial)!;
+   525→          map.jumpTo({ center: [z.lng, z.lat], zoom: 12 });
+   526→        } else {
+   527→          map.fitBounds(ITALY, { padding: 14 });
+   528→        }
+   529→      };
+   530→      map.once("load", () => fitItaly());
+   531→      // se il contenitore cambia dimensione prima del load (layout che si
+   532→      // assesta), l'inquadratura dell'Italia resta quella giusta
+   533→      const roFitLocal = new ResizeObserver(() => { if (!fitted && map.isStyleLoaded()) fitItaly(); });
+   534→      roFit = roFitLocal;
+   535→      roFitLocal.observe(holder);
+   536→      map.on("resize", () => { if (!fitted && map.isStyleLoaded()) fitItaly(); });
+   537→
+   538→      // confini ISTAT delle regioni: GeoJSON locale semplificato (92 KB)
+   539→      void fetch("/regioni-italia.geojson").then(r => (r.ok ? r.json() : null)).then((gj: GeoJSON.FeatureCollection | null) => {
+   540→        if (!gj || disposed) return;
+   541→        regioniRef.current = {
+   542→          type: "FeatureCollection",
+   543→          features: gj.features.map(f => ({
+   544→            type: "Feature",
+   545→            properties: { nome: (f.properties as { nome?: string } | null)?.nome || "", n: normName((f.properties as { nome?: string } | null)?.nome) },
+   546→            geometry: f.geometry,
+   547→          })),
+   548→        };
+   549→        (map.getSource("zz-regioni") as MapLibreNS.GeoJSONSource | undefined)?.setData(regioniRef.current);
+   550→        if (map.getLayer("zz-regioni-fill")) {
+   551→          map.setPaintProperty("zz-regioni-fill", "fill-color", regionMatch());
+   552→        }
+   553→      });
+   554→
+   555→      map.on("style.load", () => { installLayers(); redraw(); });
+   556→      map.on("zoomend", () => { redraw(); });
+   557→      map.on("moveend", () => { redraw(); void fetchComuni(); });
+   558→
+   559→      // popup dei punti immobile
+   560→      map.on("click", "zz-props", e => {
+   561→        const f = e.features?.[0];
+   562→        if (!f) return;
+   563→        const p = f.properties as { name: string; city: string; mean: number | null; n: number; isDemo: boolean; id: string };
+   564→        const mean = p.mean == null ? null : Number(p.mean);
+   565→        new maplibregl.Popup({ className: "zz-popup", closeButton: true, maxWidth: "280px" })
+   566→          .setLngLat(e.lngLat)
+   567→          .setHTML(
+   568→            `<div class="zz-pop">
+   569→              <strong>${esc(p.name)}</strong>${p.isDemo ? ' <span class="badge-demo">Dato fittizio</span>' : ""}
+   570→              <div class="zz-pop-sub">Immobile${p.city ? ` · ${esc(p.city)}` : ""}</div>
+   571→              <div class="zz-pop-score" style="color:${scoreBandColor(mean)}">
+   572→                ${mean == null ? "Nessuna recensione" : `${fmt1(mean)}/10 · ${p.n} ${p.n === 1 ? "recensione" : "recensioni"}`}
+   573→              </div>
+   574→              <a href="#/scheda/${esc(p.id)}" class="zz-pop-link">Apri la scheda</a>
+   575→            </div>`)
+   576→          .addTo(map);
+   577→      });
+   578→      // popup del comune (livello comunale)
+   579→      map.on("click", "zz-comuni-fill", e => {
+   580→        const f = e.features?.[0];
+   581→        if (!f) return;
+   582→        const p = f.properties as { nome: string; mean: number; nrev: number; entityId: string | null };
+   583→        new maplibregl.Popup({ className: "zz-popup", closeButton: true, maxWidth: "280px" })
+   584→          .setLngLat(e.lngLat)
+   585→          .setHTML(
+   586→            `<div class="zz-pop">
+   587→              <strong>${esc(p.nome)}</strong>
+   588→              <div class="zz-pop-sub">Comune · reputazione del territorio</div>
+   589→              <div class="zz-pop-score" style="color:${scoreBandColor(p.mean)}">
+   590→                ${fmt1(p.mean)}/10 · ${p.nrev} ${p.nrev === 1 ? "recensione" : "recensioni"}
+   591→              </div>
+   592→              ${p.entityId ? `<a href="#/zona/${esc(p.entityId)}" class="zz-pop-link">Apri la scheda della città</a>` : ""}
+   593→            </div>`)
+   594→          .addTo(map);
+   595→      });
+   596→      for (const layerId of ["zz-props", "zz-comuni-fill"]) {
+   597→        map.on("mouseenter", layerId, () => { map.getCanvas().style.cursor = "pointer"; });
+   598→        map.on("mouseleave", layerId, () => { map.getCanvas().style.cursor = ""; });
+   599→      }
+   600→
+   601→      installLayers();
+   602→      redraw();
+   603→      void fetchComuni();
+   604→      // tiene la mappa allineata quando il contenitore cambia dimensione
+   605→      ro = new ResizeObserver(() => map.resize());
+   606→      ro.observe(holder);
+   607→    })();
+   608→    return () => {
+   609→      disposed = true;
+   610→      ro?.disconnect();
+   611→      roFit?.disconnect();
+   612→      for (const m of markersRef.current) m.remove();
+   613→      markersRef.current = [];
+   614→      mapRef.current?.remove();
+   615→      mapRef.current = null;
+   616→      MLRef.current = null;
+   617→      comuniAskedRef.current = new Set();
+   618→      comuniFeatRef.current = new Map();
+   619→    };
+   620→  }, [data]);
+   621→
+   622→  // ridisegno quando cambiano dati, modalità, zona attiva o città di riferimento
+   623→  useEffect(() => {
+   624→    live.current = { data, mode, activeZone, myZone };
+   625→    const map = mapRef.current;
+   626→    if (!map) return;
+   627→    if (map.isStyleLoaded() && map.getStyle()) {
+   628→      installLayers();
+   629→      redraw();
+   630→    }
+   631→  }, [data, mode, activeZone, myZone, installLayers, redraw]);
+   632→
+   633→  const focusZone = useCallback((zoneId: string, animate = true) => {
+   634→    const map = mapRef.current;
+   635→    const z = live.current.data?.zones.find(zz => zz.id === zoneId);
+   636→    if (!map || !z) return;
+   637→    if (animate) map.flyTo({ center: [z.lng, z.lat], zoom: 12, duration: 0.9 });
+   638→    else map.jumpTo({ center: [z.lng, z.lat], zoom: 12 });
+   639→  }, []);
+   640→  const italyView = useCallback(() => {
+   641→    mapRef.current?.fitBounds(ITALY, { padding: 14 });
+   642→  }, []);
+   643→
+   644→  const useGps = () => {
+   645→    if (!navigator.geolocation || !data) {
+   646→      toast("Geolocalizzazione non disponibile in questo browser: scegli la città dall'elenco.", "err");
+   647→      return;
+   648→    }
+   649→    toast("Rilevo la posizione… le coordinate servono solo al momento e non vengono salvate.");
+   650→    navigator.geolocation.getCurrentPosition(
+   651→      pos => {
+   652→        // città coperta più vicina (distanza locale approssimata)
+   653→        const R = 6371, rad = Math.PI / 180;
+   654→        const m = Math.cos(pos.coords.latitude * rad);
+   655→        let best: MapData["zones"][number] | null = null, bd = Infinity;
+   656→        for (const z of data.zones) {
+   657→          const dLat = (z.lat - pos.coords.latitude) * rad;
+   658→          const dLng = (z.lng - pos.coords.longitude) * rad;
+   659→          const d = R * Math.sqrt(dLat * dLat + (dLng * m) * (dLng * m));
+   660→          if (d < bd) { bd = d; best = z; }
+   661→        }
+   662→        if (best) {
+   663→          setMyZone(best.id);
+   664→          focusZone(best.id, true);
+   665→          toast(`Città di riferimento: ${best.name}. Coordinate scartate.`);
+   666→        }
+   667→      },
+   668→      err => {
+   669→        const why = err.code === 1 ? "autorizzazione negata" : err.code === 2 ? "posizione non disponibile" : "tempo scaduto";
+   670→        toast(`GPS non utilizzabile (${why}): scegli la città dall'elenco.`, "err");
+   671→      },
+   672→      { timeout: 8000, maximumAge: 600000, enableHighAccuracy: false }
+   673→    );
+   674→  };
+   675→
+   676→  if (!data) {
+   677→    return (
+   678→      <div className="map-viewport" role="application" aria-label="Mappa in caricamento">
+   679→        <p className="map-loading">Caricamento della mappa…</p>
+   680→      </div>
+   681→    );
+   682→  }
+   683→
+   684→  return (
+   685→    <div className="map-viewport" role="application"
+   686→      aria-label="Mappa delle reputazioni del territorio italiano (cartografia MapTiler/OpenStreetMap). Trascina per esplorare, usa la rotella o i pulsanti per lo zoom. A livello nazionale le regioni sono colorate per reputazione; zoomando passano province e comuni. I pin delle città aprono la loro scheda, i punti immobile aprono una scheda sintetica.">
+   687→      <div className="map-holder" ref={holderRef}></div>
+   688→      <div className="map-loc">
+   689→        <span aria-hidden="true">◎</span>
+   690→        <select className="map-zone-select" aria-label="La tua città di riferimento"
+   691→          value={myZone || ""}
+   692→          onChange={e => {
+   693→            const zid = e.target.value || null;
+   694→            setMyZone(zid);
+   695→            if (zid) {
+   696→              focusZone(zid, true);
+   697→              toast("Città di riferimento: " + (data.zones.find(z => z.id === zid)?.name || "") + ". Preferenza salvata solo su questo dispositivo.");
+   698→            } else {
+   699→              italyView();
+   700→              toast("Città di riferimento rimossa.");
+   701→            }
+   702→          }}>
+   703→          <option value="">La tua città…</option>
+   704→          {data.zones.map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
+   705→        </select>
+   706→        <button className="btn btn-ghost btn-xs" onClick={useGps}
+   707→          title="Usa la mia posizione: le coordinate servono solo al momento e non vengono salvate">GPS</button>
+   708→      </div>
+   709→      <div className="map-italy-btn">
+   710→        <button type="button" onClick={italyView} title="Torna alla vista dell'Italia intera: regioni colorate per reputazione">Vista Italia</button>
+   711→      </div>
+   712→    </div>
+   713→  );
+   714→}
+   715→
+   716→export function MapLegend() {
+   717→  return (
+   718→    <div className="map-legend">
+   719→      <span className="leg-dot" style={{ background: scoreBandColor(9) }}></span> 8–10 ottimo
+   720→      <span className="leg-dot" style={{ background: scoreBandColor(7) }}></span> 6–8 discreto
+   721→      <span className="leg-dot" style={{ background: scoreBandColor(5) }}></span> 4–6 criticità
+   722→      <span className="leg-dot" style={{ background: scoreBandColor(2) }}></span> 0–4 gravi criticità
+   723→      <span className="small muted">Vista Italia: regioni colorate per reputazione · zoomando: province e comuni · fuori dall&apos;Italia oscurato · Cartografia © MapTiler, © OpenStreetMap contributors</span>
+   724→    </div>
+   725→  );
+   726→}
+   727→

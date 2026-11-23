@@ -1,9 +1,11 @@
 // Collaudo offline della geometria della mappa: validazione dei layer
-// (filtri + espressioni data-driven) con lo style-spec di MapLibre e prove
-// del modulo di normalizzazione/alias dei nomi italiani.
+// (filtri + espressioni data-driven) con lo style-spec di MapLibre, prove
+// del modulo di normalizzazione/alias dei nomi italiani e dei FILTRI PER
+// CRITERIO (formula della media ponderata + espressioni colore generate).
 // Uso: bun scripts/test-mappa-maptiler.ts
 import { validateStyleMin } from "@maplibre/maplibre-gl-style-spec";
 import { normName, regionCanonical, tilerProvinceOf, TILER_PROVINCE, REGIONI_ISTAT } from "../src/lib/map-italy";
+import { critAggregate, criterionShortLabel, scoreBandColor, type CritMap } from "../src/lib/map-criteria";
 
 let pass = 0, fail = 0;
 const check = (name: string, cond: boolean, extra = "") => {
@@ -68,6 +70,32 @@ const errors = validateStyleMin(style as never);
 check("style-spec: tutti i layer/filtri/espressioni sono validi", errors.length === 0,
   errors.length ? JSON.stringify(errors.slice(0, 3)) : "");
 
+/* ---- 1b) coropleti con FILTRO PER CRITERIO attivo: l'espressione match
+   viene generata da map.tsx con critAggregate → scoreBandColor: le righe
+   senza dati per i criteri scelti restano fuori (area neutra) ---- */
+const critRows: Array<{ name: string; mean: number; n: number; criteria?: CritMap }> = [
+  { name: "Lombardia", mean: 7.8, n: 46, criteria: { servizi: [8.1, 12], trasporti: [8.6, 12], sicurezza: [7.7, 12], verde: [7.6, 12], costi: [6.2, 12] } },
+  { name: "Campania", mean: 6.6, n: 21, criteria: { servizi: [6.0, 9], trasporti: [5.7, 9], sicurezza: [5.2, 9], verde: [6.7, 9], costi: [7.0, 9] } },
+  { name: "Veneto", mean: 7.2, n: 8 }, // criteri sotto soglia: nessun colore
+];
+const critPairs: Array<string> = [];
+for (const row of critRows) {
+  const v = critAggregate(row.criteria, ["sicurezza", "verde"]);
+  if (v) critPairs.push(normName(row.name), scoreBandColor(v.mean));
+}
+const styleFiltro = {
+  version: 8,
+  sources: { regioni: { type: "geojson", data: { type: "FeatureCollection", features: [] } } },
+  layers: [{
+    id: "zz-regioni-fill", type: "fill", source: "regioni", maxzoom: 6.5,
+    paint: { "fill-color": ["match", ["get", "n"], ...critPairs, "rgba(0,0,0,0)"], "fill-opacity": 0.55 },
+  }] as never,
+};
+const errFiltro = validateStyleMin(styleFiltro as never);
+check("style-spec: coropleti con filtro criterio validi (aree senza voti escluse)",
+  errFiltro.length === 0 && critPairs.length === 4,
+  errFiltro.length ? JSON.stringify(errFiltro.slice(0, 3)) : `coppie generate: ${critPairs.length / 2}`);
+
 /* ---- 2) normalizzazione e alias dei nomi ---- */
 check("normName: accenti, apostrofi, trattini", normName("Forlì-Cesena") === "forli cesena" && normName("L'Aquila") === "l aquila");
 check("normName: maiuscole e spazi multipli", normName("  Reggio  nell'Emilia ") === "reggio nell emilia");
@@ -104,6 +132,33 @@ const fs = await import("node:fs");
 const gj = JSON.parse(fs.readFileSync("public/regioni-italia.geojson", "utf8"));
 check("regioni geojson: 20 feature, tutte con nome riconosciuto",
   gj.features.length === 20 && gj.features.every((f: { properties: { nome: string } }) => regionCanonical(f.properties.nome) === f.properties.nome));
+
+/* ---- 3) filtri per criterio: formula, gestione dati mancanti, etichette ---- */
+check("criteri: selezione vuota → complessivo (critAggregate null)", critAggregate(critRows[0].criteria, []) === null);
+check("criteri: nessun dato per criterio → null", critAggregate(undefined, ["servizi"]) === null && critAggregate({}, ["servizi"]) === null);
+const vSing = critAggregate(critRows[0].criteria, ["sicurezza"]);
+check("criteri: criterio singolo → la sua media (7,7 · 12 voti)",
+  !!vSing && Math.abs(vSing.mean - 7.7) < 1e-9 && vSing.n === 12 && !vSing.multi);
+const CM: CritMap = { a: [8, 4], b: [6, 2] };
+const vPond = critAggregate(CM, ["a", "b"]);
+check("criteri: media ponderata per voti ((8·4+6·2)/6 = 7,33)",
+  !!vPond && Math.abs(vPond.mean - 44 / 6) < 1e-9 && vPond.multi);
+const vParz = critAggregate(CM, ["a", "inesistente"]);
+check("criteri: chiavi senza dati ignorate (restano solo i voti presenti)",
+  !!vParz && Math.abs(vParz.mean - 8) < 1e-9 && vParz.n === 4 && !vParz.multi);
+const vMulti = critAggregate(critRows[1].criteria, ["sicurezza", "verde"]);
+check("criteri: due criteri insieme (Campania (5,2·9+6,7·9)/18 = 5,95)",
+  !!vMulti && Math.abs(vMulti.mean - (5.2 * 9 + 6.7 * 9) / 18) < 1e-9 && vMulti.multi);
+const vFuori = critAggregate(critRows[2].criteria, ["servizi"]);
+check("criteri: riga senza criteri pubblicati → nessun colore", vFuori === null);
+check("criteri: fascia colore invariata (6–8 giallo, 4–6 arancio)",
+  scoreBandColor(7.7) === "#C9A227" && scoreBandColor(5.95) === "#C07A2D" && scoreBandColor(null) === "#9AA4AE");
+check("criteri: etichette corte dei criteri zona",
+  criterionShortLabel("servizi", "Servizi alla persona e vivibilità") === "Servizi"
+  && criterionShortLabel("verde", "Verde, aria e ambiente") === "Verde e aria"
+  && criterionShortLabel("costi", "Costi della vita nella zona") === "Costi della vita");
+const lblLunga = criterionShortLabel("criterio_nuovo", "Criterio aggiunto dal back office");
+check("criteri: chiave ignota → etichetta completa tagliata", lblLunga.startsWith("Criterio aggiunto") && lblLunga.endsWith("…"));
 
 console.log(`\nRIEPILOGO: ${pass}/${pass + fail} controlli superati`);
 if (fail) process.exit(1);

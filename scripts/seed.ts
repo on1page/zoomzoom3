@@ -158,6 +158,26 @@ const TARGETS: Array<[string, number, number]> = [
 
 const UPDATE_REASONS = ["Ho corretto un dettaglio dopo la pubblicazione.", "Aggiornamento dopo l'intervento di manutenzione promesso.", "Precisazione sui tempi di risposta."];
 
+// Profilo per criterio delle città demo (solo categoria zona): scostamenti
+// dal punteggio complessivo che danno carattere realistico a ogni città e
+// rendono leggibile a colpo d'occhio il filtro per criterio della mappa
+// (es. Milano: trasporti ottimi, costi della vita critici). Il punteggio
+// complessivo della recensione NON cambia: sono i singoli criteri a
+// discostarsene, come nelle recensioni vere.
+const ZONA_CRIT_PROFILE: Record<string, Record<string, number>> = {
+  ent_z_milano: { servizi: 0.3, trasporti: 0.8, sicurezza: -0.1, verde: -0.4, costi: -1.8 },
+  ent_z_roma: { servizi: -0.1, trasporti: -0.5, sicurezza: -0.7, verde: 0.2, costi: -1.2 },
+  ent_z_napoli: { servizi: -0.4, trasporti: -0.7, sicurezza: -1.2, verde: 0.4, costi: 0.7 },
+  ent_z_torino: { servizi: 0.2, trasporti: 0.4, sicurezza: 0.1, verde: 0, costi: -0.6 },
+  ent_z_bologna: { servizi: 0.5, trasporti: 0.6, sicurezza: 0.3, verde: 0.7, costi: -0.7 },
+  ent_z_palermo: { servizi: -0.5, trasporti: -0.7, sicurezza: -1.4, verde: 0.4, costi: 0.8 },
+  ent_z_firenze: { servizi: 0.4, trasporti: 0.1, sicurezza: 0.3, verde: 0.4, costi: -1.5 },
+  ent_z_venezia: { servizi: 0.2, trasporti: 0.1, sicurezza: 0.3, verde: 0.6, costi: -1.6 },
+  ent_z_bari: { servizi: -0.3, trasporti: -0.5, sicurezza: -0.8, verde: 0.1, costi: 0.4 },
+  ent_z_genova: { servizi: -0.3, trasporti: -0.1, sicurezza: -0.5, verde: 0.6, costi: 0.1 },
+  ent_z_cagliari: { servizi: 0.2, trasporti: -0.3, sicurezza: -0.1, verde: 0.8, costi: 0.2 },
+};
+
 function daysAgoIso(days: number): string {
   return new Date(Date.now() - days * 86400000).toISOString();
 }
@@ -369,7 +389,12 @@ async function main() {
       });
       const score = clamp(roundHalf(target + (r() - 0.5) * 3), 0.5, 10);
       const crit: Record<string, number> = {};
-      for (const c of cat.criteria) crit[c.key] = clamp(roundHalf(score + (r() - 0.5) * 3), 0.5, 10);
+      // città demo: i voti per criterio seguono il profilo della città
+      // (vedi ZONA_CRIT_PROFILE); jitter più contenuto così il carattere
+      // della città resta leggibile nelle medie
+      const prof = catId === "zona" ? (ZONA_CRIT_PROFILE[entId] || {}) : {};
+      const jitter = catId === "zona" ? 2.4 : 3;
+      for (const c of cat.criteria) crit[c.key] = clamp(roundHalf(score + (prof[c.key] ?? 0) + (r() - 0.5) * jitter), 0.5, 10);
       const ph = PRICE_HINTS[entId];
       const hasPrice = !!(ph && cat.id !== "zona" && cat.id !== "affittuario");
       const hasUpdate = r() < 0.14;

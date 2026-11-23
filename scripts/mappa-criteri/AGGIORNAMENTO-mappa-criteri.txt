@@ -1,0 +1,179 @@
+ZoomZoom — MAPPA PER CRITERIO: i filtri Servizi / Trasporti / Sicurezza / Verde / Costi ricolorano il territorio
+==================================================================================================================
+
+LO SCOPO
+--------
+La zona viene valutata esprimendo un voto per ciascun criterio specifico
+della categoria (Servizi alla persona e vivibilità; Trasporti e mobilità;
+Sicurezza percepita; Verde, aria e ambiente; Costi della vita nella zona).
+Questo aggiornamento porta QUELLA dimensione dentro la mappa: con i nuovi
+pulsanti "Criterio" la colorazione di regioni, province, comuni e pin
+segue i criteri selezionati, non solo la media complessiva. Lo scopo
+resta lo stesso della mappa delle reputazioni: leggere a prima vista
+come va il territorio — ora anche "per aspetto".
+
+COSA COMPARE SULLA MAPPA
+-------------------------
+Sopra la mappa (sotto il selettore città) una barra di pulsanti:
+
+    Criterio: [Complessiva] [Servizi] [Trasporti] [Sicurezza]
+              [Verde e aria] [Costi della vita]
+
+- COMPLESSIVA (predefinito) è la vista di prima: media di tutte le
+  recensioni delle schede del territorio.
+- Un clic su un criterio attiva il filtro: regioni (vista Italia),
+  province (zoom intermedio), comuni (zoom ravvicinato), pin e aree
+  città si ricolorano con la media dei voti ricevuti SU QUEL CRITERIO.
+- Più criteri insieme: la colorazione usa la media PONDERATA per numero
+  di voti dei criteri selezionati; pin e popup mostrano "media di N
+  criteri" invece di un conteggio (che non sarebbe più "recensioni").
+- Un secondo clic spegne il criterio; "Complessiva" azzera tutto.
+- Dove non ci sono voti per i criteri scelti l'area resta NEUTRA
+  (trasparente, pin "n. d."): NON cade sulla media complessiva, che è
+  un dato diverso da quello richiesto. La stessa soglia di soppressione
+  (mapMinAggregate) protegge anche i singoli criteri.
+- I popup seguono il filtro: sul comune si legge ad esempio
+  "Milano — Comune · Sicurezza percepita — 7,4/10 · 12 recensioni".
+- I pulsanti nascono dall'elenco criteri della categoria Zone del back
+  office: se domani un criterio cambia nome o se ne aggiunge uno, la
+  barra si aggiorna da sola (etichette corte automatiche sul pulsante,
+  etichetta completa nel tooltip e nei popup).
+
+DA DOVE VENGONO I VOTI PER CRITERIO
+-----------------------------------
+Dalle recensioni pubblicate delle schede collocate, una sola passata in
+/api/public/map: ogni voto espresso su un criterio del catalogo Zone
+entra negli aggregati per zona (tutte le schede del territorio) e,
+se la scheda è una scheda città, anche nell'aggregato della scheda
+stessa (che colora pin e chip). Oggi quei criteri li esprimono le
+recensioni delle schede città: per questo il conteggio per criterio può
+differire da quello complessivo del territorio (che comprende anche
+immobili, agenzie, ditte…). Sempre e solo medie e conteggi: nessun dato
+individuale, niente autori, niente date.
+
+FORMULA UNICA E VERIFICATA
+--------------------------
+La media (singolo criterio o combinazione) è calcolata da
+src/lib/map-criteria.ts, condivisa da rotta API, client e collaudo:
+media ponderata per numero di voti dei soli criteri selezionati con
+dati pubblicati. Scala cromatica invariata (8–10 verde, 6–8 giallo,
+4–6 arancio, 0–4 rosso): cambia il valore, non la legenda.
+
+BUG LATENTE TROVATO E CORRETTO DURANTE IL COLLAUDO (importante)
+---------------------------------------------------------------
+Il ridisegno della mappa era protetto da map.isStyleLoaded(): quella
+funzione però restituisce false finché ANCHE UN SOLO tile della vista è
+in caricamento — con i tile pubblici OSM (il ripiego senza chiave
+MapTiler) accade quasi sempre — e così pin e coropleti non si
+aggiornavano MAI dopo zoom, spostamento o cambio filtro. Ora la guardia
+è l'evento style.load (riferimento styleReadyRef): setPaintProperty e
+setData funzionano tranquillamente mentre i tile arrivano. Corretto
+per entrambi gli stili (MapTiler e ripiego OSM); sparita anche la
+segnalazione "There is no style added to the map" in console.
+
+IL SEED DEMO ORA DÀ CARATTERE ALLE CITTÀ (facoltativo)
+------------------------------------------------------
+Le recensioni fittizie delle schede città nascono con un profilo per
+criterio (es. Milano: trasporti ottimi 8,7 ma costi della vita critici
+5,7; Palermo: sicurezza 4,8 con verde 7,1): così i filtri si leggono a
+colpo d'occhio anche sui dati demo. Il punteggio complessivo di ogni
+recensione NON cambia: sono i singoli criteri a discostarsene, come
+nella realtà. Il seed ricrea SOLO i contenuti marcati isDemo (i dati
+veri non vengono toccati); rieseguirlo è facoltativo — i filtri
+funzionano con qualsiasi dato già presente.
+
+FILE NEL PACCHETTO
+------------------
+  src/lib/map-criteria.ts                     NUOVO — formula dei filtri
+                                              (critAggregate), scala colori
+                                              condivisa, etichette corte
+  src/components/map.tsx                      barra "Criterio" + colorazione
+                                              filtrata di regioni/province/
+                                              comuni/pin/aree, popup per
+                                              criterio, guard style.load
+  src/app/api/public/map/route.ts             aggregati per criterio
+                                              (regioni, province, comuni,
+                                              scheda città) + criteriaList
+  src/app/globals.css                         stili della barra .map-crit
+  src/components/views/map-rankings-category.tsx  sottotitolo e suggerimenti
+                                              della pagina mappa
+  src/components/views/home.tsx               sottotitolo sezione mappa home
+  scripts/seed.ts                             profili criterio città demo
+  scripts/test-mappa-maptiler.ts              collaudo esteso: 33 controlli
+
+DIPENDENZE E DATABASE
+---------------------
+NESSUNA nuova dipendenza (maplibre-gl e style-spec restano quelli del
+pacchetto precedente). NESSUNA modifica allo schema Prisma: né
+db:push né migrazioni. NESSUNA nuova variabile d'ambiente: su Vercel
+restano NEXT_PUBLIC_MAPTILER_KEY (facoltativa) e APP_SECRET.
+
+INSTALLAZIONE
+-------------
+1) Ferma il server di sviluppo (Ctrl+C).
+
+2) Copia i file del pacchetto dentro C:\Users\Carlo\sito\zoomzoom
+   mantenendo i percorsi. Da PowerShell, dopo aver estratto lo zip in
+   una cartella temporanea:
+
+       Copy-Item -Recurse -Force "C:\percorso\estratto\src" "C:\Users\Carlo\sito\zoomzoom\"
+       Copy-Item -Recurse -Force "C:\percorso\estratto\scripts" "C:\Users\Carlo\sito\zoomzoom\"
+
+3) Nessun bun install (dipendenze invariate), nessun comando database.
+
+4) (Facoltativo, solo dati demo) per dare il carattere per criterio
+   alle città demo: bun scripts/seed.ts — ricrea i SOLI contenuti demo.
+
+5) Riavvia e pubblica:
+
+       bun run dev     # verifica: pulsanti Criterio sulla mappa
+       git add -A
+       git commit -m "mappa per criterio: filtri Servizi/Trasporti/Sicurezza/Verde/Costi che ricolorano il territorio (+ fix ridisegno style.load)"
+       git push
+
+TEST ESEGUITI SU QUESTA VERSIONE (tutti verdi)
+----------------------------------------------
+- scripts/test-mappa-maptiler.ts — 33/33:
+  validazione style-spec dei layer (incluso il match generato dai
+  filtri, con le aree senza voti escluse), formula critAggregate
+  (criterio singolo, media ponderata, chiavi mancanti, nessun dato →
+  nessun colore), fascia colori, etichette corte + fallback per criteri
+  del back office, e tutte le prove di normalizzazione/alias precedenti.
+- API: /api/public/map pubblica criteriaList e gli aggregati per
+  criterio di regioni, province, comuni e schede città sopra soglia
+  (verificati su 10 regioni: es. Lombardia trasporti 8,7 / costi 5,7;
+  Sicilia sicurezza 4,8 / verde 7,1).
+- Collaudo nel browser reale (pagina #/mappa, pagina zona Milano):
+  - filtro Sicurezza: pin aggiornati (Milano 7,4, Genova 4,0, Palermo
+    4,8 — coincidono con l'API) e coropleti ripitturati (verifica
+    pixel: Sicilia/Campania/Puglia da giallo ad arancio, Toscana e
+    Lombardia invariate perché restano nella stessa fascia);
+  - doppio filtro Trasporti+Sicurezza: pin "8,0/10 · 2 criteri" e
+    media ponderata corretta;
+  - popup del comune: "Milano — Comune · Sicurezza percepita —
+    7,4/10 · 12 recensioni", con reset su "Complessiva" →
+    "Comune · reputazione del territorio — 7,8/10 · 46 recensioni";
+  - barra presente anche sulla mappa della pagina città e in home;
+  - ZERO errori JavaScript in console.
+- TypeScript: 15 errori in src/, tutti pre-esistenti (baseline
+  invariata); ESLint pulito su tutti i file del pacchetto.
+- Nota sul collaudo sandbox: lì non c'è la chiave MapTiler, quindi gli
+  screenshot mostrano il ripiego OSM (senza maschera estero/province):
+  sul tuo ambiente con la chiave resta la grafica MapTiler minimale e
+  i filtri si applicano anche alle province.
+- Screenshot di riscontro consegnati insieme a questo archivio:
+  zoomzoom-mappa-criteri-complessiva.png, zoomzoom-mappa-criteri-sicurezza.png,
+  zoomzoom-mappa-criteri-doppio.png, zoomzoom-mappa-criteri-popup.png.
+
+VERIFICA RAPIDA DOPO IL DEPLOY
+------------------------------
+1) Apri #/mappa: la barra "Criterio" è sopra la mappa, "Complessiva"
+   attiva; regioni e pin come sempre.
+2) Clic "Sicurezza": le regioni con criticità (Sicilia, Campania,
+   Puglia sui dati demo) virano all'arancio; i pin mostrano il valore
+   del criterio.
+3) Aggiungi "Trasporti": pin con "media di 2 criteri"; il colore è la
+   media ponderata dei due.
+4) Zoomma su Milano e clicca il comune: popup "Comune · Sicurezza
+   percepita" con punteggio e link alla scheda città.
+5) "Complessiva" per tornare alla vista di partenza.
