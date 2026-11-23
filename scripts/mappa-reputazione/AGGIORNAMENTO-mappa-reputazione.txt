@@ -1,0 +1,222 @@
+ZoomZoom — MAPPA DELLE REPUTAZIONI: MapTiler minimale, mascheratura dell'estero, coropleti per regioni, province e comuni
+=========================================================================================================================
+
+LO SCOPO
+--------
+Mostrare a prima vista la reputazione del territorio: chi apre la mappa deve
+leggere immediatamente come va il Paese (e, zoomando, la provincia e il
+comune) in base alle recensioni realmente presenti nel catalogo.
+
+I QUATTRO INTERVENTI RICHIESTI (tutti realizzati)
+-------------------------------------------------
+1) BASOLIVELLO MINIMALE "OMT" DI MAPTILER
+   La mappa passa da Leaflet + tile raster OpenStreetMap a MapLibre GL con
+   lo stile MapTiler "backdrop-light" (la linea OpenMapTiles monocroma:
+   strade e nomi appena accennati, zero colori che competono con i dati).
+   Lo stile si può cambiare con la variabile NEXT_PUBLIC_MAPTILER_STYLE
+   (default: backdrop-light; altri minimal: dataviz-light, toner-v2-lite,
+   base-v4-light).
+
+2) ESTERO OSCURATO (mascheratura, guida MapTiler)
+   Sopra la cartografia viene aggiunto il livello dei poligoni dei Paesi
+   (tileset "Countries" di MapTiler, layer "administrative", level 0),
+   FILTRATO ESCLUDENDO L'ITALIA (iso_a2 != "IT"): riempimento scuro
+   (#1B2A38) con trasparenza (62%), come descritto nella guida "Use
+   masking" di MapTiler. Il confine italiano riceve in più una linea
+   luminosa a sfumatura che lo evidenzia.
+
+3) VISTA ITALIA: REGIONI COLORATE PER REPUTAZIONE
+   A livello nazionale ogni regione è un poligono colorato in funzione
+   della reputazione aggregata (media ponderata di TUTTE le recensioni
+   pubbliche delle schede collocate in zone di quella regione).
+   NOTA TECNICA IMPORTANTE (verificata sui dati reali del tileset): il
+   tileset Countries per l'Italia NON contiene le regioni — passa dal
+   Paese (level 0) direttamente alle province (level 1, le 110 storiche).
+   Le regioni vengono quindi disegnate con i confini UFFICIALI ISTAT
+   (GeoJSON locale semplificato, 92 KB, derivato dai limiti ISTAT): stessa
+   geometria delle fonti ufficiali, niente dipendenza dalla rete.
+
+4) PROVINCE E COMUNI ZOOMANDO / CERCANDO
+   - Zoom intermedio (5,9–9,6): coropleti delle PROVINCE dal tileset
+     Countries (level 1 per l'Italia). I nomi nel tileset non sempre sono
+     quelli d'uso (Torino→"Turin", Bolzano→"Bozen", Aosta→"Aoste", e
+     refusi tipo "Crotene"/"Oristrano"): un modulo di traduzione li
+     riconduce ai nomi italiani del database (torino→turin, citta
+     metropolitana di milano→milano, reggio nell'emilia→reggio emilia…).
+   - Zoom ravvicinato (da 8,4) o città selezionata: contorni dei COMUNI
+     del catalogo, chiesti on demand al geocoder pubblico (Nominatim)
+     tramite il nostro proxy con cache 24 ore: un comune viene chiesto al
+     più una volta al giorno, nel rispetto della policy. Anche qui il
+     colore è la reputazione aggregata di tutte le schede della zona.
+   - Le soglie di zoom sono indicate anche nella barra informativa.
+
+COME VIENE CALCOLATO IL COLORE
+------------------------------
+Stessa scala cromatica già usata per pin e punti (8–10 verde, 6–8 giallo,
+4–6 arancio, 0–4 rosso). La "reputazione del territorio" è la media
+ponderata per numero di recensioni di tutte le schede pubblicate con
+recensioni in zone di quella regione/provincia/comune: non solo immobili,
+anche zone, agenzie, amministratori, ditte. Soppressione selettiva
+invariata: sotto la soglia mapMinAggregate (3) l'aggregato NON viene
+pubblicato e l'area resta neutra. Nulla cambia sulla privacy: mai dati
+individuali, mai autori, mai date.
+
+ROBUSTEZZA E DEGRADAZIONE GRAZIOSA (verificata nei test)
+--------------------------------------------------------
+- SENZA chiave MapTiler (NEXT_PUBLIC_MAPTILER_KEY assente): la mappa
+  funziona lo stesso con i tile pubblici OpenStreetMap; restano coropleti
+  di REGIONI (GeoJSON locale) e COMUNI, pin, punti e popup. Spariscono
+  solo maschera dell'estero e province (vengono dal tileset Countries,
+  che richiede la chiave).
+- Con chiave ERRATA o stile irraggiungibile: ripiego automatico su OSM.
+- Il worker di MapLibre viene servito dal progetto stesso
+  (public/maplibre-gl-worker.mjs): sotto Next/Turbopack l'URL interno del
+  bundler non è raggiungibile e senza questo accorgimento la mappa
+  resterebbe vuota con errori in console.
+- Vista iniziale: l'inquadratura dell'Italia viene applicata a mappa
+  davvero pronta (evento load + osservatore ridimensionamenti). Un
+  fitBounds troppo presto — contenitore ancora a zero pixel — portava la
+  camera in mezzo all'Africa (bug trovato e corretto nel collaudo).
+- I poligoni con espressione "match" vuota (nessun dato ancora) non
+  rompono più lo stile: colore neutro invece dell'errore.
+
+IL SELETTORE POSIZIONE DELLA RECENSIONE SEGUE
+---------------------------------------------
+Anche la piccola mappa "pin sulla mappa" del flusso di recensione (passo
+indirizzo → posizione) è passata a MapLibre con la stessa base minimale:
+una sola libreria mappa nel progetto (Leaflet rimosso del tutto).
+
+FILE NEL PACCHETTO
+------------------
+  public/regioni-italia.geojson                confini ISTAT delle 20
+                                              regioni, semplificati (NUOVO)
+  public/maplibre-gl-worker.mjs                worker MapLibre servito dal
+                                              progetto (NUOVO, generato
+                                              dalla libreria: non editare)
+  src/lib/map-italy.ts                         normalizzazione nomi + alias
+                                              province tileset MapTiler (NUOVO)
+  src/components/map.tsx                       mappa riscritta in MapLibre:
+                                              basemap MapTiler, maschera
+                                              estero, coropleti 3 livelli,
+                                              pin, punti, popup, GPS, Vista
+                                              Italia
+  src/components/location-picker.tsx           selettore pin recensione
+                                              migrato a MapLibre
+  src/app/api/public/map/route.ts              aggregati regioni/province e
+                                              reputazione del comune per
+                                              zona; province/regione in
+                                              ogni zona
+  src/app/api/public/zone-outline/route.ts     contorno del comune on demand
+                                              via Nominatim, cache 24 h (NUOVO)
+  src/app/globals.css                          stili mappa/popup da Leaflet
+                                              a MapLibre GL
+  src/components/views/map-rankings-category.tsx  testi pagina mappa
+  src/components/views/home.tsx                sottotitolo sezione mappa home
+  scripts/seed.ts                              le 12 città demo ora nascono
+                                              con provincia e regione
+  scripts/test-mappa-maptiler.ts               collaudo (NUOVO): validazione
+                                              style-spec di filtri ed
+                                              espressioni + 21 prove di
+                                              normalizzazione/alias nomi
+
+DIPENDENZE
+----------
+ESCE: leaflet 1.9.4 + @types/leaflet (rimossi dal progetto).
+ENTRANO: maplibre-gl 6.19.0 (runtime) e @maplibre/maplibre-gl-style-spec
+(solo sviluppo, per il collaudo). Nessuna API key è necessaria per
+compilare o avviare; la chiave MapTiler è FACOLTATIVA (vedi sotto).
+
+INSTALLAZIONE
+-------------
+1) Ferma il server di sviluppo (Ctrl+C).
+
+2) Copia i file di questo pacchetto dentro la cartella del progetto
+   (C:\Users\Carlo\sito\zoomzoom), mantenendo i percorsi. Da PowerShell,
+   dopo aver estratto lo zip in una cartella temporanea:
+
+       Copy-Item -Recurse -Force "C:\percorso\estratto\public" "C:\Users\Carlo\sito\zoomzoom\"
+       Copy-Item -Recurse -Force "C:\percorso\estratto\src" "C:\Users\Carlo\sito\zoomzoom\"
+       Copy-Item -Recurse -Force "C:\percorso\estratto\scripts" "C:\Users\Carlo\sito\zoomzoom\"
+
+3) Dipendenze (una uscita, due entrate):
+
+       cd C:\Users\Carlo\sito\zoomzoom
+       bun remove leaflet
+       bun remove -d @types/leaflet
+       bun add maplibre-gl@^6.19.0
+       bun add -d @maplibre/maplibre-gl-style-spec
+
+4) Nessuna modifica al database: le colonne province/regione delle zone
+   esistono già (aggiornamento "conferma indirizzo"). Se esegui il seed
+   demo, le 12 città demo ricevono provincia/regione in automatico.
+
+5) CHIAVE MAPTILER (facoltativa ma consigliata): crea un account gratuito
+   su cloud.maptiler.com, copia la chiave e aggiungi al file .env:
+
+       NEXT_PUBLIC_MAPTILER_KEY=la-tua-chiave
+       # facoltativo, default backdrop-light:
+       # NEXT_PUBLIC_MAPTILER_STYLE=backdrop-light
+
+   Senza chiave la mappa funziona (OSM pubblici + regioni + comuni);
+   maschera dell'estero e province richiedono la chiave. Il piano
+   gratuito MapTiler copre largamente il traffico di un sito in partenza.
+
+6) Riavvia e pubblica:
+
+       bun run dev     # verifica: mappa, zoom, ricerca città
+       git add -A
+       git commit -m "mappa delle reputazioni: MapTiler minimale, mascheratura estero, coropleti regioni/province/comuni"
+       git push
+
+SU VERCEL
+---------
+- Aggiungi NEXT_PUBLIC_MAPTILER_KEY tra le variabili d'ambiente
+  (Settings → Environment Variables, ambiente Production, SENZA
+  virgolette) e fai Redeploy: le variabili NEXT_PUBLIC_ vengono incorporate
+  nel bundle al momento della build.
+- Nessuna nuova variabile server: zone-outline e aggregati non usano
+  servizi a pagamento.
+- APP_SECRET e DEMO_MODE restano invariati.
+
+TEST ESEGUITI SU QUESTA VERSIONE (tutti verdi)
+----------------------------------------------
+- scripts/test-mappa-maptiler.ts — 22/22:
+  validazione formale (style-spec MapLibre) di TUTTI i layer con i filtri
+  reali (maschera level 0 iso_a2 != IT, province level 1 iso_a2 = IT,
+  coropleti con espressioni match, punti immobile con interpolazione
+  zoom) + prove di normalizzazione e alias (Turin/Bozen/Aoste/Crotene/
+  Oristrano, prefissi Nominatim "Città metropolitana di…", 110/110
+  province del tileset risolte, 20/20 regioni del GeoJSON riconosciute).
+- API: /api/public/map risponde con admin.regions (10 regioni con dati
+  sopra soglia), admin.provinces e zones[].place; /api/public/zone-outline
+  restituisce i poligoni comunali di Milano e Alassio (Nominatim).
+- Collaudo visivo nel browser reale (pagine #/mappa, home, #/zona di
+  Milano e Bologna, flusso recensione con selettore posizione):
+  - vista iniziale centrata sull'Italia con regioni colorate (Toscana
+    verde per media 8,0; Lombardia/Emilia gialle per 7,8/7,4 — coincide
+    con i dati del database);
+  - pagina zona Milano: poligono comunale giallo renderizzato, popup
+    "Comune · reputazione del territorio" con punteggio e link alla
+    scheda città; stesso comportamento per Bologna;
+  - pulsante "Vista Italia" che riinquadra le regioni;
+  - selettore posizione della recensione: mappa MapLibre con strade
+    urbane di Bologna, pin piazzato, coordinate lat 44.49663 · lng
+    11.34295 corrette;
+  - ZERO errori JavaScript in console dopo le correzioni (match vuoto e
+    worker risolti).
+- TypeScript: 15 errori in src/, Tutti pre-esistenti (anzi: 2 in meno
+  della versione precedente, sistemati nella rotta mappa); ESLint pulito
+  su tutti i file del pacchetto.
+- Screenshot di riscontro consegnati insieme a questo archivio:
+  zoomzoom-mappa-vista-italia.png, zoomzoom-mappa-comune-milano.png,
+  zoomzoom-mappa-pin-recensione.png.
+
+VERIFICA RAPIDA DOPO IL DEPLOY
+------------------------------
+1) Apri #/mappa: Italia con regioni colorate, pin delle città.
+2) Zoomma su una città con recensioni: la provincia si colora, poi il
+   contorno del comune; cliccalo: popup con media e numero recensioni.
+3) Scegli la tua città nell'elenco in alto a sinistra: la mappa vola sul
+   comune colorato.
+4) Se hai impostato la chiave MapTiler: l'estero diventa scuro e il
+   confine italiano si accende.
