@@ -116,7 +116,7 @@ export function HomeView() {
           <div className="section-head">
             <div>
               <h2>La mappa delle reputazioni</h2>
-              <p className="sub">Tutto il territorio italiano su cartografia reale (OpenStreetMap): medie aggregate per città e punti colorati per fascia di punteggio. I contenuti delle città demo sono dati fittizi.</p>
+              <p className="sub">Tutto il territorio italiano su cartografia MapTiler minimale: regioni, province e comuni colorati per reputazione, medie aggregate per città e punti colorati per fascia di punteggio. I contenuti delle città demo sono dati fittizi.</p>
             </div>
             <a className="btn btn-ghost btn-sm" href="#/mappa">Apri la mappa completa</a>
           </div>

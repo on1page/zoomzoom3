@@ -37,18 +37,18 @@ const rndInt = (r: () => number, a: number, b: number) => a + Math.floor(r() * (
 // Città reali distribuite su tutto il territorio italiano (coordinate WGS84
 // dei centri storici). Coprono Nord-Ovest, Nord-Est, Centro, Sud e Isole.
 const ZONES = [
-  { id: "torino", name: "Torino", lat: 45.0703, lng: 7.6869, radius: 4000 },
-  { id: "milano", name: "Milano", lat: 45.4642, lng: 9.1900, radius: 4000 },
-  { id: "genova", name: "Genova", lat: 44.4056, lng: 8.9463, radius: 3000 },
-  { id: "venezia", name: "Venezia", lat: 45.4408, lng: 12.3155, radius: 3000 },
-  { id: "bologna", name: "Bologna", lat: 44.4949, lng: 11.3426, radius: 3000 },
-  { id: "firenze", name: "Firenze", lat: 43.7696, lng: 11.2558, radius: 3000 },
-  { id: "roma", name: "Roma", lat: 41.9028, lng: 12.4964, radius: 5000 },
-  { id: "napoli", name: "Napoli", lat: 40.8518, lng: 14.2681, radius: 4000 },
-  { id: "bari", name: "Bari", lat: 41.1171, lng: 16.8719, radius: 3000 },
-  { id: "reggio-calabria", name: "Reggio Calabria", lat: 38.1113, lng: 15.6470, radius: 3000 },
-  { id: "palermo", name: "Palermo", lat: 38.1157, lng: 13.3615, radius: 4000 },
-  { id: "cagliari", name: "Cagliari", lat: 39.2238, lng: 9.1217, radius: 3000 },
+  { id: "torino", name: "Torino", lat: 45.0703, lng: 7.6869, radius: 4000, province: "Torino", region: "Piemonte" },
+  { id: "milano", name: "Milano", lat: 45.4642, lng: 9.1900, radius: 4000, province: "Milano", region: "Lombardia" },
+  { id: "genova", name: "Genova", lat: 44.4056, lng: 8.9463, radius: 3000, province: "Genova", region: "Liguria" },
+  { id: "venezia", name: "Venezia", lat: 45.4408, lng: 12.3155, radius: 3000, province: "Venezia", region: "Veneto" },
+  { id: "bologna", name: "Bologna", lat: 44.4949, lng: 11.3426, radius: 3000, province: "Bologna", region: "Emilia-Romagna" },
+  { id: "firenze", name: "Firenze", lat: 43.7696, lng: 11.2558, radius: 3000, province: "Firenze", region: "Toscana" },
+  { id: "roma", name: "Roma", lat: 41.9028, lng: 12.4964, radius: 5000, province: "Roma", region: "Lazio" },
+  { id: "napoli", name: "Napoli", lat: 40.8518, lng: 14.2681, radius: 4000, province: "Napoli", region: "Campania" },
+  { id: "bari", name: "Bari", lat: 41.1171, lng: 16.8719, radius: 3000, province: "Bari", region: "Puglia" },
+  { id: "reggio-calabria", name: "Reggio Calabria", lat: 38.1113, lng: 15.6470, radius: 3000, province: "Reggio Calabria", region: "Calabria" },
+  { id: "palermo", name: "Palermo", lat: 38.1157, lng: 13.3615, radius: 4000, province: "Palermo", region: "Sicilia" },
+  { id: "cagliari", name: "Cagliari", lat: 39.2238, lng: 9.1217, radius: 3000, province: "Cagliari", region: "Sardegna" },
 ];
 
 // Tipi di esperienza e unità prezzo (copia locale delle costanti applicative,
@@ -228,9 +228,17 @@ async function main() {
     await db.user.deleteMany({ where: { id: { in: demoUserIds } } });
   }
 
-  // 2) Zone: città reali (coordinate vere, contenuti dimostrativi)
+  // 2) Zone: città reali (coordinate vere, contenuti dimostrativi). Con
+  // provincia e regione: servono ai coropleti della mappa (regioni →
+  // province → comuni) e nascono già completi anche per le città demo.
   for (const z of ZONES) {
-    await db.zone.create({ data: { id: z.id, name: z.name, gpsLat: z.lat, gpsLng: z.lng, radiusM: z.radius, isDemo: true } });
+    await db.zone.upsert({
+      where: { id: z.id },
+      create: { id: z.id, name: z.name, gpsLat: z.lat, gpsLng: z.lng, radiusM: z.radius, province: z.province, region: z.region, isDemo: true },
+      // aggiorna in essere: le zone demo già presenti vengono completate con
+      // provincia/regione senza toccare il resto (seed ri-eseguito)
+      update: { province: z.province, region: z.region },
+    });
   }
   // la descrizione della categoria "zona" viene allineata alla copertura nazionale
   await db.category.update({ where: { id: "zona" }, data: { description: "Città e zone del territorio italiano: servizi, trasporti, sicurezza percepita e qualità della vita quotidiana." } });

@@ -1,14 +1,45 @@
 "use client";
-// ZoomZoom — selettore posizione su cartografia reale (Leaflet/OpenStreetMap)
-// per l'aggiunta di un immobile: clic per piazzare o spostare il pin.
+// ZoomZoom — selettore posizione su cartografia reale (MapLibre GL +
+// MapTiler OMT, come la mappa principale) per l'aggiunta di un immobile:
+// clic per piazzare o spostare il pin.
 // Il pin è facoltativo: senza posizione la scheda resta recensibile, semplicemente
 // non compare tra i punti della mappa. Nessun dato lascia il browser finché il
 // modulo non viene inviato (il GPS serve solo al momento e la scelta è dell'utente).
 import { useCallback, useEffect, useRef, useState } from "react";
-import type * as LeafletNS from "leaflet";
-import "leaflet/dist/leaflet.css";
+import type * as MapLibreNS from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
 
 export type LatLng = { lat: number; lng: number };
+
+// chiave e stile MapTiler (OMT minimale), come nella mappa principale:
+// senza chiave si usano i tile raster pubblici di OpenStreetMap
+const MAPTILER_KEY = process.env.NEXT_PUBLIC_MAPTILER_KEY || "";
+const MAPTILER_STYLE = process.env.NEXT_PUBLIC_MAPTILER_STYLE || "backdrop-light";
+const MAPTILER_STYLE_URL = `https://api.maptiler.com/maps/${MAPTILER_STYLE}/style.json?key=${MAPTILER_KEY}`;
+
+// worker di MapLibre servito dal progetto (vedi mappa principale)
+const MAPLIBRE_WORKER_URL = "/maplibre-gl-worker.mjs";
+function setupMapLibre(ML: typeof MapLibreNS): void {
+  try { ML.setWorkerUrl(MAPLIBRE_WORKER_URL); } catch { /* già impostato */ }
+}
+
+function osmRasterStyle(): MapLibreNS.StyleSpecification {
+  return {
+    version: 8,
+    sources: {
+      osm: {
+        type: "raster",
+        tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
+      },
+    },
+    layers: [{ id: "osm", type: "raster", source: "osm" }],
+  };
+}
+
+const round6 = (v: number) => Math.round(v * 1e6) / 1e6;
 
 export function LocationPicker({ value, onChange, note }: {
   value: LatLng | null;
@@ -16,9 +47,9 @@ export function LocationPicker({ value, onChange, note }: {
   note?: string;
 }) {
   const holderRef = useRef<HTMLDivElement | null>(null);
-  const LRef = useRef<typeof LeafletNS | null>(null);
-  const mapRef = useRef<LeafletNS.Map | null>(null);
-  const markerRef = useRef<LeafletNS.Marker | null>(null);
+  const MLRef = useRef<typeof MapLibreNS | null>(null);
+  const mapRef = useRef<MapLibreNS.Map | null>(null);
+  const markerRef = useRef<MapLibreNS.Marker | null>(null);
   const live = useRef<{ value: LatLng | null; onChange: (v: LatLng | null) => void }>({ value, onChange });
   const [ready, setReady] = useState(false);
   const [gpsBusy, setGpsBusy] = useState(false);
@@ -32,54 +63,86 @@ export function LocationPicker({ value, onChange, note }: {
     let disposed = false;
     let ro: ResizeObserver | null = null;
     void (async () => {
-      const mod = await import("leaflet");
-      const L = ((mod as unknown as { default?: typeof LeafletNS }).default) ?? mod;
+      const maplibregl = await import("maplibre-gl");
       if (disposed || !holderRef.current) return;
-      LRef.current = L;
-      const map = L.map(holder, { zoomControl: true, scrollWheelZoom: false, attributionControl: true });
-      mapRef.current = map;
-      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      MLRef.current = maplibregl as unknown as typeof MapLibreNS;
+      setupMapLibre(MLRef.current);
+
+      // base: MapTiler se c'è la chiave (verificata), altrimenti OSM raster
+      let style: string | MapLibreNS.StyleSpecification = osmRasterStyle();
+      if (MAPTILER_KEY) {
+        try {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 6000);
+          const r = await fetch(MAPTILER_STYLE_URL, { signal: ctrl.signal });
+          clearTimeout(timer);
+          if (!r.ok) throw new Error("stile MapTiler non disponibile");
+          style = (await r.json()) as MapLibreNS.StyleSpecification;
+        } catch {
+          // ripiego silenzioso sui tile pubblici
+        }
+      }
+
+      const map = new maplibregl.Map({
+        container: holder,
+        style,
+        attributionControl: false,
+        center: [12.5, 42.5],
+        zoom: 5,
         maxZoom: 19,
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
-      }).addTo(map);
-      map.setView([42.5, 12.5], 5);
-      map.on("click", ev => {
-        const { lat, lng } = ev.latlng;
-        const rounded = { lat: Math.round(lat * 1e6) / 1e6, lng: Math.round(lng * 1e6) / 1e6 };
-        live.current.onChange(rounded);
+        minZoom: 3.6,
+        dragRotate: false,
+        pitchWithRotate: false,
+        touchPitch: false,
       });
-      ro = new ResizeObserver(() => map.invalidateSize());
+      mapRef.current = map;
+      map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), "top-right");
+      map.addControl(new maplibregl.AttributionControl({
+        compact: true,
+        customAttribution: MAPTILER_KEY
+          ? '<a href="https://www.maptiler.com/copyright/" target="_blank" rel="noopener">© MapTiler</a> <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>'
+          : undefined,
+      }));
+      // come prima: niente zoom con la rotella (la mappa sta dentro un modulo)
+      map.scrollZoom.disable();
+      map.on("click", ev => {
+        live.current.onChange({ lat: round6(ev.lngLat.lat), lng: round6(ev.lngLat.lng) });
+      });
+      ro = new ResizeObserver(() => map.resize());
       ro.observe(holder);
       setReady(true);
     })();
     return () => {
       disposed = true;
       ro?.disconnect();
+      markerRef.current?.remove();
+      markerRef.current = null;
       mapRef.current?.remove();
       mapRef.current = null;
-      markerRef.current = null;
-      LRef.current = null;
+      MLRef.current = null;
     };
   }, []);
 
   // pin sincronizzato col valore esterno (GPS, geocoding, reset)
   useEffect(() => {
-    const L = LRef.current, map = mapRef.current;
-    if (!L || !map || !ready) return;
+    const ML = MLRef.current;
+    const map = mapRef.current;
+    if (!ML || !map || !ready) return;
     if (markerRef.current) { markerRef.current.remove(); markerRef.current = null; }
     if (value) {
-      const icon = L.divIcon({
-        className: "zz-loc-pin-wrap",
-        html: '<div class="zz-loc-pin"><span class="zz-loc-dot"></span></div>',
-        iconSize: [22, 22], iconAnchor: [11, 11],
-      });
-      markerRef.current = L.marker([value.lat, value.lng], { icon, draggable: true, title: "Posizione dell'immobile" })
-        .on("dragend", ev => {
-          const { lat, lng } = (ev.target as LeafletNS.Marker).getLatLng();
-          live.current.onChange({ lat: Math.round(lat * 1e6) / 1e6, lng: Math.round(lng * 1e6) / 1e6 });
-        })
+      const el = document.createElement("div");
+      el.className = "zz-loc-pin-wrap";
+      el.innerHTML = '<div class="zz-loc-pin"><span class="zz-loc-dot"></span></div>';
+      el.title = "Posizione dell'immobile";
+      const marker = new ML.Marker({ element: el, anchor: "center", draggable: true })
+        .setLngLat([value.lng, value.lat])
         .addTo(map);
-      map.setView([value.lat, value.lng], Math.max(map.getZoom(), 15), { animate: true });
+      marker.on("dragend", () => {
+        const p = marker.getLngLat();
+        live.current.onChange({ lat: round6(p.lat), lng: round6(p.lng) });
+      });
+      markerRef.current = marker;
+      map.flyTo({ center: [value.lng, value.lat], zoom: Math.max(map.getZoom(), 15), duration: 500 });
     }
   }, [value, ready]);
 
@@ -89,7 +152,7 @@ export function LocationPicker({ value, onChange, note }: {
     navigator.geolocation.getCurrentPosition(
       pos => {
         setGpsBusy(false);
-        live.current.onChange({ lat: Math.round(pos.coords.latitude * 1e6) / 1e6, lng: Math.round(pos.coords.longitude * 1e6) / 1e6 });
+        live.current.onChange({ lat: round6(pos.coords.latitude), lng: round6(pos.coords.longitude) });
       },
       () => setGpsBusy(false),
       { timeout: 8000, maximumAge: 60000, enableHighAccuracy: false },
