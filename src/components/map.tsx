@@ -760,24 +760,10 @@ export function MapViewport({ mode = "immobili", activeZone }: { mode?: "immobil
     <div className="map-viewport" role="application"
       aria-label="Mappa delle reputazioni del territorio italiano (cartografia MapTiler/OpenStreetMap). Trascina per esplorare, usa la rotella o i pulsanti per lo zoom. A livello nazionale le regioni sono colorate per reputazione; zoomando passano province e comuni. I pulsanti Criterio colorano regioni, province e comuni in base ai singoli criteri di valutazione delle zone. I pin delle città aprono la loro scheda, i punti immobile aprono una scheda sintetica.">
       <div className="map-holder" ref={holderRef}></div>
-      <div className="map-crit" role="group"
-        aria-label="Colora la mappa in base ai criteri di valutazione delle zone">
-        <span className="map-crit-lab" aria-hidden="true">Criterio:</span>
-        <button type="button" className={`map-crit-chip${critSel.length ? "" : " on"}`}
-          aria-pressed={critSel.length === 0}
-          title="Reputazione complessiva: media di tutte le recensioni delle schede del territorio"
-          onClick={() => setCritSel([])}>Complessiva</button>
-        {(data.criteriaList || []).map(c => {
-          const on = critSel.includes(c.key);
-          return (
-            <button type="button" key={c.key} className={`map-crit-chip${on ? " on" : ""}`}
-              aria-pressed={on} title={`Colora per: ${c.label} (secondo clic per disattivare; più criteri = media ponderata)`}
-              onClick={() => setCritSel(s => (s.includes(c.key) ? s.filter(x => x !== c.key) : [...s, c.key]))}>
-              {criterionShortLabel(c.key, c.label)}
-            </button>
-          );
-        })}
-      </div>
+      {/* pannello ricerca città + pulsanti Criterio IMPILATI in una colonna:
+          qualunque altezza assuma l'uno (su schermi stretti va a capo), i
+          pulsanti restano sempre SOTTO il pannello, mai coperti */}
+      <div className="map-topleft">
       <div className="map-loc">
         <span aria-hidden="true">◎</span>
         <select className="map-zone-select" aria-label="La tua città di riferimento"
@@ -798,6 +784,25 @@ export function MapViewport({ mode = "immobili", activeZone }: { mode?: "immobil
         </select>
         <button className="btn btn-ghost btn-xs" onClick={useGps}
           title="Usa la mia posizione: le coordinate servono solo al momento e non vengono salvate">GPS</button>
+      </div>
+      <div className="map-crit" role="group"
+        aria-label="Colora la mappa in base ai criteri di valutazione delle zone">
+        <span className="map-crit-lab" aria-hidden="true">Criterio:</span>
+        <button type="button" className={`map-crit-chip${critSel.length ? "" : " on"}`}
+          aria-pressed={critSel.length === 0}
+          title="Reputazione complessiva: media di tutte le recensioni delle schede del territorio"
+          onClick={() => setCritSel([])}>Complessiva</button>
+        {(data.criteriaList || []).map(c => {
+          const on = critSel.includes(c.key);
+          return (
+            <button type="button" key={c.key} className={`map-crit-chip${on ? " on" : ""}`}
+              aria-pressed={on} title={`Colora per: ${c.label} (secondo clic per disattivare; più criteri = media ponderata)`}
+              onClick={() => setCritSel(s => (s.includes(c.key) ? s.filter(x => x !== c.key) : [...s, c.key]))}>
+              {criterionShortLabel(c.key, c.label)}
+            </button>
+          );
+        })}
+      </div>
       </div>
       <div className="map-italy-btn">
         <button type="button" onClick={italyView} title="Torna alla vista dell'Italia intera: regioni colorate per reputazione">Vista Italia</button>

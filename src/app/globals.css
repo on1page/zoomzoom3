@@ -320,19 +320,24 @@ table.table { width: 100%; border-collapse: collapse; font-size: .9rem; }
 .map-viewport .maplibregl-map { background: #DCE6EA; font-family: var(--font-sans); }
 .map-viewport .maplibregl-canvas { outline: none; }
 .map-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; margin: 0; color: var(--ink-soft); font-size: .9rem; }
-.map-loc { position: absolute; top: 10px; left: 10px; z-index: 650; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; background: rgba(255,255,255,.94); border: 1px solid var(--line); border-radius: 999px; padding: 4px 6px 4px 12px; box-shadow: var(--shadow-1); font-size: .78rem; }
+/* ricerca città e pulsanti Criterio impilati in colonna in alto a sinistra:
+   il pannello ricerca può andare a capo e allargarsi quanto serve, i pulsanti
+   Criterio restano sempre SOTTO di lui — mai sovrapposti o coperti */
+.map-topleft { position: absolute; top: 10px; left: 10px; z-index: 650; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; max-width: min(76%, 700px); pointer-events: none; }
+.map-topleft > * { pointer-events: auto; }
+.map-loc { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; background: rgba(255,255,255,.94); border: 1px solid var(--line); border-radius: 999px; padding: 4px 6px 4px 12px; box-shadow: var(--shadow-1); font-size: .78rem; }
 .map-zone-select { border: 1px solid var(--line); border-radius: 999px; padding: 3px 6px; font-size: .78rem; background: var(--surface); max-width: 190px; }
 .map-italy-btn { position: absolute; top: 10px; right: 60px; z-index: 650; }
 .map-italy-btn button { border: 1px solid var(--line); background: rgba(255,255,255,.94); border-radius: 8px; padding: 6px 11px; font: 700 .74rem var(--font-sans); color: var(--ink); cursor: pointer; box-shadow: var(--shadow-1); }
 .map-italy-btn button:hover { background: #fff; }
 /* filtri per criterio: ricolorano regioni, province, comuni e pin */
-.map-crit { position: absolute; top: 50px; left: 10px; z-index: 648; display: flex; gap: 5px; align-items: center; flex-wrap: wrap; max-width: min(74%, 680px); background: rgba(255,255,255,.94); border: 1px solid var(--line); border-radius: 12px; padding: 5px 8px; box-shadow: var(--shadow-1); }
+.map-crit { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; max-width: 100%; background: rgba(255,255,255,.94); border: 1px solid var(--line); border-radius: 12px; padding: 5px 8px; box-shadow: var(--shadow-1); }
 .map-crit-lab { font: 700 .72rem var(--font-sans); color: var(--ink-soft); }
 .map-crit-chip { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 3px 10px; font: 600 .72rem var(--font-sans); color: var(--ink); cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
 .map-crit-chip:hover { background: #fff; border-color: #33658A; }
 .map-crit-chip.on { background: #33658A; border-color: #33658A; color: #fff; }
 .map-crit-chip:focus-visible { outline: 2px solid #33658A; outline-offset: 1px; }
-@media (max-width: 820px) { .map-zone-select { max-width: 130px; } .map-italy-btn { right: 56px; } .map-crit { top: 48px; max-width: calc(100% - 20px); } }
+@media (max-width: 820px) { .map-zone-select { max-width: 130px; } .map-italy-btn { right: 56px; } .map-topleft { max-width: calc(100% - 20px); } }
 
 /* pin delle città: chip leggibile + punto colorato */
 .zz-zone-pin-wrap { background: none; border: none; pointer-events: none; }

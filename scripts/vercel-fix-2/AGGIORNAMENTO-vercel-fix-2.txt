@@ -1,0 +1,104 @@
+ZoomZoom — Fix build Vercel: dipendenza maplibre-gl mancante
+============================================================
+
+LA DIAGNOSI È CERTA (dal Build Log che mi hai mandato)
+------------------------------------------------------
+La build si ferma con 4 errori, identici nella sostanza:
+
+    Module not found: Can't resolve 'maplibre-gl'
+      - src/components/map.tsx              riga 523 (e riga 35 per il CSS)
+      - src/components/location-picker.tsx  riga 66 (e riga 10 per il CSS)
+
+Cosa è successo: con l'aggiornamento della mappa (prima la reputazione del
+territorio, poi i filtri per criterio) il codice è passato da Leaflet a
+MapLibre GL. I file del codice sono stati consegnati tutti, ma NEI PACCHETTI
+ZIP MANCAVANO package.json E bun.lock AGGIORNATI: nella tua repository la
+dipendenza "maplibre-gl" non è mai stata dichiarata, e Vercel — non trovando
+la libreria tra i moduli installati — non riesce a compilare map.tsx e
+location-picker.tsx. È stata una svista nella preparazione degli archivi:
+il codice è corretto, manca solo la dichiarazione della libreria.
+
+La prova è nel log stesso: "bun install ... Checked 885 installs across 951
+packages (no changes)". Con il fix diventano 906/972: la ventina di pacchetti
+in più è maplibre-gl con le sue librerie geografiche (al posto delle due di
+Leaflet, che non servono più).
+
+Tutto il resto della mappa è già al suo posto nella repository (altrimenti
+il log mostrerebbe altri errori): map-criteria.ts, map-italy.ts,
+api/public/map, api/public/zone-outline, il worker public/maplibre-gl-worker.mjs
+e il geojson public/regioni-italia.geojson.
+
+IL RIMEDIO: DUE FILE (package.json e bun.lock)
+----------------------------------------------
+package.json — identico a quello del progetto, con sole queste differenze:
+    + "maplibre-gl": "^6.19.0"                      (dependencies: la mappa)
+    + "@maplibre/maplibre-gl-style-spec": "^26.9.0"  (devDependencies: serve
+      solo allo script di collaudo scripts/test-mappa-maptiler.ts)
+    - "leaflet" e "@types/leaflet"                  (non più usati da nessun
+      componente: resta solo un commento storico nel codice)
+    Invariato tutto il resto, compreso "postinstall": "prisma generate" del
+    fix Vercel precedente e lo script di build con output standalone.
+
+bun.lock — rigenerato e collaudato con queste dipendenze esatte
+    (maplibre-gl 6.19.0).
+
+COME APPLICARLO (5 minuti)
+--------------------------
+Opzione A — se non hai mai modificato package.json a mano (consigliata):
+  1. copia i due file del pacchetto nella cartella del progetto:
+       Copy-Item -Force "C:\percorso\estratto\package.json" "C:\Users\Carlo\sito\zoomzoom\package.json"
+       Copy-Item -Force "C:\percorso\estratto\bun.lock" "C:\Users\Carlo\sito\zoomzoom\bun.lock"
+  2. pubblica:
+       cd C:\Users\Carlo\sito\zoomzoom
+       git add package.json bun.lock
+       git commit -m "mappa: aggiunge dipendenza maplibre-gl (fix build Vercel)"
+       git push
+
+Opzione B — se nel tempo hai personalizzato package.json (dipendenze o
+script tuoi): dalla cartella del progetto lascia fare a bun, che aggiorna
+da solo i due file:
+       cd C:\Users\Carlo\sito\zoomzoom
+       bun add maplibre-gl@^6.19.0
+       bun add -d @maplibre/maplibre-gl-style-spec@^26.9.0
+       bun remove leaflet @types/leaflet
+  poi git add / commit / push come sopra. (Se per caso usi npm invece di
+  bun: npm install maplibre-gl@^6.19.0 ecc. — ma il progetto e Vercel usano bun.)
+
+COSA ASPETTARSI SULLA BUILD
+---------------------------
+- spariscono tutti e 4 gli errori "Can't resolve 'maplibre-gl'": ora il
+  pacchetto è dichiarato e viene installato;
+- nel log "Installing dependencies" vedrai installare i pacchetti nuovi
+  (bun.lock è cambiato, quindi niente più "(no changes)");
+- a build conclusa il sito torna online con la mappa completa: coropleti di
+  reputazione, filtri per criterio (Servizi / Trasporti / Sicurezza / Verde /
+  Costi) che ricolorano regioni, province, comuni e pin, popup dei comuni e
+  pulsante "Vista Italia".
+
+VERIFICA RAPIDA DOPO IL DEPLOY
+------------------------------
+1. apri il sito: la vista Italia deve presentarsi colorata per reputazione;
+2. nel modulo mappa attiva un filtro (es. solo "Sicurezza percepita") e poi
+   una combinazione di criteri: i colori di regioni/province/comuni devono
+   cambiare di conseguenza;
+3. console del browser (F12): nessun errore rosso legato a maplibre.
+
+TEST ESEGUITI SU QUESTA VERSIONE (con esattamente questi due file)
+------------------------------------------------------------------
+- build di produzione completa ("next build" con Turbopack, la stessa
+  pipeline di Vercel): completata senza errori, tutte le route compilate,
+  MapLibre presente nei chunk client e worker servito correttamente;
+- "bun install --frozen-lockfile": package.json e bun.lock perfettamente
+  allineati (906 installazioni / 972 pacchetti);
+- server di produzione standalone avviato e interrogato: homepage 200,
+  worker maplibre 200, geojson regioni 200, API /api/public/map risponde
+  con i dati aggregati reali.
+
+FILE DEL PACCHETTO
+------------------
+package.json — dipendenze aggiornate (maplibre-gl al posto di leaflet);
+bun.lock     — lockfile rigenerato e collaudato;
+questa nota.
+
+Nessuna modifica a: codice sorgente, schema del database, variabili d'ambiente,
+impostazioni Vercel. Il database non va toccato.
