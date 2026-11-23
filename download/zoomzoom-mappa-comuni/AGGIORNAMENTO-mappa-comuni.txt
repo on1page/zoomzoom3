@@ -1,0 +1,167 @@
+ZoomZoom — La mappa si suddivide per comune: la reputazione si vede per OGNI comune d'Italia
+=============================================================================================
+
+PERCHÉ QUESTO PACCHETTO
+-----------------------
+Bravo per la soluzione del colore: compilando il database con Prisma Studio
+hai riempito gli aggregati che mancano (contorni e logica c'erano già, senza
+DATI la mappa restava neutra). Quello che chiedevi dopo — «suddividere la
+mappa pure per comune, in maniera da mostrare la reputazione pure per ogni
+comune» — richiede un pezzo che non esisteva: prima la mappa disegnava SOLO
+i contorni delle città presenti nel catalogo (poche alla volta, chiesti al
+geocoder Nominatim); tutti gli altri comuni d'Italia semplicemente non
+esistevano sullo schermo. Questo pacchetto aggiunge i confini di TUTTI i
+7.895 comuni italiani (ISTAT, vintage 1° gennaio 2026): zoomando, la mappa
+si suddivide per comune e ogni comune del catalogo con recensioni sopra
+soglia mostra il proprio colore; gli altri restano neutri, con il confine
+visibile e un invito a scrivere la prima recensione.
+
+COME FUNZIONA
+-------------
+1) I CONFINI — 20 file GeoJSON in public/comuni/ (r1..r20, uno per regione,
+   4,3 MB in tutto). Derivano dai confini amministrativi ISTAT ufficiali
+   (ridistribuzione CC-BY del dataset «geojson-italy» di Guglielmo Celata),
+   semplificati al 20% dei vertici con coordinate arrotondate a 4 decimali
+   (~11 metri): la semplificazione è la stessa usata da chi visualizza
+   l'Italia intera in un file solo da 4 MB, e a zoom 8–12 è più che
+   sufficiente. Il file più grande è la Lombardia (1.502 comuni, 612 KB).
+   Nessuna nuova dipendenza: sono file statici serviti da /public (su
+   Vercel con gzip, circa un terzo del peso).
+
+2) IL CARICAMENTO — quando zoomi oltre 7,6 (prima i comuni comparivano da
+   8,4), la mappa calcola quali REGIONI interseca la vista (usa i bbox dei
+   confini regionali già in public/regioni-italia.geojson) e scarica i file
+   comuni di quelle regioni e basta. Ogni file si scarica una volta sola
+   per sessione (il browser lo tiene in cache); se guardi Milano scarichi
+   Lombardia e magari Piemonte (i bbox si sovrappongono un po'), non
+   l'Italia intera. Da zoom 8 in poi la suddivisione è disegnata: le
+   province ora cedono il passo un po' prima (maxzoom da 9,6 a 8,8) per non
+   accatastare le due suddivisioni una sull'altra.
+
+3) IL COLORE — resta la stessa reputazione aggregata di prima: la media di
+   TUTTE le recensioni pubblicate delle schede collocate in quella zona
+   (zones[].place della API /api/public/map), con le stesse soglie di
+   soppressione (sotto il minimo niente colore) e gli stessi filtri
+   «Criterio» (Servizi, Trasporti, Sicurezza, Verde e aria, Costi della
+   vita): i comuni si ricolorano come regioni e province, anche con più
+   criteri insieme. Chi ha compilato il database con Prisma Studio non
+   deve fare nulla di nuovo: i valori sono gli stessi che colorano già le
+   regioni.
+
+4) L'ACCOPPIAMENTO catalogo ↔ confini — per NOME normalizzato (la stessa
+   funzione già usata per regioni e province: minuscolo, senza accenti né
+   apostrofi). I comuni bilingui dell'Alto Adige si accoppiano sulla parte
+   italiana (ISTAT scrive «Bolzano/Bozen», il geocoder «Bolzano»). Per i
+   nomi che il geocoder restituisce diversi dalla denominazione ISTAT c'è
+   una piccola tabella di varianti in src/lib/map-italy.ts (COMUNI_ALIAS):
+   oggi contiene l'unico caso reale, «Reggio Calabria» → ISTAT «Reggio di
+   Calabria» (rinominato nel 2023). Se in futuro una città del catalogo
+   non trovasse il suo poligono, non si rompe nulla: cade sul contorno del
+   geocoder di prima (la rotta /api/public/zone-outline non è stata
+   toccata) — e aggiungere una riga in COMUNI_ALIAS risolve.
+
+5) I POPUP — clic su un comune del catalogo: media, numero di recensioni e
+   link alla scheda città, esattamente come prima (i filtri criterio
+   cambiano il punteggio mostrato al volo). Clic su UN QUALSIASI ALTRO
+   comune: «Nessuna recensione pubblicata» con l'invito ad aggiungerlo e
+   scrivere la prima recensione (link a #/recensione). La suddivisione
+   diventa anche la mappa di dove mancano dati.
+
+6) I CONFINI PIÙ VISIBILI — i bordi comunali erano bianchi semitrasparenti:
+   sulla cartografia chiara non si vedevano (verificato: con un collaudo
+   ai colori accesi il mosaico c'era, ma era invisibile a occhio). Ora i
+   confini sono blu scuro (#274B6D, lo stesso del bordo nazionale),
+   visibili sia sui comuni neutri sia sopra i colori di reputazione.
+
+FILE DEL PACCHETTO
+------------------
+  AGGIORNAMENTO-mappa-comuni.txt              questa nota
+  LEGGIMI.md                                  guida sintetica
+  zoomzoom-mappa-comuni.patch                 le modifiche ai 4 file src/
+                                              (i 20 file comuni sono nuovi:
+                                              vanno copiati, la patch non
+                                              li contiene)
+  src/lib/map-italy.ts                        codici regione ISTAT, nome del
+                                              file comuni, chiave comuneKey
+                                              (normalizzazione + varianti)
+  src/components/map.tsx                      caricamento on-demand per
+                                              regione, sorgente comuni,
+                                              popup fuori catalogo, soglie
+                                              zoom, confini blu
+  src/components/views/home.tsx               testo descrittivo (una riga)
+  src/components/views/map-rankings-category.tsx   testi descrittivi
+  public/comuni/r1.geojson … r20.geojson      i confini comunali, uno per
+                                              regione (r3=Lombardia …
+                                              r12=Lazio, numeri ISTAT)
+  anteprime/                                  8 screenshot del collaudo
+
+COME APPLICARLO (5 minuti)
+--------------------------
+Opzione A — copia dei file (consigliata: porta anche i 20 file comuni):
+       cd C:\Users\Carlo\sito\zoomzoom
+       Copy-Item -Force -Recurse "pacchetto\src\*" "src\"
+       Copy-Item -Force -Recurse "pacchetto\public\*" "public\"
+
+Opzione B — patch git per i file src + copia dei soli confini:
+       git apply percorso\zoomzoom-mappa-comuni.patch
+       Copy-Item -Force -Recurse "pacchetto\public\comuni" "public\"
+
+Poi in locale:
+       npm run dev        # o: bun run dev
+       # apri #/mappa, scegli una città e zooma: mosaico di comuni
+
+Se tutto va bene:
+       git add -A
+       git commit -m "mappa: suddivisione per comune di tutta Italia (confini ISTAT)"
+       git push
+Vercel ridistribuisce da solo. Nessuna migrazione, nessun db push,
+nessuna nuova dipendenza, nessun cambiamento alle API.
+
+VERIFICA FATTA SU QUESTA VERSIONE (con esattamente questi file)
+---------------------------------------------------------------
+Collaudo automatico su browser (8/8 superati) + verifiche visive e al
+pixel sugli screenshot allegati:
+- vista Italia: coropleto delle regioni invariato (nessuna regressione);
+- Milano a zoom cittadino: file r3 (Lombardia) scaricato on-demand alla
+  selezione della città, comune di Milano colorato (7,8/10 · 46
+  recensioni) e comuni vicini con solo il confine;
+- popup del comune di catalogo (Milano): media, recensioni, link alla
+  scheda — invariato rispetto a prima;
+- popup di Monza (fuori catalogo): «Nessuna recensione pubblicata» +
+  invito alla prima recensione;
+- filtro «Costi della vita»: il comune di Milano si ricolora (7,8 → 5,7:
+  fascia gialla → arancione; verificato al pixel e a vista);
+- alias ISTAT: selezionando «Reggio Calabria» il poligono ISTAT «Reggio
+  di Calabria» si aggancia alla zona del catalogo (popup con scheda
+  città, NON l'invito fuori catalogo) senza passare da Nominatim;
+- mosaico dei confini: presente e leggibile (analisi dei pixel: ~10% di
+  pixel di confine blu sull'area campionata; prima, col bianco, era
+  indistinguibile dalla cartografia);
+- nessun errore di rete (tutti i file comuni rispondono 200) e nessun
+  errore in console.
+
+DIMENSIONI E PRESTAZIONI
+------------------------
+- Download on-demand: solo le regioni guardate, una volta per sessione
+  (Lombardia 612 KB, Lazio 222 KB, la più piccola Valle d'Aosta 42 KB);
+  con la compressione di Vercel il peso in rete è circa un terzo.
+- Il rendering è vettoriale lato client (MapLibre/geojson-vt): 1.502
+  comuni lombardi non costano più di pochi poligoni; nessun lavoro extra
+  per il server oltre a servire file statici.
+- Il confronto catalogo↔confini è O(n) al caricamento di ogni regione:
+  impercettibile.
+
+NOTE
+----
+- Nei miei screenshot la cartografia è il ripiego OSM (nella sandbox non
+  c'è la chiave MapTiler): sul tuo sito lo stile è quello di sempre e i
+  confini blu si leggono ancora meglio sullo stile minimale.
+- Il comune di Miagliano (Biella) non ha geometria nel dato ISTAT (null
+  nella fonte): non apparirà sulla mappa; se un giorno entrasse nel
+  catalogo, il ripiego Nominatim lo coprirebbe.
+- Per aggiungere una variante di nome (città del catalogo che non matcha
+  il confine ISTAT): src/lib/map-italy.ts, tabella COMUNI_ALIAS, una
+  riga con chiave normalizzata geocoder → chiave normalizzata ISTAT.
+- Ultima cosa, importante: se non l'hai ancora fatto, chiudi la questione
+  .env nella repository pubblica (cambio password Supabase + rimozione
+  del file) descritta nella nota di sicurezza dell'ultimo pacchetto.

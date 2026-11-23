@@ -1,0 +1,465 @@
+diff --git a/src/components/map.tsx b/src/components/map.tsx
+index dca2040..14d3ac2 100755
+--- a/src/components/map.tsx
++++ b/src/components/map.tsx
+@@ -16,8 +16,11 @@
+ //     - vista Italia  → REGIONI (confini ISTAT in GeoJSON locale: il tileset
+ //       Countries per l'Italia non contiene le regioni);
+ //     - zoom intermedio → PROVINCE (tileset Countries, level 1 per IT);
+-//     - zoom ravvicinato / città cercata → COMUNI del catalogo (contorni
+-//       caricati on demand dal geocoder pubblico tramite il nostro proxy).
++//     - zoom ravvicinato / città cercata → COMUNI: la suddivisione di
++//       TUTTI i comuni d'Italia (confini ISTAT in GeoJSON locale, un file
++//       per regione in public/comuni/, caricato on demand per le regioni
++//       in vista); le città del catalogo con nomi diversi da ISTAT cadono
++//       sul contorno del geocoder pubblico tramite il nostro proxy.
+ //   FILTRI     la colorazione può seguire i SINGOLI CRITERI di valutazione
+ //              della categoria zone (Servizi, Trasporti, Sicurezza, Verde,
+ //              Costi): i pulsanti "Criterio" sopra la mappa attivano uno o
+@@ -36,7 +39,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
+ import { api, fmt1 } from "@/lib/client/api";
+ import { useApp } from "@/lib/client/store";
+ import { navigate } from "@/lib/client/router";
+-import { normName, regionCanonical, tilerProvinceOf } from "@/lib/map-italy";
++import { comuneBaseName, comuneKey, comuniFileFor, normName, regionCanonical, tilerProvinceOf } from "@/lib/map-italy";
+ import { critAggregate, criterionShortLabel, scoreBandColor, type CritMap } from "@/lib/map-criteria";
+ 
+ type AdminRow = { name: string; mean: number; n: number; criteria?: CritMap };
+@@ -88,9 +91,9 @@ const ITALY: MapLibreNS.LngLatBoundsLike = [[6.6, 35.3], [18.6, 47.1]];
+ // soglie di zoom dei livelli amministrativi (il colore segue la reputazione)
+ const Z_REGIONE_MAX = 6.5;   // fino a qui: coropleto delle regioni
+ const Z_PROVINCIA_MIN = 5.9; // da qui: province del tileset Countries
+-const Z_PROVINCIA_MAX = 9.6;
+-const Z_COMUNE_FETCH = 8.8;  // da qui si chiedono i contorni dei comuni
+-const Z_COMUNE_MIN = 8.4;    // il livello comunale è disegnato da qui
++const Z_PROVINCIA_MAX = 8.8; // da qui in poi lascia spazio ai comuni
++const Z_COMUNE_FETCH = 7.6;  // da qui si caricano i file comuni ISTAT
++const Z_COMUNE_MIN = 8.0;    // il livello comunale è disegnato da qui
+ 
+ function esc(s: string): string {
+   return s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] as string);
+@@ -111,6 +114,27 @@ function circlePolygon(lat: number, lng: number, radiusM: number, segments = 48)
+ 
+ const EMPTY_FC: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
+ 
++/** Estensione (bbox [ovest, sud, est, nord]) di una geometria GeoJSON:
++ * serve a capire quali file di comuni (per regione) scaricare in funzione
++ * della vista, senza interrogare la mappa. */
++function bboxOfGeom(g: GeoJSON.Geometry): [number, number, number, number] | null {
++  let w = Infinity, s = Infinity, e = -Infinity, n = -Infinity;
++  const walk = (coords: unknown) => {
++    if (!Array.isArray(coords) || coords.length === 0) return;
++    if (typeof coords[0] === "number" && typeof coords[1] === "number") {
++      const lng = coords[0], lat = coords[1];
++      if (lng < w) w = lng;
++      if (lng > e) e = lng;
++      if (lat < s) s = lat;
++      if (lat > n) n = lat;
++      return;
++    }
++    for (const c of coords) walk(c);
++  };
++  walk((g as { coordinates?: unknown }).coordinates);
++  return w === Infinity ? null : [w, s, e, n];
++}
++
+ /** Ripiego senza chiave MapTiler: tile raster pubblici OpenStreetMap. */
+ function osmRasterStyle(): MapLibreNS.StyleSpecification {
+   return {
+@@ -143,7 +167,15 @@ export function MapViewport({ mode = "immobili", activeZone }: { mode?: "immobil
+   // — map.isStyleLoaded() è inutilizzabile come guardia perché dipende dai
+   // tile in caricamento (vedi redraw)
+   const styleReadyRef = useRef(false);
+-  const comuniFeatRef = useRef<Map<string, GeoJSON.Feature>>(new Map());
++  // comuni: suddivisione di TUTTI i comuni d'Italia. CONFINI ISTAT in
++  // GeoJSON locale per regione (caricati on demand), chiave = nome
++  // normalizzato (comuneKey); RISERVA del geocoder (Nominatim) per le
++  // città del catalogo che non trovano il proprio poligono ISTAT,
++  // chiave = id della zona
++  const comuniBundledRef = useRef<Map<string, GeoJSON.Feature>>(new Map());
++  const comuniFallbackRef = useRef<Map<string, GeoJSON.Feature>>(new Map());
++  const comuniRegionsRef = useRef<Set<string>>(new Set());
++  const regioniBboxRef = useRef<Map<string, [number, number, number, number]> | null>(null);
+   const comuniAskedRef = useRef<Set<string>>(new Set());
+   // valori correnti per i ridisegni e i callback (niente closure stantie)
+   const live = useRef<{ data: MapData | null; mode: string; activeZone?: string; myZone: string | null; critSel: string[] }>({ data: null, mode, activeZone, myZone, critSel: [] });
+@@ -214,7 +246,7 @@ export function MapViewport({ mode = "immobili", activeZone }: { mode?: "immobil
+     for (const z of d?.zones || []) {
+       if (!z.place) continue;
+       const v = rowValue({ mean: z.place.mean, n: z.place.n, criteria: z.place.criteria });
+-      if (v != null) pairs.push(normName(z.name), scoreBandColor(v));
++      if (v != null) pairs.push(comuneKey(z.name), scoreBandColor(v));
+     }
+     return pairs.length
+       ? ["match", ["get", "n"], ...pairs, "rgba(0,0,0,0)"] as unknown as MapLibreNS.ExpressionSpecification
+@@ -285,7 +317,10 @@ export function MapViewport({ mode = "immobili", activeZone }: { mode?: "immobil
+       }
+     }
+ 
+-    // COMUNI — coropleto dei comuni del catalogo (zoom ravvicinato)
++    // COMUNI — coropleto della suddivisione comunale (zoom ravvicinato):
++    // TUTTI i comuni d'Italia dai file ISTAT per regione, colorati per la
++    // reputazione del comune quando la città è nel catalogo con recensioni
++    // sopra soglia; riserve del geocoder per i nomi che non matchano
+     if (!map.getLayer("zz-comuni-fill")) {
+       map.addLayer({
+         id: "zz-comuni-fill", type: "fill", source: "zz-comuni",
+@@ -295,7 +330,10 @@ export function MapViewport({ mode = "immobili", activeZone }: { mode?: "immobil
+       map.addLayer({
+         id: "zz-comuni-line", type: "line", source: "zz-comuni",
+         minzoom: Z_COMUNE_MIN,
+-        paint: { "line-color": "#ffffff", "line-opacity": 0.55, "line-width": 1.4 },
++        // blu scuro come il bordo nazionale: i confini comunali devono
++        // leggersi anche sui comuni neutri (fill trasparente) sopra la
++        // cartografia chiara, che altrimenti li annulla
++        paint: { "line-color": "#274B6D", "line-opacity": 0.6, "line-width": 1.5 },
+       }, symbol);
+     } else {
+       map.setPaintProperty("zz-comuni-fill", "fill-color", comuneMatch());
+@@ -472,16 +510,90 @@ export function MapViewport({ mode = "immobili", activeZone }: { mode?: "immobil
+     (map.getSource("zz-props") as MapLibreNS.GeoJSONSource | undefined)?.setData(propsFc);
+   }, []);
+ 
+-  /* ---- comuni: contorni on demand quando si zooma/cerca ---- */
++  /* ---- comuni: la suddivisione di TUTTI i comuni d'Italia ----
++   * Da zoom Z_COMUNE_FETCH si caricano i confini comunali ISTAT (un file
++   * GeoJSON per regione, public/comuni/r{regione}.geojson) delle regioni
++   * che intersecano la vista: la mappa mostra così TUTTI i comuni, colorati
++   * per reputazione quando la città è nel catalogo con recensioni sopra
++   * soglia, altrimenti solo con il proprio confine. Le città del catalogo
++   * che non trovano il poligono ISTAT (nome diverso) cadono sul contorno
++   * del geocoder pubblico, come prima. */
++
++  /** Ricostruisce la sorgente "zz-comuni": confini ISTAT (con il
++   *  collegamento alla zona del catalogo quando c'è: serve ai popup e ai
++   *  link alle schede) + riserve del geocoder non già coperte; aggiorna
++   *  anche il colore del coropleto. */
++  const pushComuni = useCallback(() => {
++    const map = mapRef.current;
++    const d = live.current.data;
++    if (!map || !d) return;
++    const byN = new Map<string, MapData["zones"][number]>();
++    for (const z of d.zones) byN.set(comuneKey(z.name), z);
++    const features: GeoJSON.Feature[] = [];
++    for (const [n, f] of comuniBundledRef.current) {
++      const z = byN.get(n);
++      features.push({
++        type: "Feature",
++        properties: { ...(f.properties as Record<string, unknown>), id: z?.id ?? null, entityId: z?.entityId ?? null },
++        geometry: f.geometry,
++      });
++    }
++    for (const f of comuniFallbackRef.current.values()) {
++      const n = String((f.properties as { n?: string } | null)?.n || "");
++      if (comuniBundledRef.current.has(n)) continue; // già coperto dai file ISTAT
++      features.push(f);
++    }
++    (map.getSource("zz-comuni") as MapLibreNS.GeoJSONSource | undefined)
++      ?.setData({ type: "FeatureCollection", features });
++    if (map.getLayer("zz-comuni-fill")) {
++      map.setPaintProperty("zz-comuni-fill", "fill-color", comuneMatch());
++    }
++  }, []);
++
+   const fetchComuni = useCallback(async () => {
+     const map = mapRef.current;
+     const d = live.current.data;
+     if (!map || !d || map.getZoom() < Z_COMUNE_FETCH) return;
+-    // margine intorno alla vista (~15%): si chiedono i comuni visibili o in
+-    // arrivo, senza il metodo .pad() che LngLatBounds non ha
+     const b = map.getBounds();
+     const latSpan = Math.max(0.02, b.getNorth() - b.getSouth());
+     const lngSpan = Math.max(0.02, b.getEast() - b.getWest());
++
++    // 1) file ISTAT delle regioni che intersecano la vista (con margine
++    //    generoso: le bboxes regionali sono larghe, meglio un file in più
++    //    che un buco nella suddivisione); ogni file si scarica una volta
++    //    sola per sessione
++    const vw = b.getWest() - lngSpan * 0.35, ve = b.getEast() + lngSpan * 0.35;
++    const vs = b.getSouth() - latSpan * 0.35, vn = b.getNorth() + latSpan * 0.35;
++    const bboxes = regioniBboxRef.current;
++    const jobs: Array<Promise<void>> = [];
++    for (const [nome, bb] of bboxes || []) {
++      const url = comuniFileFor(nome);
++      if (!url || comuniRegionsRef.current.has(url)) continue;
++      if (bb[0] > ve || bb[2] < vw || bb[1] > vn || bb[3] < vs) continue;
++      comuniRegionsRef.current.add(url); // in carico: niente richieste doppie
++      jobs.push(
++        fetch(url).then(r => (r.ok ? r.json() : null)).then((gj: GeoJSON.FeatureCollection | null) => {
++          if (!gj) return;
++          for (const f of gj.features || []) {
++            const nome = comuneBaseName((f.properties as { nome?: string } | null)?.nome);
++            const n = normName(nome);
++            if (!n) continue;
++            comuniBundledRef.current.set(n, {
++              type: "Feature",
++              properties: { nome, n, prov: (f.properties as { prov?: string } | null)?.prov || "" },
++              geometry: f.geometry,
++            });
++          }
++        }).catch(() => { comuniRegionsRef.current.delete(url); }) // riprova al prossimo spostamento
++      );
++    }
++    if (jobs.length) await Promise.all(jobs);
++
++    // 2) aggiorna la sorgente con i comuni appena caricati
++    pushComuni();
++
++    // 3) riserva geocoder: solo città del catalogo in vista il cui comune
++    //    non è nei file ISTAT (nome diverso o geometria mancante)
+     const margin = (v: number) => v * 0.15;
+     const inView = (lng: number, lat: number) =>
+       lng >= b.getWest() - margin(lngSpan) && lng <= b.getEast() + margin(lngSpan) &&
+@@ -489,28 +601,24 @@ export function MapViewport({ mode = "immobili", activeZone }: { mode?: "immobil
+     const pending = d.zones
+       .filter(z => z.place && !comuniAskedRef.current.has(z.id))
+       .filter(z => inView(z.lng, z.lat))
++      .filter(z => !comuniBundledRef.current.has(comuneKey(z.name)))
+       .slice(0, 6);
++    let fetched = false;
+     for (const z of pending) {
+       comuniAskedRef.current.add(z.id);
+       const q = new URLSearchParams({ name: z.name, province: z.province || "", region: z.region || "" });
+       const res = await api<{ polygon: { type: string; coordinates: unknown } | null }>(`/api/public/zone-outline?${q.toString()}`);
+       if (res.ok && res.polygon) {
+-        comuniFeatRef.current.set(z.id, {
++        comuniFallbackRef.current.set(z.id, {
+           type: "Feature",
+-          properties: { id: z.id, nome: z.name, n: normName(z.name), entityId: z.entityId },
++          properties: { id: z.id, nome: z.name, n: comuneKey(z.name), entityId: z.entityId },
+           geometry: res.polygon as GeoJSON.Geometry,
+         });
++        fetched = true;
+       }
+     }
+-    if (pending.length) {
+-      (map.getSource("zz-comuni") as MapLibreNS.GeoJSONSource | undefined)
+-        ?.setData({ type: "FeatureCollection", features: [...comuniFeatRef.current.values()] });
+-      // il match dei colori cambia solo se arrivano nuovi comuni
+-      if (map.getLayer("zz-comuni-fill")) {
+-        map.setPaintProperty("zz-comuni-fill", "fill-color", comuneMatch());
+-      }
+-    }
+-  }, []);
++    if (fetched) pushComuni();
++  }, [pushComuni]);
+ 
+   // inizializzazione MapLibre (una sola volta, all'arrivo dei dati)
+   useEffect(() => {
+@@ -587,7 +695,9 @@ export function MapViewport({ mode = "immobili", activeZone }: { mode?: "immobil
+       roFitLocal.observe(holder);
+       map.on("resize", () => { if (!fitted && styleReadyRef.current) fitItaly(); });
+ 
+-      // confini ISTAT delle regioni: GeoJSON locale semplificato (92 KB)
++      // confini ISTAT delle regioni: GeoJSON locale semplificato (92 KB).
++      // Si precalcolano anche i bbox delle regioni: servono a scegliere i
++      // file dei comuni (uno per regione) da scaricare in base alla vista
+       void fetch("/regioni-italia.geojson").then(r => (r.ok ? r.json() : null)).then((gj: GeoJSON.FeatureCollection | null) => {
+         if (!gj || disposed) return;
+         regioniRef.current = {
+@@ -598,10 +708,18 @@ export function MapViewport({ mode = "immobili", activeZone }: { mode?: "immobil
+             geometry: f.geometry,
+           })),
+         };
++        const bb = new Map<string, [number, number, number, number]>();
++        for (const f of regioniRef.current.features) {
++          const box = bboxOfGeom(f.geometry);
++          const nome = String((f.properties as { nome?: string } | null)?.nome || "");
++          if (box && nome) bb.set(nome, box);
++        }
++        regioniBboxRef.current = bb;
+         (map.getSource("zz-regioni") as MapLibreNS.GeoJSONSource | undefined)?.setData(regioniRef.current);
+         if (map.getLayer("zz-regioni-fill")) {
+           map.setPaintProperty("zz-regioni-fill", "fill-color", regionMatch());
+         }
++        void fetchComuni(); // ora che i bbox ci sono, la vista può già avere comuni da caricare
+       });
+ 
+       map.on("style.load", () => { styleReadyRef.current = true; installLayers(); redraw(); });
+@@ -629,12 +747,27 @@ export function MapViewport({ mode = "immobili", activeZone }: { mode?: "immobil
+       });
+       // popup del comune (livello comunale): il punteggio segue i filtri
+       // per criterio attivi in quel momento (la feature porta l'id della
+-      // zona, i valori si leggono dai dati vivi, non stantii)
++      // zona, i valori si leggono dai dati vivi, non stantii). I comuni
++      // FUORI catalogo — la maggior parte della suddivisione — invitano a
++      // scrivere la prima recensione
+       map.on("click", "zz-comuni-fill", e => {
+         const f = e.features?.[0];
+         if (!f) return;
+-        const p = f.properties as { id?: string; nome: string; entityId: string | null };
++        const p = f.properties as { id?: string; nome: string; prov?: string; entityId: string | null };
+         const z = live.current.data?.zones.find(zz => zz.id === p.id);
++        if (!z) {
++          new maplibregl.Popup({ className: "zz-popup", closeButton: true, maxWidth: "280px" })
++            .setLngLat(e.lngLat)
++            .setHTML(
++              `<div class="zz-pop">
++              <strong>${esc(p.nome)}</strong>
++              <div class="zz-pop-sub">Comune${p.prov ? ` · ${esc(p.prov)}` : ""}</div>
++              <div class="zz-pop-score" style="color:${scoreBandColor(null)}">Nessuna recensione pubblicata</div>
++              <a href="#/recensione" class="zz-pop-link">Aggiungi questo comune e scrivi la prima recensione</a>
++            </div>`)
++            .addTo(map);
++          return;
++        }
+         const sel = live.current.critSel;
+         const selDefs = (live.current.data?.criteriaList || []).filter(c => sel.includes(c.key));
+         let sub = "Comune · reputazione del territorio";
+@@ -688,13 +821,17 @@ export function MapViewport({ mode = "immobili", activeZone }: { mode?: "immobil
+       mapRef.current = null;
+       MLRef.current = null;
+       comuniAskedRef.current = new Set();
+-      comuniFeatRef.current = new Map();
++      comuniBundledRef.current = new Map();
++      comuniFallbackRef.current = new Map();
++      comuniRegionsRef.current = new Set();
++      regioniBboxRef.current = null;
+     };
+   }, [data]);
+ 
+   // ridisegno quando cambiano dati, modalità, zona attiva, città di
+   // riferimento o FILTRO PER CRITERIO: i tre coropleti vengono ripitturati
+-  // (installLayers aggiorna le espressioni colore) e pin/aree ricostruiti
++  // (installLayers aggiorna le espressioni colore), pin/aree ricostruiti e
++  // la sorgente comuni riaccoppiata al catalogo (id/entityId dei popup)
+   useEffect(() => {
+     live.current = { data, mode, activeZone, myZone, critSel };
+     const map = mapRef.current;
+@@ -702,8 +839,9 @@ export function MapViewport({ mode = "immobili", activeZone }: { mode?: "immobil
+     if (styleReadyRef.current) {
+       installLayers();
+       redraw();
++      pushComuni();
+     }
+-  }, [data, mode, activeZone, myZone, critSel, installLayers, redraw]);
++  }, [data, mode, activeZone, myZone, critSel, installLayers, redraw, pushComuni]);
+ 
+   const focusZone = useCallback((zoneId: string, animate = true) => {
+     const map = mapRef.current;
+@@ -758,7 +896,7 @@ export function MapViewport({ mode = "immobili", activeZone }: { mode?: "immobil
+ 
+   return (
+     <div className="map-viewport" role="application"
+-      aria-label="Mappa delle reputazioni del territorio italiano (cartografia MapTiler/OpenStreetMap). Trascina per esplorare, usa la rotella o i pulsanti per lo zoom. A livello nazionale le regioni sono colorate per reputazione; zoomando passano province e comuni. I pulsanti Criterio colorano regioni, province e comuni in base ai singoli criteri di valutazione delle zone. I pin delle città aprono la loro scheda, i punti immobile aprono una scheda sintetica.">
++      aria-label="Mappa delle reputazioni del territorio italiano (cartografia MapTiler/OpenStreetMap). Trascina per esplorare, usa la rotella o i pulsanti per lo zoom. A livello nazionale le regioni sono colorate per reputazione; zoomando passano le province e poi la suddivisione in tutti i comuni d'Italia (confini ISTAT), colorati per reputazione dove ci sono recensioni. I pulsanti Criterio colorano regioni, province e comuni in base ai singoli criteri di valutazione delle zone. I pin delle città aprono la loro scheda, i punti immobile aprono una scheda sintetica.">
+       <div className="map-holder" ref={holderRef}></div>
+       {/* pannello ricerca città + pulsanti Criterio IMPILATI in una colonna:
+           qualunque altezza assuma l'uno (su schermi stretti va a capo), i
+@@ -818,7 +956,7 @@ export function MapLegend() {
+       <span className="leg-dot" style={{ background: scoreBandColor(7) }}></span> 6–8 discreto
+       <span className="leg-dot" style={{ background: scoreBandColor(5) }}></span> 4–6 criticità
+       <span className="leg-dot" style={{ background: scoreBandColor(2) }}></span> 0–4 gravi criticità
+-      <span className="small muted">Vista Italia: regioni colorate per reputazione · zoomando: province e comuni · pulsanti «Criterio»: colora per Servizi, Trasporti, Sicurezza, Verde e aria, Costi della vita (anche più criteri insieme) · fuori dall&apos;Italia oscurato · Cartografia © MapTiler, © OpenStreetMap contributors</span>
++      <span className="small muted">Vista Italia: regioni colorate per reputazione · zoomando: province e poi la suddivisione in tutti i comuni d'Italia, colorati dove ci sono recensioni (confini comunali: dati ISTAT) · pulsanti «Criterio»: colora per Servizi, Trasporti, Sicurezza, Verde e aria, Costi della vita (anche più criteri insieme) · fuori dall&apos;Italia oscurato · Cartografia © MapTiler, © OpenStreetMap contributors</span>
+     </div>
+   );
+ }
+diff --git a/src/components/views/home.tsx b/src/components/views/home.tsx
+index 59679ac..481eec2 100755
+--- a/src/components/views/home.tsx
++++ b/src/components/views/home.tsx
+@@ -116,7 +116,7 @@ export function HomeView() {
+           <div className="section-head">
+             <div>
+               <h2>La mappa delle reputazioni</h2>
+-              <p className="sub">Tutto il territorio italiano su cartografia MapTiler minimale: regioni, province e comuni colorati per reputazione, medie aggregate per città e punti colorati per fascia di punteggio. I pulsanti «Criterio» ricolorano il territorio per Servizi, Trasporti, Sicurezza, Verde e aria, Costi della vita. I contenuti delle città demo sono dati fittizi.</p>
++              <p className="sub">Tutto il territorio italiano su cartografia MapTiler minimale: regioni e province colorate per reputazione e, zoomando, la suddivisione in tutti i comuni d&apos;Italia (confini ISTAT), colorati dove ci sono recensioni. Medie aggregate per città e punti colorati per fascia di punteggio. I pulsanti «Criterio» ricolorano il territorio per Servizi, Trasporti, Sicurezza, Verde e aria, Costi della vita. I contenuti delle città demo sono dati fittizi.</p>
+             </div>
+             <a className="btn btn-ghost btn-sm" href="#/mappa">Apri la mappa completa</a>
+           </div>
+diff --git a/src/components/views/map-rankings-category.tsx b/src/components/views/map-rankings-category.tsx
+index 466447b..b2ef707 100755
+--- a/src/components/views/map-rankings-category.tsx
++++ b/src/components/views/map-rankings-category.tsx
+@@ -26,7 +26,7 @@ export function MapView() {
+       <div className="section-head" style={{ paddingTop: 26 }}>
+         <div>
+           <h1>Mappa delle reputazioni</h1>
+-          <p className="sub">L&apos;intero territorio italiano su cartografia MapTiler minimale, con l&apos;estero oscurato. La reputazione si legge a prima vista: regioni colorate nella vista Italia, province e comuni zoomando, e i pulsanti «Criterio» ricolorano il territorio per Servizi, Trasporti, Sicurezza, Verde e aria o Costi della vita. Punteggi aggregati: la mappa non rivela mai chi ha scritto una recensione né quando.</p>
++          <p className="sub">L&apos;intero territorio italiano su cartografia MapTiler minimale, con l&apos;estero oscurato. La reputazione si legge a prima vista: regioni colorate nella vista Italia, province e poi la suddivisione in tutti i comuni d&apos;Italia zoomando (confini ISTAT), e i pulsanti «Criterio» ricolorano il territorio per Servizi, Trasporti, Sicurezza, Verde e aria o Costi della vita. Punteggi aggregati: la mappa non rivela mai chi ha scritto una recensione né quando.</p>
+         </div>
+       </div>
+       <div className="map-wrap" style={{ position: "relative" }}>
+@@ -35,7 +35,7 @@ export function MapView() {
+           <button className={`chip chip-filter${mode !== "zone" ? " on" : ""}`} onClick={() => setMode("immobili")}>Immobili</button>
+           <button className={`chip chip-filter${mode === "zone" ? " on" : ""}`} onClick={() => setMode("zone")}>Solo aggregati di città</button>
+           <span className="spacer"></span>
+-          <span className="small muted">Vista Italia: regioni per reputazione · zoom/città: province e comuni · pulsanti «Criterio»: colora per singolo criterio · clicca una città o un punto per i dettagli · «Vista Italia» per tornare all&apos;insieme</span>
++          <span className="small muted">Vista Italia: regioni per reputazione · zoom/città: province e poi tutti i comuni d&apos;Italia (confini ISTAT) · pulsanti «Criterio»: colora per singolo criterio · clicca una città, un comune o un punto per i dettagli · «Vista Italia» per tornare all&apos;insieme</span>
+         </div>
+         <MapViewport mode={mode} />
+         <MapLegend />
+diff --git a/src/lib/map-italy.ts b/src/lib/map-italy.ts
+index 2881b92..38d41e3 100755
+--- a/src/lib/map-italy.ts
++++ b/src/lib/map-italy.ts
+@@ -7,8 +7,12 @@
+ //   - PROVINCE (zoom intermedio): tileset Countries di MapTiler, layer
+ //     "administrative" con level = 1 (per l'Italia le divisioni di primo
+ //     livello sono le province, 110 poligoni con codice ISO 3166-2);
+-//   - COMUNI (zoom ravvicinato/ricerca): poligoni caricati on demand dal
+-//     geocoder pubblico (Nominatim) per le città presenti nel catalogo.
++//   - COMUNI (zoom ravvicinato/ricerca): confini ISTAT ufficiali in
++//     GeoJSON locale, UN FILE PER REGIONE (public/comuni/r{codice}.geojson,
++//     vintage 1° gennaio 2026, 7.895 comuni): la mappa carica on demand le
++//     regioni in vista e mostra la suddivisione di TUTTI i comuni d'Italia;
++//     il geocoder pubblico (Nominatim) resta come riserva per le città del
++//     catalogo il cui nome non corrisponde alla denominazione ISTAT.
+ //
+ // I nomi del tileset MapTiler non always coincidono con i nomi italiani
+ // d'uso (Torino → "Turin", Bolzano → "Bozen", Aosta → "Aoste", e persino
+@@ -138,3 +142,53 @@ export function tilerProvinceOf(raw: unknown): string | null {
+   n = PROVINCE_ALIAS[n] || n;
+   return TILER_PROVINCE_NORM.get(n) || null;
+ }
++
++/* ------------------------------ COMUNI ------------------------------ */
++
++/** Codice ISTAT delle 20 regioni (nome canonico → codice): i confini
++ *  comunali sono raggruppati per regione in public/comuni/r{codice}.geojson
++ *  (dati ISTAT, 1° gennaio 2026) e la mappa li carica on demand quando la
++ *  vista interessa una regione. */
++export const REGIONI_ISTAT_CODE: Record<string, number> = {
++  "Piemonte": 1, "Valle d'Aosta/Vallée d'Aoste": 2, "Lombardia": 3,
++  "Trentino-Alto Adige/Südtirol": 4, "Veneto": 5, "Friuli-Venezia Giulia": 6,
++  "Liguria": 7, "Emilia-Romagna": 8, "Toscana": 9, "Umbria": 10,
++  "Marche": 11, "Lazio": 12, "Abruzzo": 13, "Molise": 14, "Campania": 15,
++  "Puglia": 16, "Basilicata": 17, "Calabria": 18, "Sicilia": 19,
++  "Sardegna": 20,
++};
++
++/** URL del GeoJSON dei comuni di una regione (accetta il nome in qualsiasi
++ *  forma; null se non è una regione italiana). */
++export function comuniFileFor(raw: unknown): string | null {
++  const c = regionCanonical(raw);
++  if (!c) return null;
++  const code = REGIONI_ISTAT_CODE[c];
++  return code ? `/comuni/r${code}.geojson` : null;
++}
++
++/** Denominazione italiana di un comune bilingue (parte prima di "/"):
++ *  i file ISTAT scrivono "Bolzano/Bozen", il geocoder "Bolzano" — la chiave
++ *  di confronto si calcola sempre su questa forma base. */
++export function comuneBaseName(raw: unknown): string {
++  return String(raw ?? "").split("/")[0].trim();
++}
++
++/** Varianti note tra il nome che restituisce il geocoder (OSM/Nominatim,
++ *  usato per le zone del catalogo) e la denominazione ufficiale ISTAT del
++ *  comune: chiave normalizzata geocoder → chiave normalizzata ISTAT.
++ *  Estendere qui se una città del catalogo non trova il proprio poligono
++ *  nei file ISTAT (cade comunque sul contorno del geocoder). */
++const COMUNI_ALIAS: Record<string, string> = {
++  // ISTAT dal 2023: "Reggio di Calabria"; il geocoder restituisce "Reggio Calabria"
++  "reggio calabria": "reggio di calabria",
++};
++
++/** Chiave di confronto di un comune: denominazione base normalizzata, con
++ *  le varianti note applicate. È la funzione da usare SEMPRE per mettere
++ *  in corrispondenza le zone del catalogo e i confini comunali (colori del
++ *  coropleto, collegamenti alle schede, ripiego geocoder). */
++export function comuneKey(raw: unknown): string {
++  const n = normName(comuneBaseName(raw));
++  return COMUNI_ALIAS[n] || n;
++}

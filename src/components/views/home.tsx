@@ -116,7 +116,7 @@ export function HomeView() {
           <div className="section-head">
             <div>
               <h2>La mappa delle reputazioni</h2>
-              <p className="sub">Tutto il territorio italiano su cartografia MapTiler minimale: regioni, province e comuni colorati per reputazione, medie aggregate per città e punti colorati per fascia di punteggio. I pulsanti «Criterio» ricolorano il territorio per Servizi, Trasporti, Sicurezza, Verde e aria, Costi della vita. I contenuti delle città demo sono dati fittizi.</p>
+              <p className="sub">Tutto il territorio italiano su cartografia MapTiler minimale: regioni e province colorate per reputazione e, zoomando, la suddivisione in tutti i comuni d&apos;Italia (confini ISTAT), colorati dove ci sono recensioni. Medie aggregate per città e punti colorati per fascia di punteggio. I pulsanti «Criterio» ricolorano il territorio per Servizi, Trasporti, Sicurezza, Verde e aria, Costi della vita. I contenuti delle città demo sono dati fittizi.</p>
             </div>
             <a className="btn btn-ghost btn-sm" href="#/mappa">Apri la mappa completa</a>
           </div>
