@@ -1,0 +1,165 @@
+ZoomZoom — Aggiornamento: HOME PAGE — titolo grande, città Zoom e «Cerca casa»
+==============================================================================
+
+LO SCOPO (punto 2 del piano concordato)
+---------------------------------------
+La home parlava del modello di verifica, non di chi cerca casa. Questo
+aggiornamento la ruota verso chi deve scegliere dove vivere: un titolo
+grande, le città Zoom in evidenza, una voce «Cerca casa» in menu e una
+pagina che le raccoglie, in attesa della ricerca avanzata completa
+(punto 3 del piano, oggetto del preventivo già consegnato).
+
+COSA CAMBIA, IN OTTO PUNTI
+--------------------------
+1. TITOLO HERO GRANDE — Nuovo H1 «La tua casa per la *prossima
+   avventura*» (accento oro, come prima su «verificate»). Dimensione
+   fluida clamp(2.4rem, 6vw, 6.25rem): circa 86 px su schermo 1440 px,
+   fino a 100 px sugli schermi ampi, ~33 px sul telefono (dove il tetto
+   scende a clamp(2.05rem, 8.5vw, 2.6rem)); larghezza massima 1020 px e
+   interlinea 1,06 perché le tre righe respirino. Il paragrafo sotto il
+   titolo resta quello delle impostazioni del sito (heroSub): quando hai
+   il testo definitivo, sostituiscilo lì.
+2. HERO — Il pulsante primario diventa «Cerca casa» (apre #/cerca-casa);
+   «Scrivi una recensione» passa a ghost bianco; la nota sui giorni
+   Premium ora ha contrasto corretto sullo sfondo scuro (#C6D3E1).
+3. «LE CITTÀ ZOOM» AL POSTO DEI TRE RETTANGOLI — Subito sotto la hero:
+   tre card scure grandi (Roma, Milano, Napoli — le prime tre della
+   gerarchia editoriale) con regione, recensioni e media REALI della
+   zona («N recensioni in zona · media X,Y») e invito «Esplora …».
+   Sotto, una riga di chip con le altre sette città Zoom (Torino,
+   Bologna, Firenze, Genova, Bari, Cagliari, Catania). Catania non è
+   ancora in catalogo: chip tratteggiata «in arrivo», non cliccabile.
+   Le città già nel database fuori dalle dieci (Venezia, Palermo, Reggio
+   Calabria, Laveno-Mombello) restano raggiungibili: ricerca, mappa e
+   pagina Cerca casa.
+4. MENU DI NAVIGAZIONE — Nuova voce «Cerca casa» in testa al menu
+   desktop e al menu mobile, e link omonimo in cima alla colonna
+   «Il progetto» del footer.
+5. PAGINA PONTE #/cerca-casa — Le dieci città Zoom in ordine alfabetico
+   (Bari, Bologna, Cagliari, Catania…) come card con statistiche reali;
+   quelle senza scheda mostrano «Scheda in preparazione». In alto
+   l'avviso «Novità in arrivo: ricerca avanzata con mappa interattiva e
+   filtri (tipologia, prezzo, superficie, locali, bagni, vendita o
+   affitto)» con collegamenti alla ricerca esistente e alla mappa delle
+   reputazioni; in coda «Già consultabili anche: …» con le zone del
+   catalogo fuori dalle dieci. Quando realizzeremo la ricerca completa,
+   questa vista verrà sostituita.
+6. SEZIONE «COME FUNZIONA» RISCRITTA — Tre step sul percorso della
+   scelta della casa: «Esplora città e zone» (città Zoom + mappa delle
+   reputazioni, con i cinque criteri), «Leggi chi c'è già stato»
+   (recensioni verificate su immobili, zone e servizi, prezzi
+   dichiarati, consultazione libera), «Decidi senza sorprese» (medie
+   ponderate con soglia minima, l'ordine non si compra, pubblicità
+   separata). Il bottone diventa «Approfondisci la verifica» verso
+   #/come-funziona, dove il modello è spiegato per intero.
+   ATTENZIONE: I TESTI DELLA SEZIONE SONO PROVVISORI.
+7. NUOVA INTESTAZIONE SULLA SEZIONE CLASSIFICHE — «Le recensioni della
+   community» con conteggi reali (totale recensioni e schede, dai dati
+   di boot) e bottone «Tutte le classifiche» (spostato qui, i singoli
+   riquadri top 3 restano senza bottone). ANCHE QUESTO TESTO È
+   PROVVISORIO.
+8. MIGLIORIE TECNICHE — Le voci del menu non vanno mai a capo
+   (white-space: nowrap) e tra 861 e 1290 px il menu si compatta da solo
+   (padding e corpo ridotti): con tutte le voci — Cerca casa, Cerca,
+   Mappa, Classifiche, Categorie, Come funziona — resta su una riga.
+   La griglia delle città è responsive (3 colonne → 2 a 1020 px → 1 a
+   860 px). E i tipi TypeScript delle classifiche della home ora
+   riflettono i campi piatti che /api/public/rankings restituisce
+   davvero (RankRow: entityId, name, zoneId, n, mean…): niente più cast
+   forzati, controllo migliore in futuro.
+
+LE DIECI CITTÀ ZOOM (gerarchia editoriale concordata)
+-----------------------------------------------------
+   1 Roma (Lazio)         2 Milano (Lombardia)    3 Napoli (Campania)
+   4 Torino (Piemonte)    5 Bologna (Emilia-R.)   6 Firenze (Toscana)
+   7 Genova (Liguria)     8 Bari (Puglia)         9 Cagliari (Sardegna)
+  10 Catania (Sicilia — in arrivo)
+Lo slug di ogni città coincide con l'id della zona nel database, dove
+presente. Tutto vive in src/lib/zoom-cities.ts: gerarchia (card grandi
+per le prime tre, chip per le altre), ordine alfabetico per la pagina
+Cerca casa, coordinate pronte per la futura ricerca con mappa. Per
+cambiare l'ordine o aggiungere una città si tocca solo quel file.
+
+FILE DEL PACCHETTO
+------------------
+  AGGIORNAMENTO-home-update.txt            questa nota
+  LEGGIMI.md                               guida sintetica all'installazione
+  zoomzoom-home-update.patch               le modifiche in patch git
+  src/lib/zoom-cities.ts                   NUOVO  — le dieci città Zoom
+  src/components/views/cerca-casa.tsx      NUOVO  — pagina «Cerca casa»
+  src/components/views/home.tsx            modificato — hero, città Zoom,
+                                                    come funziona, intro
+                                                    recensioni
+  src/components/chrome.tsx                modificato — menu desktop/mobile
+                                                    e footer
+  src/app/page.tsx                         modificato — rotta #/cerca-casa
+  src/app/globals.css                      modificato — titolo grande,
+                                                    card/chip città, fix menu
+  anteprime/                               4 screenshot del collaudo browser
+
+COME APPLICARLO (5 minuti)
+--------------------------
+Opzione A — patch git (consigliata), dalla cartella del progetto con
+branch pulito (gli stessi file dell'ultima consegna, mappa per criterio
++ fix build Vercel):
+       cd C:\Users\Carlo\sito\zoomzoom
+       git apply --stat percorso\zoomzoom-home-update.patch   (anteprima)
+       git apply percorso\zoomzoom-home-update.patch
+
+Opzione B — copia dei sei file da src\ del pacchetto a src\ del
+progetto (PowerShell, dalla cartella dove hai estratto lo zip):
+       Copy-Item -Force -Recurse "src\*" "C:\Users\Carlo\sito\zoomzoom\src\"
+
+Poi in locale:
+       cd C:\Users\Carlo\sito\zoomzoom
+       npm run dev          # o: bun run dev
+       # apri http://localhost:3000/ e http://localhost:3000/#/cerca-casa
+
+Se tutto va bene:
+       git add -A
+       git commit -m "home: titolo grande, città Zoom, pagina Cerca casa"
+       git push
+e Vercel ridistribuisce da solo.
+
+VERIFICA FATTA SU QUESTA VERSIONE (con esattamente questi file)
+---------------------------------------------------------------
+- Build di produzione completa («next build», la stessa pipeline di
+  Vercel): completata senza errori, tutte le route compilate.
+- Verifica visiva nel browser reale a 1440, 1290, 1100 e 950 px di
+  larghezza: titolo hero, card e chip delle città, «come funziona»,
+  menu sempre su una riga, pagina Cerca casa. Gli screenshot sono in
+  anteprime/ (home-titolo, home-citta-zoom, home-come-funziona,
+  pagina-cerca-casa).
+- Nessuna modifica a database, schema Prisma, API o autenticazione:
+  solo frontend, sei file. Il database non va toccato.
+
+VERIFICA RAPIDA DOPO IL DEPLOY
+------------------------------
+1. Home: il titolo grande «La tua casa per la prossima avventura» con
+   l'accento oro; sotto, il pulsante «Cerca casa».
+2. Sezione «Le città Zoom»: card Roma, Milano e Napoli con recensioni e
+   media reali; chip con le altre sette; Catania «in arrivo» e non
+   cliccabile.
+3. Menu: «Cerca casa» in prima posizione, tutto su una riga anche con
+   la finestra a metà schermo; stessa voce nel menu hamburger del
+   telefono e nel footer.
+4. #/cerca-casa: le dieci città in ordine alfabetico con le statistiche,
+   l'avviso «Novità in arrivo», i collegamenti a ricerca e mappa, e in
+   coda le zone già consultabili.
+5. «Come funziona» con i tre nuovi step e la sezione classifiche con
+   l'intestazione «Le recensioni della community» e i conteggi.
+
+NOTE
+----
+- TESTI ANCORA DA DEFINIRE DA PARTE TUA (marcati provvisori): gli step
+  di «Come funziona», l'introduzione della sezione recensioni, e il
+  testo sotto il titolo hero (heroSub, dalle impostazioni del sito).
+- Catania è l'unica città Zoom senza scheda. Appena la aggiungi al
+  catalogo delle zone, card e chip diventano cliccabili DA SOLE: la
+  logica confronta le città Zoom con le zone disponibili nel boot.
+- I conteggi e le medie sulle card vengono dalle API delle classifiche:
+  se una città non ha ancora recensioni, la card mostra un testo di
+  cortesia («Le prime recensioni arrivano a breve»).
+- La pagina #/cerca-casa è un ponte verso la ricerca avanzata completa
+  (punto 3 del piano): quando la realizzeremo, la sostituiremo mantenendo
+  la rotta e la voce di menu.

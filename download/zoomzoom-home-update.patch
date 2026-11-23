@@ -1,0 +1,459 @@
+diff --git a/src/app/globals.css b/src/app/globals.css
+index 361725c..e9dc0f1 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -61,7 +61,7 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 1.5em 0; }
+ .brand-name { font-family: var(--font-serif); font-size: 1.35rem; font-weight: 700; color: var(--navy); letter-spacing: .2px; }
+ .brand-name b { color: var(--gold-strong); font-weight: 700; }
+ .main-nav { display: flex; align-items: center; gap: 4px; }
+-.main-nav a, .main-nav button.navlink { display: inline-block; padding: 8px 11px; border-radius: var(--radius-s); text-decoration: none; color: var(--ink); font-size: .95rem; background: none; border: 0; font-family: inherit; cursor: pointer; }
++.main-nav a, .main-nav button.navlink { display: inline-block; padding: 8px 11px; border-radius: var(--radius-s); text-decoration: none; color: var(--ink); font-size: .95rem; background: none; border: 0; font-family: inherit; cursor: pointer; white-space: nowrap; }
+ .main-nav a:hover, .main-nav button.navlink:hover, .main-nav a.active { background: var(--navy-mist); color: var(--navy); }
+ .nav-dd { position: relative; }
+ .nav-dd-panel { position: absolute; top: calc(100% + 6px); left: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-2); padding: 10px; min-width: 320px; display: none; z-index: 130; }
+@@ -109,9 +109,9 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 1.5em 0; }
+ 
+ /* ---------- Hero ---------- */
+ .hero { background: linear-gradient(180deg, var(--navy-deep), var(--navy)); color: #EAF0F7; padding: 54px 0 58px; }
+-.hero h1 { color: #fff; font-size: 2.3rem; max-width: 720px; margin-bottom: .4em; }
++.hero h1 { color: #fff; font-size: clamp(2.4rem, 6vw, 6.25rem); max-width: 1020px; margin-bottom: .35em; line-height: 1.06; letter-spacing: -.5px; }
+ .hero h1 em { color: var(--gold); font-style: normal; }
+-.hero p.lead { color: #C6D3E1; max-width: 640px; font-size: 1.06rem; }
++.hero p.lead { color: #C6D3E1; max-width: 680px; font-size: 1.12rem; }
+ .hero-box { background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.14); border-radius: var(--radius); padding: 22px; margin-top: 26px; }
+ .hero-badges { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+ .hero-badge { background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2); color: #DCE6F0; font-size: .82rem; padding: 5px 11px; border-radius: 999px; display: inline-flex; gap: 7px; align-items: center; }
+@@ -416,6 +416,22 @@ table.table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+ .step h3 { margin-top: 8px; font-size: 1rem; }
+ .step p { font-size: .88rem; color: var(--ink-soft); margin: 0; }
+ 
++/* ---------- Città Zoom ---------- */
++.city-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
++.city-card { display: flex; flex-direction: column; justify-content: space-between; gap: 22px; background: linear-gradient(165deg, var(--navy-deep), var(--navy-soft)); border: 1px solid rgba(255,255,255,.16); border-radius: var(--radius); padding: 24px; text-decoration: none; color: #EAF0F7; box-shadow: var(--shadow-1); min-height: 190px; transition: border-color .15s, box-shadow .15s, transform .15s; }
++.city-card:hover { border-color: var(--gold); box-shadow: var(--shadow-2); transform: translateY(-2px); color: #fff; }
++.city-region { font-size: .78rem; text-transform: uppercase; letter-spacing: .8px; color: var(--ink-soft); }
++.city-card .city-region { color: #A9BACB; }
++.city-card h3 { font-family: var(--font-serif); font-size: 2rem; color: #fff; margin: 2px 0 0; line-height: 1.1; }
++.city-card .city-stats { font-size: .85rem; color: #C6D3E1; margin: 0; }
++.city-card .city-stats b { color: #fff; }
++.city-card .city-cta { font-size: .9rem; color: var(--gold); font-weight: 600; }
++.city-chip-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; align-items: center; }
++.city-chip { background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 7px 16px; text-decoration: none; font-size: .9rem; color: var(--ink); display: inline-flex; gap: 8px; align-items: center; }
++a.city-chip:hover { border-color: var(--gold-strong); color: var(--navy); }
++.city-chip .n { color: var(--ink-soft); font-size: .78rem; }
++.city-chip.city-soon { background: var(--paper); border-style: dashed; color: var(--ink-soft); cursor: default; }
++
+ /* ---------- Posta demo ---------- */
+ .mail-item { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); margin-bottom: 12px; overflow: hidden; }
+ .mail-head { padding: 10px 16px; background: var(--paper); border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: .82rem; color: var(--ink-soft); }
+@@ -434,19 +450,29 @@ table.table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+ @media (max-width: 1020px) {
+   .grid-4 { grid-template-columns: repeat(2, 1fr); }
+   .stat-grid { grid-template-columns: repeat(2, 1fr); }
++  .city-grid { grid-template-columns: repeat(2, 1fr); }
+   .grid-side { grid-template-columns: 1fr; }
+   .admin-shell { grid-template-columns: 1fr; }
+   .admin-side { position: static; border-radius: var(--radius); margin-bottom: 16px; }
+   .admin-main { padding-left: 0; }
+   .footer-grid { grid-template-columns: 1fr 1fr; }
+ }
++/* Tra 861px e 1290px il menu rischia di andare a capo con tutte le voci
++   (Cerca casa, Cerca, Mappa, Classifiche, Categorie, Come funziona):
++   lo compattiamo per tenerlo su una riga. */
++@media (min-width: 861px) and (max-width: 1290px) {
++  .header-inner { gap: 12px; }
++  .main-nav { gap: 2px; }
++  .main-nav a, .main-nav button.navlink { padding: 8px 7px; font-size: .9rem; }
++}
+ @media (max-width: 860px) {
+   .main-nav { display: none; }
+   .header-actions .btn-accedi { display: none; }
+   .burger { display: inline-flex; }
+   .grid-3 { grid-template-columns: 1fr; }
++  .city-grid { grid-template-columns: 1fr; }
+   .steps { grid-template-columns: 1fr; }
+-  .hero h1 { font-size: 1.7rem; }
++  .hero h1 { font-size: clamp(2.05rem, 8.5vw, 2.6rem); letter-spacing: 0; }
+   .pc-grid { grid-template-columns: 1fr; }
+   .score-hero .big { font-size: 2.3rem; }
+ }
+diff --git a/src/app/page.tsx b/src/app/page.tsx
+index 3d07b51..5b26260 100644
+--- a/src/app/page.tsx
++++ b/src/app/page.tsx
+@@ -7,6 +7,7 @@ import { useHashRoute } from "@/lib/client/router";
+ import { CookieBanner, DemoBar, Footer, Header, Toasts } from "@/components/chrome";
+ import { HomeView } from "@/components/views/home";
+ import { SearchView } from "@/components/views/search";
++import { CercaCasaView } from "@/components/views/cerca-casa";
+ import { CategoryView, MapView, RankingsView } from "@/components/views/map-rankings-category";
+ import { EntityView, ZoneView } from "@/components/views/entity-zone";
+ import { ContactsView, CookieView, HowItWorksView, MailboxView, ModerationView, NotFoundView, PremiumView, PrivacyView, ReviewRulesView, TermsView } from "@/components/views/info-pages";
+@@ -29,6 +30,7 @@ function Router() {
+   const view = (() => {
+     switch (segs[0]) {
+       case undefined: return <HomeView />;
++      case "cerca-casa": return <CercaCasaView />;
+       case "cerca": return <SearchView />;
+       case "mappa": return <MapView />;
+       case "classifiche": return <RankingsView />;
+diff --git a/src/components/chrome.tsx b/src/components/chrome.tsx
+index a9ea45c..35ae039 100644
+--- a/src/components/chrome.tsx
++++ b/src/components/chrome.tsx
+@@ -123,6 +123,7 @@ export function Header() {
+             <span className="brand-name">{nameParts}</span>
+           </a>
+           <nav className="main-nav" aria-label="Navigazione principale">
++            <a href="#/cerca-casa" className={active("cerca-casa")}>Cerca casa</a>
+             <a href="#/cerca" className={active("cerca")}>Cerca</a>
+             <a href="#/mappa" className={active("mappa")}>Mappa</a>
+             <a href="#/classifiche" className={active("classifiche")}>Classifiche</a>
+@@ -149,6 +150,7 @@ export function Header() {
+       </header>
+       <div className={`mobile-nav${mobileOpen ? " open" : ""}`}>
+         {boot?.site.openReviewsEnabled ? <a className="mobile-cta" href="#/recensione" onClick={() => setMobileOpen(false)}>Scrivi una recensione</a> : null}
++        <a href="#/cerca-casa" onClick={() => setMobileOpen(false)}>Cerca casa</a>
+         <a href="#/cerca" onClick={() => setMobileOpen(false)}>Cerca</a>
+         <a href="#/mappa" onClick={() => setMobileOpen(false)}>Mappa</a>
+         <a href="#/classifiche" onClick={() => setMobileOpen(false)}>Classifiche</a>
+@@ -320,6 +322,7 @@ export function Footer() {
+           </div>
+           <div>
+             <h4>Il progetto</h4>
++            <a href="#/cerca-casa">Cerca casa</a>
+             <a href="#/come-funziona">Come funziona la verifica</a>
+             <a href="#/premium">Membership Premium</a>
+             <a href="#/cerca">Cerca un soggetto</a>
+diff --git a/src/components/views/cerca-casa.tsx b/src/components/views/cerca-casa.tsx
+new file mode 100644
+index 0000000..d94f29d
+--- /dev/null
++++ b/src/components/views/cerca-casa.tsx
+@@ -0,0 +1,85 @@
++"use client";
++// ZoomZoom — «Cerca casa»: pagina ponte in attesa della ricerca avanzata
++// con mappa interattiva e filtri (località, tipologia, prezzo, superficie,
++// locali, bagni, vendita/affitto). Nel frattempo indirizza verso le città
++// Zoom, le schede zona, la ricerca esistente e la mappa delle reputazioni.
++import { useEffect, useState } from "react";
++import { useApp } from "@/lib/client/store";
++import { api, fmtInt } from "@/lib/client/api";
++import { Alert } from "../ui-kit";
++import { ZOOM_CITIES_ALPHA } from "@/lib/zoom-cities";
++
++// Le righe delle classifiche arrivano dall'API con campi piatti:
++// vedi /api/public/rankings.
++type RankRow = { entityId: string; name: string; zoneId: string | null; n: number; mean: number | null };
++
++export function CercaCasaView() {
++  const { boot } = useApp();
++  const [rows, setRows] = useState<RankRow[] | null>(null);
++
++  useEffect(() => {
++    if (!boot) return;
++    void (async () => {
++      const r = await api<{ sections: { rows: RankRow[] }[] }>("/api/public/rankings?cat=zona");
++      setRows(r.ok ? (r.sections[0]?.rows ?? []) : []);
++    })();
++  }, [boot]);
++
++  if (!boot) return <div className="container section"><p className="muted">Caricamento…</p></div>;
++
++  // Zone già presenti nel catalogo ma fuori dalle dieci città Zoom
++  // (es. città demo del seed): restano consultabili e vengono elencate in coda.
++  const extraZones = boot.zones.filter(z => !ZOOM_CITIES_ALPHA.some(c => c.slug === z.id));
++  const stat = (slug: string) => {
++    const r = (rows || []).find(x => x.zoneId === slug);
++    return r ? { n: r.n, mean: r.mean } : null;
++  };
++
++  return (
++    <div className="container">
++      <div className="section-head" style={{ paddingTop: 26 }}>
++        <div>
++          <h1>Cerca casa</h1>
++          <p className="sub">Scegli una delle città Zoom e scopri cosa dicono le recensioni verificate di zone, immobili e servizi della casa.</p>
++        </div>
++      </div>
++
++      <Alert kind="info">
++        <b>Novità in arrivo:</b> la ricerca avanzata con mappa interattiva e filtri (tipologia, prezzo, superficie, locali, bagni, vendita o affitto) è in fase di realizzazione. Nel frattempo puoi esplorare le città Zoom qui sotto, usare la <a href="#/cerca">ricerca con i filtri attuali</a> o aprire la <a href="#/mappa">mappa delle reputazioni</a>.
++      </Alert>
++
++      <div className="grid grid-3 mt3">
++        {ZOOM_CITIES_ALPHA.map(city => {
++          const st = stat(city.slug);
++          const live = boot.zones.some(z => z.id === city.slug);
++          return live ? (
++            <a className="card card-click" href={`#/zona/${city.slug}`} key={city.slug}>
++              <span className="city-region">{city.region}</span>
++              <h3 style={{ margin: "2px 0 6px" }}>{city.name}</h3>
++              <p className="small muted mb0">
++                {st
++                  ? <>{fmtInt(st.n)} recensioni in zona{st.mean != null ? <> · media {st.mean.toFixed(1)}</> : null}</>
++                  : "Le prime recensioni arrivano a breve"}
++              </p>
++            </a>
++          ) : (
++            <div className="card" key={city.slug} style={{ borderStyle: "dashed" }}>
++              <span className="city-region">{city.region}</span>
++              <h3 style={{ margin: "2px 0 6px" }}>{city.name}</h3>
++              <p className="small muted mb0">Scheda in preparazione: questa città entra ora nel catalogo Zoom.</p>
++            </div>
++          );
++        })}
++      </div>
++
++      {extraZones.length ? (
++        <p className="small muted mt3 mb0">
++          Già consultabili anche:{" "}
++          {extraZones.map((z, i) => (
++            <span key={z.id}>{i > 0 ? ", " : ""}<a href={`#/zona/${z.id}`}>{z.name}</a></span>
++          ))}.
++        </p>
++      ) : null}
++    </div>
++  );
++}
+diff --git a/src/components/views/home.tsx b/src/components/views/home.tsx
+index 59679ac..39b7e35 100644
+--- a/src/components/views/home.tsx
++++ b/src/components/views/home.tsx
+@@ -1,6 +1,6 @@
+ "use client";
+-// ZoomZoom — home: hero con ricerca, mappa delle reputazioni, come funziona,
+-// categorie recensibili, top 3 e sezione imparzialità.
++// ZoomZoom — home: hero con ricerca, card delle città Zoom, mappa delle
++// reputazioni, come funziona, categorie recensibili, top 3 e sezione imparzialità.
+ import { useState } from "react";
+ import { useApp } from "@/lib/client/store";
+ import { navigate } from "@/lib/client/router";
+@@ -10,24 +10,28 @@ import { MapLegend, MapViewport } from "../map";
+ import { AdSlot } from "../chrome";
+ import { EntityCard, type EntCardData } from "../ui-kit";
+ import { useEffect } from "react";
++import { ZOOM_CITIES, ZOOM_CITIES_TOP } from "@/lib/zoom-cities";
+ 
+-type SearchRow = {
+-  entity: { id: string; name: string; categoryId: string; subtitle: string | null; address: string | null; zoneId: string | null; verifiedBusiness: boolean; isDemo: boolean };
+-  n: number; mean: number | null; weighted: number | null; sufficient: boolean;
++// Le righe delle classifiche arrivano dall'API con campi piatti
++// (entityId, name, zoneId, n, mean…): vedi /api/public/rankings.
++type RankRow = {
++  entityId: string; name: string; zoneId: string | null;
++  isDemo?: boolean; verifiedBusiness?: boolean;
++  n: number; mean: number | null; sufficient?: boolean;
+ };
+ 
+ export function HomeView() {
+   const { boot } = useApp();
+   const [q, setQ] = useState("");
+   const [cat, setCat] = useState("");
+-  const [tops, setTops] = useState<Record<string, { rows: SearchRow[]; method: { m: number; prior: number } }>>({});
++  const [tops, setTops] = useState<Record<string, { rows: RankRow[]; method: { m: number; prior: number } }>>({});
+ 
+   useEffect(() => {
+     if (!boot) return;
+     void (async () => {
+       const [r1, r2] = await Promise.all([
+-        api<{ sections: { category: { id: string }; rows: SearchRow[]; method: { m: number; prior: number } }[] }>("/api/public/rankings?cat=immobile"),
+-        api<{ sections: { category: { id: string }; rows: SearchRow[]; method: { m: number; prior: number } }[] }>("/api/public/rankings?cat=zona"),
++        api<{ sections: { category: { id: string }; rows: RankRow[]; method: { m: number; prior: number } }[] }>("/api/public/rankings?cat=immobile"),
++        api<{ sections: { category: { id: string }; rows: RankRow[]; method: { m: number; prior: number } }[] }>("/api/public/rankings?cat=zona"),
+       ]);
+       const acc: typeof tops = {};
+       if (r1.ok) for (const s of r1.sections) acc[s.category.id] = { rows: s.rows, method: s.method };
+@@ -40,6 +44,14 @@ export function HomeView() {
+   const cats = boot.categories;
+   const zoneName = (id: string | null) => boot.zones.find(z => z.id === id)?.name || "";
+ 
++  // Statistiche zona (recensioni e media) per una città Zoom, se presente
++  // nel catalogo con almeno una recensione.
++  const zoneStats = (slug: string): { n: number; mean: number | null } | null => {
++    const rows = tops.zona?.rows || [];
++    const r = rows.find(x => x.zoneId === slug);
++    return r ? { n: r.n, mean: r.mean } : null;
++  };
++
+   const submitSearch = (e: React.FormEvent) => {
+     e.preventDefault();
+     const params = new URLSearchParams();
+@@ -54,10 +66,10 @@ export function HomeView() {
+     const rows = section.rows.filter(x => x.n > 0).slice(0, 3).map(x => ({
+       entity: {
+         id: x.entityId, name: x.name, categoryId: catId, subtitle: null,
+-        address: null, zoneId: x.zoneId, verifiedBusiness: (x as { verifiedBusiness?: boolean }).verifiedBusiness || false,
+-        isDemo: x.isDemo,
++        address: null, zoneId: x.zoneId, verifiedBusiness: x.verifiedBusiness || false,
++        isDemo: x.isDemo || false,
+       },
+-      n: x.n, mean: x.mean, sufficient: x.sufficient,
++      n: x.n, mean: x.mean, sufficient: !!x.sufficient,
+     }));
+     if (!rows.length) return null;
+     const cat = cats.find(c => c.id === catId)!;
+@@ -68,7 +80,6 @@ export function HomeView() {
+             <h2>{title}</h2>
+             <p className="sub">{sub}</p>
+           </div>
+-          <a className="btn btn-ghost btn-sm" href="#/classifiche">Tutte le classifiche</a>
+         </div>
+         <div className="grid">
+           {rows.map((x, i) => (
+@@ -83,7 +94,7 @@ export function HomeView() {
+     <>
+       <section className="hero">
+         <div className="container">
+-          <h1>Recensioni <em>verificate</em> su case, zone e servizi della casa</h1>
++          <h1>La tua casa per la <em>prossima avventura</em></h1>
+           <p className="lead">{boot.settings.heroSub}</p>
+           <div className="hero-box">
+             <form className="searchbar" role="search" onSubmit={submitSearch}>
+@@ -102,8 +113,9 @@ export function HomeView() {
+               <span className="hero-badge"><CheckSvg /> Consultazione libera, senza registrazione</span>
+             </div>
+             <div className="row mt2" style={{ alignItems: "center", flexWrap: "wrap" }}>
+-              <a className="btn btn-primary" href="#/recensione">Scrivi una recensione</a>
+-              <span className="small muted">Basta l&apos;indirizzo: +{boot.settings.premiumDaysPerReview} giorni Premium per ogni contributo pubblicato</span>
++              <a className="btn btn-primary" href="#/cerca-casa">Cerca casa</a>
++              <a className="btn btn-ghost" style={{ borderColor: "#fff", color: "#fff" }} href="#/recensione">Scrivi una recensione</a>
++              <span className="small" style={{ color: "#C6D3E1" }}>Basta l&apos;indirizzo: +{boot.settings.premiumDaysPerReview} giorni Premium per ogni contributo pubblicato</span>
+             </div>
+           </div>
+         </div>
+@@ -111,6 +123,56 @@ export function HomeView() {
+ 
+       <AdSlot position="home-top" />
+ 
++      <section className="section">
++        <div className="container">
++          <div className="section-head">
++            <div>
++              <h2>Le città Zoom</h2>
++              <p className="sub">Dieci città, un obiettivo: aiutarti a scegliere dove vivere. Recensioni verificate di zone, immobili e servizi della casa, raccolte con un modello pensato per ridurre le recensioni false.</p>
++            </div>
++            <a className="btn btn-ghost btn-sm" href="#/cerca-casa">Tutte le città</a>
++          </div>
++          <div className="city-grid">
++            {ZOOM_CITIES_TOP.map(city => {
++              const st = zoneStats(city.slug);
++              return (
++                <a className="city-card" href={`#/zona/${city.slug}`} key={city.slug}>
++                  <div>
++                    <span className="city-region">{city.region}</span>
++                    <h3>{city.name}</h3>
++                  </div>
++                  <div>
++                    <p className="city-stats mb1">
++                      {st
++                        ? <><b>{fmtInt(st.n)}</b> recensioni in zona{st.mean != null ? <> · media {st.mean.toFixed(1)}</> : null}</>
++                        : <>Le prime recensioni arrivano a breve: la città entra ora nel catalogo.</>}
++                    </p>
++                    <span className="city-cta">Esplora {city.name} →</span>
++                  </div>
++                </a>
++              );
++            })}
++          </div>
++          <div className="city-chip-row">
++            <span className="small muted">Altre città Zoom:</span>
++            {ZOOM_CITIES.filter(c => c.rank > 3).map(city => {
++              const st = zoneStats(city.slug);
++              const live = boot.zones.some(z => z.id === city.slug);
++              return live ? (
++                <a className="city-chip" href={`#/zona/${city.slug}`} key={city.slug}>
++                  {city.name}
++                  {st ? <span className="n">{fmtInt(st.n)} rec.</span> : null}
++                </a>
++              ) : (
++                <span className="city-chip city-soon" key={city.slug} title="Scheda in preparazione">
++                  {city.name}<span className="n">in arrivo</span>
++                </span>
++              );
++            })}
++          </div>
++        </div>
++      </section>
++
+       <section className="section section-alt" style={{ paddingTop: 36 }}>
+         <div className="container">
+           <div className="section-head">
+@@ -132,15 +194,15 @@ export function HomeView() {
+         <div className="container">
+           <div className="section-head">
+             <div>
+-              <h2>Come funziona la verifica</h2>
+-              <p className="sub">Un modello pensato per ridurre le recensioni false, senza promettere l&apos;impossibile.</p>
++              <h2>Come funziona</h2>
++              <p className="sub">Dalla scelta della zona alla decisione finale: tre passi per trovare casa senza sorprese.</p>
+             </div>
+-            <a className="btn btn-ghost btn-sm" href="#/come-funziona">Approfondisci</a>
++            <a className="btn btn-ghost btn-sm" href="#/come-funziona">Approfondisci la verifica</a>
+           </div>
+           <div className="steps">
+-            <div className="step"><h3>Esperienza reale, due strade</h3><p>Per <b>immobili e zone</b> basta dichiarare la tua esperienza: nessun invito, il badge resta “dichiarata”. Per le <b>persone</b> serve l&apos;invito del soggetto o la verifica documentale: il badge “verificata” vale qualcosa proprio per questo.</p></div>
+-            <div className="step"><h3>Contributo con incentivo</h3><p>Ogni recensione pubblicata attiva giorni di Membership Premium, che sbloccano i testi integrali; chi allega una foto sblocca anche le foto degli altri. Il premio è per il contributo, non per il voto.</p></div>
+-            <div className="step"><h3>Community e moderazione</h3><p>Gli utenti Premium validano o disconfermano le recensioni (pollice su/giù); segnalazioni e moderazione con decisioni motivate chiudono il cerchio: chi bara perde il vantaggio ottenuto.</p></div>
++            <div className="step"><h3>Esplora città e zone</h3><p>Parti dalle città Zoom e dalla <a href="#/mappa">mappa delle reputazioni</a>: medie aggregate per servizi, trasporti, sicurezza, verde e aria, costi della vita.</p></div>
++            <div className="step"><h3>Leggi chi c&apos;è già stato</h3><p>Recensioni verificate su immobili, zone e servizi della casa: esperienze reali, prezzi dichiarati e avvertenze esplicite, consultabili senza registrazione.</p></div>
++            <div className="step"><h3>Decidi senza sorprese</h3><p>Medie ponderate con soglia minima di recensioni e una recensione per esperienza: l&apos;ordine dei risultati non si compra, la pubblicità è sempre separata.</p></div>
+           </div>
+         </div>
+       </section>
+@@ -173,6 +235,13 @@ export function HomeView() {
+ 
+       <section className="section">
+         <div className="container">
++          <div className="section-head">
++            <div>
++              <h2>Le recensioni della community</h2>
++              <p className="sub">Finora {fmtInt(boot.stats.reviews)} recensioni verificate su {fmtInt(boot.stats.entities)} schede, raccolte con un modello pensato per ridurre le recensioni false. Questi sono i soggetti più apprezzati, ordinati con la stessa media ponderata usata in tutto il sito.</p>
++            </div>
++            <a className="btn btn-ghost btn-sm" href="#/classifiche">Tutte le classifiche</a>
++          </div>
+           <div className="grid grid-2">
+             {topList("immobile", "Immobili più apprezzati", "Primi tre per media ponderata, con numero di recensioni visibile.")}
+             {topList("zona", "Zone più apprezzate", "Le valutazioni aggregate di chi ci vive o ci lavora.")}
+diff --git a/src/lib/zoom-cities.ts b/src/lib/zoom-cities.ts
+new file mode 100644
+index 0000000..e49e820
+--- /dev/null
++++ b/src/lib/zoom-cities.ts
+@@ -0,0 +1,36 @@
++// ZoomZoom — le 10 città Zoom con la gerarchia editoriale concordata.
++// La gerarchia (rank 1-10) decide l'ordine di presentazione sulla home
++// (card grandi per le prime tre, chip per le altre); l'ordine alfabetico
++// è disponibile con ZOOM_CITIES_ALPHA per gli elenchi di selezione
++// (es. pagina «Cerca casa»).
++// slug = id della zona nel database, dove presente (Catania è in arrivo).
++export type ZoomCity = {
++  slug: string;
++  name: string;
++  region: string;
++  lat: number;
++  lng: number;
++  /** 1 = città più importante della gerarchia editoriale */
++  rank: number;
++};
++
++export const ZOOM_CITIES: ZoomCity[] = [
++  { slug: "roma", name: "Roma", region: "Lazio", lat: 41.9028, lng: 12.4964, rank: 1 },
++  { slug: "milano", name: "Milano", region: "Lombardia", lat: 45.4642, lng: 9.19, rank: 2 },
++  { slug: "napoli", name: "Napoli", region: "Campania", lat: 40.8518, lng: 14.2681, rank: 3 },
++  { slug: "torino", name: "Torino", region: "Piemonte", lat: 45.0703, lng: 7.6869, rank: 4 },
++  { slug: "bologna", name: "Bologna", region: "Emilia-Romagna", lat: 44.4949, lng: 11.3426, rank: 5 },
++  { slug: "firenze", name: "Firenze", region: "Toscana", lat: 43.7696, lng: 11.2558, rank: 6 },
++  { slug: "genova", name: "Genova", region: "Liguria", lat: 44.4056, lng: 8.9463, rank: 7 },
++  { slug: "bari", name: "Bari", region: "Puglia", lat: 41.1171, lng: 16.8719, rank: 8 },
++  { slug: "cagliari", name: "Cagliari", region: "Sardegna", lat: 39.2238, lng: 9.1217, rank: 9 },
++  { slug: "catania", name: "Catania", region: "Sicilia", lat: 37.5027, lng: 15.0873, rank: 10 },
++];
++
++/** Le stesse città in ordine alfabetico (Bari, Bologna, Cagliari, Catania, …). */
++export const ZOOM_CITIES_ALPHA: ZoomCity[] = [...ZOOM_CITIES].sort((a, b) =>
++  a.name.localeCompare(b.name, "it")
++);
++
++/** Le prime tre della gerarchia: card grandi sulla home. */
++export const ZOOM_CITIES_TOP: ZoomCity[] = ZOOM_CITIES.filter(c => c.rank <= 3);
