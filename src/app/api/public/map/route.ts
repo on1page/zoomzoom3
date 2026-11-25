@@ -9,7 +9,12 @@
 //    provincia (media ponderata di TUTTE le recensioni pubbliche delle
 //    schede pubblicate collocate in zone di quella regione/provincia);
 //  - zones[].place: reputazione aggregata del comune (stessa base: tutte
-//    le schede della zona), usata per colorare il poligono comunale.
+//    le schede della zona), usata per colorare il poligono comunale;
+//    zones[].placeCount = numero di recensioni totali della zona, pubblico
+//    anche sotto soglia (il conteggio non è un dato privato: le recensioni
+//    sono pubbliche) e serve a mostrare "in attesa di N recensioni";
+//  - admin.provincesPending: province con recensioni ma sotto soglia, allo
+//    stesso scopo (contorno tratteggiato + messaggio, niente media)
 // FILTRI PER CRITERIO (dalla mappa si può colorare il territorio in
 // funzione dei criteri della categoria "zone"):
 //  - criteriaList: i criteri attivi del catalogo [{key,label}];
@@ -177,6 +182,8 @@ export async function GET() {
       lat: number; lng: number; radiusM: number;
       aggregate: { mean: number; n: number; sufficient: boolean } | null;
       place: { mean: number; n: number; criteria?: CritMap } | null;
+      // recensioni totali della zona, anche sotto soglia (per "in attesa")
+      placeCount: number;
       // voti per criterio della SCHEDA CITTÀ (pin e chip sulla mappa)
       crit?: CritMap;
       suppressed: boolean; entityId: string | null;
@@ -203,6 +210,9 @@ export async function GET() {
         place: place && place.n >= settings.mapMinAggregate
           ? { mean: Math.round((place.sum / place.n) * 10) / 10, n: place.n, ...(placeCrit ? { criteria: placeCrit } : {}) }
           : null,
+        // conteggio grezzo sempre pubblico: serve al livello "in attesa"
+        // (comuni con recensioni ancora sotto la soglia di soppressione)
+        placeCount: place ? place.n : 0,
         crit: zEnt ? critOut(critSheet.get(zEnt.id), settings.mapMinAggregate) : undefined,
         entityId: zEnt?.id || null,
       });
@@ -232,6 +242,12 @@ export async function GET() {
       admin: {
         regions: rowsOut(perRegion, critRegion, settings.mapMinAggregate),
         provinces: rowsOut(perProvince, critProvince, settings.mapMinAggregate),
+        // province con recensioni ma sotto soglia: contorno tratteggiato e
+        // messaggio "in attesa", nessun valore pubblicato
+        provincesPending: [...perProvince.entries()]
+          .filter(([, a]) => a.n > 0 && a.n < settings.mapMinAggregate)
+          .map(([name, a]) => ({ name, n: a.n }))
+          .sort((a, b) => b.n - a.n),
       },
       thresholds: { mapMinAggregate: settings.mapMinAggregate, minReviews: settings.minReviews },
     });

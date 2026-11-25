@@ -7,12 +7,8 @@
 //   - PROVINCE (zoom intermedio): tileset Countries di MapTiler, layer
 //     "administrative" con level = 1 (per l'Italia le divisioni di primo
 //     livello sono le province, 110 poligoni con codice ISO 3166-2);
-//   - COMUNI (zoom ravvicinato/ricerca): confini ISTAT ufficiali in
-//     GeoJSON locale, UN FILE PER REGIONE (public/comuni/r{codice}.geojson,
-//     vintage 1° gennaio 2026, 7.895 comuni): la mappa carica on demand le
-//     regioni in vista e mostra la suddivisione di TUTTI i comuni d'Italia;
-//     il geocoder pubblico (Nominatim) resta come riserva per le città del
-//     catalogo il cui nome non corrisponde alla denominazione ISTAT.
+//   - COMUNI (zoom ravvicinato/ricerca): poligoni caricati on demand dal
+//     geocoder pubblico (Nominatim) per le città presenti nel catalogo.
 //
 // I nomi del tileset MapTiler non always coincidono con i nomi italiani
 // d'uso (Torino → "Turin", Bolzano → "Bozen", Aosta → "Aoste", e persino
@@ -129,6 +125,17 @@ const PROVINCE_ALIAS: Record<string, string> = {
   "tempio pausania": "olbia tempio",
 };
 
+/** Nome normalizzato della provincia, senza i prefissi che il geocoder
+ *  aggiunge ("Città metropolitana di", "Provincia di", …): è la chiave con
+ *  cui i poligoni provinciali (GeoJSON on demand) vengono riconosciuti e
+ *  colorati sulla mappa. "Varese" → "varese",
+ *  "Città metropolitana di Milano" → "milano". */
+export function provinceNormOf(raw: unknown): string {
+  let n = normName(raw);
+  for (let i = 0; i < 3 && PROV_PREFIX.test(n); i++) n = n.replace(PROV_PREFIX, "").trim();
+  return n;
+}
+
 /** Traduce il nome della provincia come arriva dal database (Nominatim,
  *  es. "Torino", "Reggio nell'Emilia", "Città metropolitana di Milano")
  *  nel nome ESATTO del poligono di livello 1 del tileset Countries.
@@ -141,54 +148,4 @@ export function tilerProvinceOf(raw: unknown): string | null {
   for (let i = 0; i < 3 && PROV_PREFIX.test(n); i++) n = n.replace(PROV_PREFIX, "").trim();
   n = PROVINCE_ALIAS[n] || n;
   return TILER_PROVINCE_NORM.get(n) || null;
-}
-
-/* ------------------------------ COMUNI ------------------------------ */
-
-/** Codice ISTAT delle 20 regioni (nome canonico → codice): i confini
- *  comunali sono raggruppati per regione in public/comuni/r{codice}.geojson
- *  (dati ISTAT, 1° gennaio 2026) e la mappa li carica on demand quando la
- *  vista interessa una regione. */
-export const REGIONI_ISTAT_CODE: Record<string, number> = {
-  "Piemonte": 1, "Valle d'Aosta/Vallée d'Aoste": 2, "Lombardia": 3,
-  "Trentino-Alto Adige/Südtirol": 4, "Veneto": 5, "Friuli-Venezia Giulia": 6,
-  "Liguria": 7, "Emilia-Romagna": 8, "Toscana": 9, "Umbria": 10,
-  "Marche": 11, "Lazio": 12, "Abruzzo": 13, "Molise": 14, "Campania": 15,
-  "Puglia": 16, "Basilicata": 17, "Calabria": 18, "Sicilia": 19,
-  "Sardegna": 20,
-};
-
-/** URL del GeoJSON dei comuni di una regione (accetta il nome in qualsiasi
- *  forma; null se non è una regione italiana). */
-export function comuniFileFor(raw: unknown): string | null {
-  const c = regionCanonical(raw);
-  if (!c) return null;
-  const code = REGIONI_ISTAT_CODE[c];
-  return code ? `/comuni/r${code}.geojson` : null;
-}
-
-/** Denominazione italiana di un comune bilingue (parte prima di "/"):
- *  i file ISTAT scrivono "Bolzano/Bozen", il geocoder "Bolzano" — la chiave
- *  di confronto si calcola sempre su questa forma base. */
-export function comuneBaseName(raw: unknown): string {
-  return String(raw ?? "").split("/")[0].trim();
-}
-
-/** Varianti note tra il nome che restituisce il geocoder (OSM/Nominatim,
- *  usato per le zone del catalogo) e la denominazione ufficiale ISTAT del
- *  comune: chiave normalizzata geocoder → chiave normalizzata ISTAT.
- *  Estendere qui se una città del catalogo non trova il proprio poligono
- *  nei file ISTAT (cade comunque sul contorno del geocoder). */
-const COMUNI_ALIAS: Record<string, string> = {
-  // ISTAT dal 2023: "Reggio di Calabria"; il geocoder restituisce "Reggio Calabria"
-  "reggio calabria": "reggio di calabria",
-};
-
-/** Chiave di confronto di un comune: denominazione base normalizzata, con
- *  le varianti note applicate. È la funzione da usare SEMPRE per mettere
- *  in corrispondenza le zone del catalogo e i confini comunali (colori del
- *  coropleto, collegamenti alle schede, ripiego geocoder). */
-export function comuneKey(raw: unknown): string {
-  const n = normName(comuneBaseName(raw));
-  return COMUNI_ALIAS[n] || n;
 }
