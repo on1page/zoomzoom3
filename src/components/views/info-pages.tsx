@@ -39,6 +39,7 @@ export function HowItWorksView() {
             <p className="sub">Un metodo trasparente, con i suoi limiti dichiarati.</p>
           </div>
         </div>
+        <p className="mb1">ZoomZoom offre <b>indagini sugli immobili grazie alla community</b>: cerchi un indirizzo e leggi cosa ha trovato chi ci ha vissuto o ci ha lavorato, con voti, foto e avvertenze. «Indagine della community» è il nome pubblico del contributo che nelle <a href="#/regole-recensioni">regole</a> e nella moderazione chiamiamo <b>recensione</b>: stesso metodo, stessi controlli, stesse tutele — per le persone fisiche resta l&apos;obbligo di invito o verifica documentale.</p>
         <Alert kind="ok">
           <b>In sintesi.</b> Su ZoomZoom ci sono <b>due livelli di recensione</b>. Per <b>immobili e zone</b> basta un account verificato: scrivi subito, senza invito, e la recensione è marcata <b>“esperienza dichiarata”</b>. Per le <b>persone fisiche</b> (proprietari, affittuari, professionisti) serve un <b>invito email</b> collegato a un&apos;esperienza registrata oppure una <b>verifica documentale</b>: la recensione è marcata <b>“esperienza verificata”</b> e attesta l&apos;esistenza dell&apos;interazione registrata — <b>non garantisce che ogni affermazione sia oggettivamente vera</b>.
         </Alert>
@@ -46,7 +47,7 @@ export function HowItWorksView() {
         <h3>1. L&apos;esperienza: dichiarata o verificata</h3>
         <p>Un&apos;esperienza (per esempio la casa in cui abiti, un contratto d&apos;affitto, una pratica seguita da un&apos;agenzia) entra nella piattaforma in tre modi:</p>
         <ul>
-          <li><b>Contributo aperto (immobili e zone)</b>: trovi la scheda o la aggiungi dall&apos;indirizzo reale e dichiari che tipo di esperienza hai avuto. Nessun invito, nessun documento: la recensione nasce marcata “dichiarata” e resta soggetta a segnalazioni e moderazione;</li>
+          <li><b>Contributo aperto (immobili e zone)</b>: trovi la scheda o la aggiungi dall&apos;indirizzo reale e dichiari che tipo di esperienza hai avuto. Nessun invito, nessun documento: l&apos;indagine nasce marcata “dichiarata” e resta soggetta a segnalazioni e moderazione;</li>
           <li><b>Soggetto verificato</b> (agenzia, amministratore, ditta con account verificato) registra l&apos;interazione e invita il cliente a recensirla, con limiti giornalieri e obbligo dichiarato di invitare <em>tutti</em> i clienti dell&apos;interazione, non solo i soddisfatti;</li>
           <li><b>Verifica documentale</b>: l&apos;utente carica un documento che dimostri l&apos;esperienza (contratto, fattura, delibera…); un moderatore valuta la richiesta e, se sufficiente, abilita la recensione.</li>
         </ul>
@@ -56,25 +57,25 @@ export function HowItWorksView() {
         </Alert>
         <h3>2. L&apos;invito è un token sicuro</h3>
         <p>L&apos;invito email contiene un collegamento con un token casuale a <b>uso singolo</b>, con <b>scadenza</b> ({s?.inviteExpiryDays ?? 7} giorni), collegato all&apos;indirizzo email del destinatario. I token sono conservati solo come hash: nemmeno gli amministratori li riutilizzano. Ogni uso, scadenza o tentativo non valido viene registrato tra gli eventi di sicurezza. Gli inviti in massa sono impediti da limiti di frequenza e da una soglia oltre la quale serve approvazione della moderazione.</p>
-        <h3>3. Una recensione per esperienza</h3>
-        <p>Ogni utente può scrivere <b>una sola recensione per esperienza</b> (e, nella via dichiarativa, una per scheda), e la pubblicazione è una transazione atomica sul server. La recensione è aggiornabile con una rettifica motivata entro {s?.rettificaDays ?? 30} giorni; dopo, occorre rivolgersi alla moderazione, che valuta le richieste di correzione con tracciatura delle decisioni.</p>
+        <h3>3. Una indagine per esperienza</h3>
+        <p>Ogni utente può scrivere <b>una sola indagine per esperienza</b> (e, nella via dichiarativa, una per scheda), e la pubblicazione è una transazione atomica sul server. L&apos;indagine è aggiornabile con una rettifica motivata entro {s?.rettificaDays ?? 30} giorni; dopo, occorre rivolgersi alla moderazione, che valuta le richieste di correzione con tracciatura delle decisioni.</p>
         <h2>Community: i voti di utilità</h2>
-        <p>Gli utenti con Membership Premium possono esprimere un <b>pollice su</b> (la recensione gli risulta attendibile e coerente) o un <b>pollice giù</b> (non li convince) su ogni recensione: un voto per utente, mai sulla propria. I conteggi sono pubblici e aiutano chi legge a pesare le opinioni; sono un segnale della community, non un giudizio ufficiale.</p>
-        <h2>Cosa contiene una recensione</h2>
+        <p>Gli utenti con Membership Premium possono esprimere un <b>pollice su</b> (l&apos;indagine gli risulta attendibile e coerente) o un <b>pollice giù</b> (non li convince) su ogni indagine: un voto per utente, mai sulla propria. I conteggi sono pubblici e aiutano chi legge a pesare le opinioni; sono un segnale della community, non un giudizio ufficiale.</p>
+        <h2>Cosa contiene un&apos;indagine</h2>
         <p>Punteggio complessivo da 0 a 10 (step 0,5) mostrato con stelle e valore numerico; punteggi per i criteri <b>specifici della categoria</b> (le domande per un immobile riguardano manutenzione e rumori, quelle per un&apos;agenzia trasparenza e gestione della pratica: non vengono riusate tra categorie); punti di forza; criticità; dove pertinente, il <b>prezzo richiesto, proposto o concluso</b> (dato dichiarato dal recensore: non viene verificato, ed è sempre mostrato come tale); descrizione dell&apos;esperienza; dichiarazione di veridicità dell&apos;esperienza personale e di assenza di dati personali di terzi.</p>
         <h2>Classifiche: il metodo</h2>
-        <p>Le classifiche ordinano le schede per <code>PC = (n · M + m · C) / (n + m)</code>, dove M è la media della scheda, n il numero di recensioni, C la media della categoria e m la soglia minima (m = {s?.minReviews ?? 3}). Con poche recensioni il punteggio resta vicino alla media della categoria: una singola valutazione massima non conquista il primo posto. Le schede sotto soglia restano consultabili ma sono segnalate come &quot;dati insufficienti&quot;. I punteggi di categorie diverse non sono direttamente confrontabili.</p>
+        <p>Le classifiche ordinano le schede per <code>PC = (n · M + m · C) / (n + m)</code>, dove M è la media della scheda, n il numero di indagini, C la media della categoria e m la soglia minima (m = {s?.minReviews ?? 3}). Con poche indagini il punteggio resta vicino alla media della categoria: una singola valutazione massima non conquista il primo posto. Le schede sotto soglia restano consultabili ma sono segnalate come &quot;dati insufficienti&quot;. I punteggi di categorie diverse non sono direttamente confrontabili.</p>
         <h2>Cosa non facciamo</h2>
         <ul>
           <li>Nessun annuncio di immobili in vendita o affitto;</li>
           <li>Nessun appuntamento, prenotazione o messaggistica tra utenti;</li>
-          <li>Nessun servizio a pagamento: la <a href="#/premium">Membership Premium</a> non si compra, si guadagna contribuendo con recensioni;</li>
+          <li>Nessun servizio a pagamento: la <a href="#/premium">Membership Premium</a> non si compra, si guadagna contribuendo con indagini della community;</li>
           <li>Nessuna vendita di posizioni: la pubblicità, quando attiva, non influenza punteggi, medie né ordine dei risultati.</li>
         </ul>
         <h2>Modera, segnala, contesta</h2>
-        <p>Ogni recensione ha un pulsante &quot;Segnala&quot; (per utenti autenticati) e ogni scheda permette di contestare l&apos;associazione a una persona o attività. Il flusso completo — stati, tempi, decisioni, appello — è descritto nella pagina <a href="#/moderazione">Moderazione e contestazioni</a>.</p>
+        <p>Ogni indagine ha un pulsante &quot;Segnala&quot; (per utenti autenticati) e ogni scheda permette di contestare l&apos;associazione a una persona o attività. Il flusso completo — stati, tempi, decisioni, appello — è descritto nella pagina <a href="#/moderazione">Moderazione e contestazioni</a>.</p>
         <h2>Sicurezza e privacy: impostazione onesta</h2>
-        <p>L&apos;area amministrativa è separata dal sito pubblico, richiede autenticazione con 2FA obbligatoria e registra ogni azione in un log riservato. Le password sono conservate solo come hash con algoritmo adatto (scrypt con sale per utente). I dati dei recensori (email, identità) non vengono mai mostrati pubblicamente: le recensioni mostrano solo lo pseudonimo scelto. Tutte le regole di accesso sono applicate dal server, con protezioni CSRF/XSS/injection, rate limiting e backup dichiarati nella documentazione operativa. Nessun sistema è immune da attacchi: documentiamo le misure adottate e le verifiche ancora necessarie.</p>
+        <p>L&apos;area amministrativa è separata dal sito pubblico, richiede autenticazione con 2FA obbligatoria e registra ogni azione in un log riservato. Le password sono conservate solo come hash con algoritmo adatto (scrypt con sale per utente). I dati dei recensori (email, identità) non vengono mai mostrati pubblicamente: le indagini mostrano solo lo pseudonimo scelto. Tutte le regole di accesso sono applicate dal server, con protezioni CSRF/XSS/injection, rate limiting e backup dichiarati nella documentazione operativa. Nessun sistema è immune da attacchi: documentiamo le misure adottate e le verifiche ancora necessarie.</p>
       </div></div>
     </>
   );
@@ -345,42 +346,42 @@ export function PremiumView() {
         <div className="section-head" style={{ paddingTop: 22 }}>
           <div>
             <h1>Membership Premium</h1>
-            <p className="sub">Le recensioni integrali si leggono contribuendo: il Premium non si compra, si guadagna.</p>
+            <p className="sub">Le indagini integrali si leggono contribuendo: il Premium non si compra, si guadagna.</p>
           </div>
         </div>
         <Alert kind="ok">
-          <b>In sintesi.</b> Le medie, i punteggi per criterio, i conteggi e le classifiche restano <b>pubblici per tutti</b>, con le ultime tre recensioni di ogni scheda in <b>anteprima offuscata</b>. Con il Premium leggi il <b>testo integrale</b> delle recensioni (punti di forza, criticità, descrizioni, prezzi dichiarati) e <b>voti</b> se le recensioni ti sembrano attendibili. Il Premium si attiva pubblicando una recensione: <b>+{days} giorni per contributo</b>, accumulabili.
+          <b>In sintesi.</b> Le medie, i punteggi per criterio, i conteggi e le classifiche restano <b>pubblici per tutti</b>, con le ultime tre indagini di ogni scheda in <b>anteprima offuscata</b>. Con il Premium leggi il <b>testo integrale</b> delle indagini (punti di forza, criticità, descrizioni, prezzi dichiarati) e <b>voti</b> se le indagini ti sembrano attendibili. Il Premium si attiva pubblicando un&apos;indagine della community: <b>+{days} giorni per contributo</b>, accumulabili.
         </Alert>
         <h2>Come si ottiene</h2>
         <ol>
-          <li>Scrivi una recensione: per <a href="#/recensione">immobili e zone</a> basta l&apos;indirizzo, per le persone serve <a href="#/verifica-esperienza">invito o verifica documentale</a>;</li>
+          <li>Scrivi la tua indagine: per <a href="#/recensione">immobili e zone</a> basta l&apos;indirizzo, per le persone serve <a href="#/verifica-esperienza">invito o verifica documentale</a>;</li>
           <li>Dalla pubblicazione hai {days} giorni di Premium;</li>
           <li>Ogni altro contributo somma giorni, entro un tetto massimo di accumulo.</li>
         </ol>
         <h2>Le foto: si sbloccano contribuendo</h2>
-        <p>Le recensioni possono includere fino a <b>3 foto</b> dell&apos;immobile (ricompresse, con i metadati — posizione EXIF inclusa — rimossi). Le foto sono visibili a chi ha il Premium <b>e a chi ha allegato almeno una foto in una propria recensione</b>: chi contribuisce con la prova visiva accede a quella di tutti. Nessuna foto con persone riconoscibili o documenti: la moderazione rimuove e segnala.</p>
+        <p>Le indagini possono includere fino a <b>3 foto</b> dell&apos;immobile (ricompresse, con i metadati — posizione EXIF inclusa — rimossi). Le foto sono visibili a chi ha il Premium <b>e a chi ha allegato almeno una foto in una propria indagine</b>: chi contribuisce con la prova visiva accede a quella di tutti. Nessuna foto con persone riconoscibili o documenti: la moderazione rimuove e segnala.</p>
         <h2>I voti di utilità: l&apos;effetto community</h2>
-        <p>Con il Premium puoi <b>validare (pollice su)</b> o <b>disconfermare (pollice giù)</b> le recensioni degli altri: un voto per recensione, mai sulla tua. I conteggi sono pubblici: chi consulta vede quali recensioni la community ritiene attendibili. È la risposta collettiva alle recensioni scritte a tavolino.</p>
+        <p>Con il Premium puoi <b>validare (pollice su)</b> o <b>disconfermare (pollice giù)</b> le indagini degli altri: un voto per indagine, mai sulla tua. I conteggi sono pubblici: chi consulta vede quali indagini la community ritiene attendibili. È la risposta collettiva alle indagini scritte a tavolino.</p>
         <p>Lo staff può anche concedere o revocare il Premium con motivazione registrata (per esempio per collaborazione, o come provvedimento). Lo stato e lo storico delle concessioni sono visibili nel <a href="#/profilo">tuo profilo</a> e inclusi nell&apos;<a href="#/profilo-impostazioni">esportazione dei tuoi dati</a>.</p>
         {user?.premium?.active ? (
           <Alert kind="ok"><b>Il tuo Premium è attivo</b>{user.premium.until ? ` fino al ${new Date(user.premium.until).toLocaleDateString("it-IT")}` : ""}. Grazie per il tuo contributo.</Alert>
         ) : null}
         <h2>Perché un incentivo (e i suoi rischi, detti chiari)</h2>
-        <p>Legare un vantaggio alla scrittura di una recensione spinge a contribuire, ma crea anche un rischio evidente: qualcuno potrebbe scrivere recensioni superficiali o inventate solo per ottenere il vantaggio. Non fingiamo che il problema non esista: dichiariamo le contromisure e i loro limiti.</p>
+        <p>Legare un vantaggio alla scrittura di un&apos;indagine spinge a contribuire, ma crea anche un rischio evidente: qualcuno potrebbe scrivere indagini superficiali o inventate solo per ottenere il vantaggio. Non fingiamo che il problema non esista: dichiariamo le contromisure e i loro limiti.</p>
         <h2>Cosa rende la frode difficile qui</h2>
         <ul>
-          <li><b>Due livelli, dichiarati chiaramente.</b> Le recensioni su immobili e zone sono “dichiarate”: nessuna pretesa di verifica, badge distinto, limiti di frequenza per utente. Quelle sulle persone richiedono un&apos;<b>esperienza verificata a monte</b> (invito a uso singolo o documento valutato da un moderatore): falsificare un documento è un reato, oltre che una violazione dei <a href="#/termini">termini</a>;</li>
-          <li><b>Una recensione per esperienza (e per scheda, nella via dichiarativa).</b> Il vincolo è atomico sul database: richieste ripetute o concorrenti non aggirano il limite;</li>
-          <li><b>La community vigila.</b> I Premium votano l&apos;utilità di ogni recensione: quelle scritte solo per il vantaggio emergono (zero conferme, molti disconoscimenti) e si segnalano;</li>
-          <li><b>Revoca immediata del vantaggio.</b> Se la moderazione nasconde una recensione per frode o contenuti illeciti, i giorni di Premium ottenuti con quel contributo vengono <b>revocati automaticamente</b> e la scadenza ricalcolata; nei casi gravi l&apos;account viene sospeso;</li>
+          <li><b>Due livelli, dichiarati chiaramente.</b> Le indagini su immobili e zone sono “dichiarate”: nessuna pretesa di verifica, badge distinto, limiti di frequenza per utente. Quelle sulle persone richiedono un&apos;<b>esperienza verificata a monte</b> (invito a uso singolo o documento valutato da un moderatore): falsificare un documento è un reato, oltre che una violazione dei <a href="#/termini">termini</a>;</li>
+          <li><b>Un&apos;indagine per esperienza (e per scheda, nella via dichiarativa).</b> Il vincolo è atomico sul database: richieste ripetute o concorrenti non aggirano il limite;</li>
+          <li><b>La community vigila.</b> I Premium votano l&apos;utilità di ogni indagine: quelle scritte solo per il vantaggio emergono (zero conferme, molti disconoscimenti) e si segnalano;</li>
+          <li><b>Revoca immediata del vantaggio.</b> Se la moderazione nasconde un&apos;indagine per frode o contenuti illeciti, i giorni di Premium ottenuti con quel contributo vengono <b>revocati automaticamente</b> e la scadenza ricalcolata; nei casi gravi l&apos;account viene sospeso;</li>
           <li><b>Nessun premio per il voto.</b> I giorni si ottengono per il contributo, non per il punteggio assegnato: scrivere 10 o 2 non cambia il vantaggio;</li>
           <li><b>Tetto di accumulo.</b> La scadenza non supera mai il massimo configurato: anche una lunga serie di contributi sospetti non costruisce un vantaggio illimitato;</li>
           <li><b>Tracciatura.</b> Ogni concessione e revoca è registrata nel log di moderazione con motivazione.</li>
         </ul>
         <h2>Limiti dichiarati</h2>
-        <p>Un account duplicato (email diverse, stessa persona) potrebbe teoricamente accumulare più concessioni, e nella via dichiarativa qualcuno può inventare un&apos;esperienza: come per ogni piattaforma, non possiamo escluderlo in assoluto. Gli inviti sono legati all&apos;email del cliente reale, i documenti sono esaminati da un moderatore, le recensioni dichiarate sono visibili come tali e sottoposte ai voti della community: ogni frode ha un costo e lascia tracce; chiunque ne individui una può <a href="#/moderazione">segnalarla</a>. La verifica documentale è un controllo umano, non una prova giudiziaria: dichiariamo riduzione del rischio, non certezza assoluta.</p>
+        <p>Un account duplicato (email diverse, stessa persona) potrebbe teoricamente accumulare più concessioni, e nella via dichiarativa qualcuno può inventare un&apos;esperienza: come per ogni piattaforma, non possiamo escluderlo in assoluto. Gli inviti sono legati all&apos;email del cliente reale, i documenti sono esaminati da un moderatore, le indagini dichiarate sono visibili come tali e sottoposte ai voti della community: ogni frode ha un costo e lascia tracce; chiunque ne individui una può <a href="#/moderazione">segnalarla</a>. La verifica documentale è un controllo umano, non una prova giudiziaria: dichiariamo riduzione del rischio, non certezza assoluta.</p>
         <h2>Privacy</h2>
-        <p>Il Premium è uno stato del tuo account, non un pagamento: non raccogliamo dati di fatturazione né numeri di telefono. Le foto allegate alle recensioni vengono ricompresse e private dei metadati (posizione EXIF inclusa) prima della conservazione, e non sono indicizzate dai motori di ricerca. Le tue concessioni compaiono nella tua area personale, sono incluse nell&apos;esportazione dei dati e vengono eliminate con l&apos;account (diritto all&apos;oblio). Il gating è applicato dal server: al browser non arrivano i testi riservati né le foto per cui non hai titolo, quindi non esistono scorciatoie lato client.</p>
+        <p>Il Premium è uno stato del tuo account, non un pagamento: non raccogliamo dati di fatturazione né numeri di telefono. Le foto allegate alle indagini vengono ricompresse e private dei metadati (posizione EXIF inclusa) prima della conservazione, e non sono indicizzate dai motori di ricerca. Le tue concessioni compaiono nella tua area personale, sono incluse nell&apos;esportazione dei dati e vengono eliminate con l&apos;account (diritto all&apos;oblio). Il gating è applicato dal server: al browser non arrivano i testi riservati né le foto per cui non hai titolo, quindi non esistono scorciatoie lato client.</p>
       </div></div>
     </>
   );

@@ -78,24 +78,24 @@ type EntityPayload = {
 // quando l'utente non ha l'accesso (il server non invia i testi in alcun caso).
 function PremiumLockedBox({ lockedCount, daysPerReview, logged }: { lockedCount: number; daysPerReview: number; logged: boolean }) {
   return (
-    <div className="premium-locked" role="note" aria-label="Recensioni integrali riservate agli utenti Premium">
+    <div className="premium-locked" role="note" aria-label="Indagini integrali riservate agli utenti Premium">
       <div className="premium-locked-head">
         <span className="premium-lock" aria-hidden="true">🔒</span>
         <div>
-          <h3 style={{ margin: 0 }}>{lockedCount > 0 ? `${lockedCount} ${lockedCount === 1 ? "recensione riservata" : "recensioni riservate"}` : "Recensioni riservate"}</h3>
+          <h3 style={{ margin: 0 }}>{lockedCount > 0 ? `${lockedCount} ${lockedCount === 1 ? "indagine riservata" : "indagini riservate"}` : "Indagini riservate"}</h3>
           <p className="small mb0">Medie, criteri e conteggi restano pubblici; qui sotto le ultime tre in <b>anteprima offuscata</b>. Il testo integrale si sblocca con la Membership Premium.</p>
         </div>
       </div>
-      <p className="small mb1">Il Premium non si compra: si guadagna contribuendo. Ogni recensione che pubblichi attiva <b>{daysPerReview} giorni di Premium</b> (accumulabili), che ti lascia leggere tutte le recensioni del sito. Allegiando una foto sblocchi anche le foto degli altri.</p>
+      <p className="small mb1">Il Premium non si compra: si guadagna contribuendo. Ogni indagine che pubblichi attiva <b>{daysPerReview} giorni di Premium</b> (accumulabili), che ti lascia leggere tutte le indagini del sito. Allegiando una foto sblocchi anche le foto degli altri.</p>
       <div className="row">
         {logged ? (
-          <a className="btn btn-primary btn-sm" href="#/recensione">Scrivi una recensione</a>
+          <a className="btn btn-primary btn-sm" href="#/recensione">Scrivi la tua indagine</a>
         ) : (
           <a className="btn btn-primary btn-sm" href="#/accedi">Accedi per iniziare</a>
         )}{" "}
         <a className="btn btn-ghost btn-sm" href="#/premium">Come funziona il Premium</a>
       </div>
-      <p className="small muted mb0">Le tue recensioni restano sempre visibili a te. La moderazione può revocare il Premium ottenuto con contributi fraudolenti.</p>
+      <p className="small muted mb0">Le tue indagini restano sempre visibili a te. La moderazione può revocare il Premium ottenuto con contributi fraudolenti.</p>
     </div>
   );
 }
@@ -121,7 +121,7 @@ function PhotosStrip({ r, canView, hintContribution }: { r: ReviewItem; canView:
       <div className="photo-grid">
         {r.photos.map(p => (
           <a key={p.id} href={`/api/public/photo/${p.id}`} target="_blank" rel="noopener noreferrer" title="Apri la foto in dimensione originale">
-            <img src={`/api/public/photo/${p.id}`} alt="Foto dell'immobile allegata alla recensione" loading="lazy" />
+            <img src={`/api/public/photo/${p.id}`} alt="Foto dell'immobile allegata a un'indagine della community" loading="lazy" />
           </a>
         ))}
       </div>
@@ -135,7 +135,7 @@ function PhotosStrip({ r, canView, hintContribution }: { r: ReviewItem; canView:
           <span>Foto {i + 1}</span>
         </div>
       ))}
-      {hintContribution ? <p className="small muted mb0" style={{ gridColumn: "1 / -1" }}>Le foto si sbloccano con la Membership Premium oppure allegando una foto a una tua recensione.</p> : null}
+      {hintContribution ? <p className="small muted mb0" style={{ gridColumn: "1 / -1" }}>Le foto si sbloccano con la Membership Premium oppure allegando una foto a una tua indagine.</p> : null}
     </div>
   );
 }
@@ -158,12 +158,12 @@ function VoteBar({ r, canVote, enabled }: { r: ReviewItem; canVote: boolean; ena
       <span className="small muted">Ti risulta attendibile?</span>
       <button type="button" className={`vote-btn up${v.mine === 1 ? " on" : ""}`} disabled={!canVote || busy}
         onClick={() => void vote(1)}
-        title={canVote ? "Confermi la plausibilità di questa recensione" : "Il voto è riservato agli utenti Premium: si ottiene pubblicando una recensione"}
-        aria-label="Pollice su: recensione attendibile">👍 <span className="vote-n">{v.up}</span></button>
+        title={canVote ? "Confermi la plausibilità di questa indagine" : "Il voto è riservato agli utenti Premium: si ottiene pubblicando un'indagine"}
+        aria-label="Pollice su: indagine attendibile">👍 <span className="vote-n">{v.up}</span></button>
       <button type="button" className={`vote-btn down${v.mine === -1 ? " on" : ""}`} disabled={!canVote || busy}
         onClick={() => void vote(-1)}
-        title={canVote ? "Questa recensione non ti torna: esprimi il disconoscimento" : "Il voto è riservato agli utenti Premium: si ottiene pubblicando una recensione"}
-        aria-label="Pollice giù: recensione non confermata">👎 <span className="vote-n">{v.down}</span></button>
+        title={canVote ? "Questa indagine non ti torna: esprimi il disconoscimento" : "Il voto è riservato agli utenti Premium: si ottiene pubblicando un'indagine"}
+        aria-label="Pollice giù: indagine non confermata">👎 <span className="vote-n">{v.down}</span></button>
       {!canVote ? <span className="small muted">{user ? "votano gli utenti Premium" : <a href="#/accedi">accedi per votare</a>}</span> : null}
     </div>
   );
@@ -199,12 +199,12 @@ function AuthorIdentity({ r }: { r: ReviewItem }) {
       <div>
         {signed ? <b>{r.author}</b> : <b>{label}</b>}{" "}
         {!signed ? (
-          <span className="pill pill-gray" title="Per privacy sulla recensione compare solo la categoria dell'autore: né pseudonimo né foto, a meno che non li abbia autorizzati lui stesso per questa recensione.">Anonima</span>
+          <span className="pill pill-gray" title="Per privacy sull'indagine compare solo la categoria dell'autore: né pseudonimo né foto, a meno che non li abbia autorizzati lui stesso per questa indagine.">Anonima</span>
         ) : null}
-        {r.mine ? <span className="pill pill-blue" title="Una delle tue recensioni: per te è sempre riconoscibile.">La tua</span> : null}
+        {r.mine ? <span className="pill pill-blue" title="Una delle tue indagini: per te è sempre riconoscibile.">La tua</span> : null}
         {r.verified
           ? <VerifBadge />
-          : <span className="pill pill-amber" title="Recensione scritta senza invito: l'esperienza è dichiarata dall'autore, soggetta a moderazione">Dichiarata</span>}
+          : <span className="pill pill-amber" title="Indagine scritta senza invito: l'esperienza è dichiarata dall'autore, soggetta a moderazione">Dichiarata</span>}
         <div className="review-meta">
           Pubblicata: {fmtMonthYear(r.createdAt)}{r.updatedAt ? ` · aggiornata ${fmtMonthYear(r.updatedAt)}` : ""}
         </div>
@@ -323,7 +323,7 @@ export function EntityView({ id }: { id: string }) {
               </div>
               <div>
                 <div><Stars score={st.mean} size={24} /></div>
-                <div className="score-n">{st.n === 1 ? "1 recensione" : `${st.n} recensioni`}</div>
+                <div className="score-n">{st.n === 1 ? "1 indagine" : `${st.n} indagini`}</div>
                 {st.n > 0 && !st.sufficient ? <div className="mt1">{insuffChip(st.n)} la media non è ancora statisticamente solida</div> : null}
               </div>
               {ent.priceStats ? (
@@ -341,12 +341,12 @@ export function EntityView({ id }: { id: string }) {
                 <CriteriaBars criteria={cat.criteria} stats={st} />
               </>
             ) : (
-              <Alert kind="info">Ancora nessuna recensione: questa scheda non ha medie o classifiche. {cat.isPerson ? "" : "Puoi essere il primo a scrivere la tua."}</Alert>
+              <Alert kind="info">Ancora nessuna indagine: questa scheda non ha medie o classifiche. {cat.isPerson ? "" : "Puoi essere il primo a contribuire."}</Alert>
             )}
             <MethodNoteBox />
             <AdSlot position="scheda-mid" />
             <div className="section-head mt3">
-              <h2>Recensioni</h2>
+              <h2>{cat.isPerson ? "Recensioni verificate" : "Indagini della community"}</h2>
               <span className="pill pill-gray">
                 {data.premium.locked ? data.publishedCount : data.reviews.length} pubblicate{data.hiddenCount ? ` · ${data.hiddenCount} nascoste dalla moderazione` : ""}
               </span>
@@ -356,23 +356,23 @@ export function EntityView({ id }: { id: string }) {
             ) : null}
             {data.premium.locked && data.teasers.length ? (
               <div className="grid">
-                <p className="small muted" style={{ marginTop: 10 }}>Anteprima: ultime {data.teasers.length} recensioni, testo offuscato. Il resto è riservato.</p>
+                <p className="small muted" style={{ marginTop: 10 }}>Anteprima: ultime {data.teasers.length} indagini, testo offuscato. Il resto è riservato.</p>
                 {data.teasers.map(r => <ReviewCard key={r.id} r={r} photos={data.photos} votes={data.votes} />)}
               </div>
             ) : null}
             <div className="grid">
               {data.premium.locked && data.reviews.length ? (
-                <p className="small muted" style={{ marginTop: 10 }}>Queste sono le tue recensioni su questa scheda (sempre visibili a te):</p>
+                <p className="small muted" style={{ marginTop: 10 }}>Queste sono le tue indagini su questa scheda (sempre visibili a te):</p>
               ) : null}
               {data.reviews.map(r => (
                 <ReviewCard key={r.id} r={r} photos={data.photos} votes={data.votes} onReport={setReportFor} />
               ))}
               {!data.reviews.length && !data.teasers.length ? (
-                <p className="small muted">{cat.isPerson ? "Nessuna recensione pubblica al momento." : "Nessuna recensione: quella giusta potrebbe essere la tua."}</p>
+                <p className="small muted">{cat.isPerson ? "Nessuna recensione pubblica al momento." : "Nessuna indagine: quella giusta potrebbe essere la tua."}</p>
               ) : null}
               {data.hiddenCount ? (
                 <div className="hidden-note">
-                  {data.hiddenCount} {data.hiddenCount === 1 ? "recensione è stata nascosta" : "recensioni sono state nascoste"} dopo una decisione di moderazione documentata (vedi <a href="#/moderazione">criteri e appello</a>).
+                  {data.hiddenCount} {data.hiddenCount === 1 ? "indagine è stata nascosta" : "indagini sono state nascoste"} dopo una decisione di moderazione documentata (vedi <a href="#/moderazione">criteri e appello</a>).
                 </div>
               ) : null}
             </div>
@@ -388,18 +388,18 @@ export function EntityView({ id }: { id: string }) {
               ) : (
                 <>
                   <h3 style={{ marginTop: 0 }}>Hai vissuto questo posto?</h3>
-                  <p className="small">Per immobili e zone <b>non serve nessun invito</b>: dichiara la tua esperienza e pubblica. Ogni recensione vale <b>{boot.settings.premiumDaysPerReview} giorni di Premium</b>; con una foto alleghi anche la prova e sblocchi le foto di tutti.</p>
-                  <a className="btn btn-primary btn-block" href={`#/recensione?entity=${ent.id}`}>Scrivi una recensione</a>
+                  <p className="small">Per immobili e zone <b>non serve nessun invito</b>: dichiara la tua esperienza e pubblica. Ogni indagine vale <b>{boot.settings.premiumDaysPerReview} giorni di Premium</b>; con una foto alleghi anche la prova e sblocchi le foto di tutti.</p>
+                  <a className="btn btn-primary btn-block" href={`#/recensione?entity=${ent.id}`}>Scrivi la tua indagine</a>
                   {ent.categoryId === "immobile" ? <p className="small muted mt1 mb0" style={{ textAlign: "center" }}>oppure <a href="#/recensione">cerca / aggiungi un altro immobile</a></p> : null}
                 </>
               )}
-              <p className="small muted mt2 mb0">Una sola recensione per esperienza; aggiornabile con rettifica motivata entro {boot.settings.rettificaDays} giorni.</p>
+              <p className="small muted mt2 mb0">Una sola indagine per esperienza; aggiornabile con rettifica motivata entro {boot.settings.rettificaDays} giorni.</p>
             </div>
             <div className="card mb2">
               <h3 style={{ marginTop: 0 }}>Problemi con la scheda?</h3>
               <p className="small mb1">Errori di associazione, contenuti illeciti o dati personali non autorizzati si possono segnalare o contestare: ogni richiesta è tracciata.</p>
               <button className="btn btn-ghost btn-block mb1" onClick={() => setDisputeOpen(true)}>Contesta l&apos;associazione</button>
-              <p className="small muted mb0">Le recensioni si segnalano dal pulsante &quot;Segnala&quot; presente su ciascuna (serve un account). <a href="#/moderazione">Come funziona la moderazione</a>.</p>
+              <p className="small muted mb0">Le indagini si segnalano dal pulsante &quot;Segnala&quot; presente su ciascuna (serve un account). <a href="#/moderazione">Come funziona la moderazione</a>.</p>
             </div>
             {cat.isMapped && ent.geo ? (
               <div className="card">
@@ -433,9 +433,9 @@ export function ReportModal({ reviewId, onClose, onDone }: { reviewId: string; o
     { id: "altro", label: "Altro (specificare nei dettagli)" },
   ];
   return (
-    <Modal label="Segnala la recensione" onClose={onClose}>
+    <Modal label="Segnala l'indagine" onClose={onClose}>
       <div className="modal-head">
-        <h2>Segnala la recensione</h2>
+        <h2>Segnala l'indagine</h2>
         <button className="modal-close" onClick={onClose} aria-label="Chiudi">×</button>
       </div>
       <form onSubmit={async e => {
@@ -570,11 +570,11 @@ export function ZoneView({ entityId }: { entityId: string }) {
               </div>
               <div>
                 <div><Stars score={st.mean} size={22} /></div>
-                <div className="score-n">{st.n} recensioni della zona</div>
+                <div className="score-n">{st.n} indagini della zona</div>
                 {st.n > 0 && !st.sufficient ? <div className="mt1">{insuffChip(st.n)}</div> : null}
               </div>
             </div>
-            {st.n > 0 ? <CriteriaBars criteria={cat.criteria} stats={st} /> : <Alert kind="info">Nessuna recensione diretta della zona, ma le schede sottostanti hanno dati aggregati.</Alert>}
+            {st.n > 0 ? <CriteriaBars criteria={cat.criteria} stats={st} /> : <Alert kind="info">Nessuna indagine diretta della zona, ma le schede sottostanti hanno dati aggregati.</Alert>}
             <div className="section-head mt3"><h2>Migliori 3 per categoria in questa zona</h2></div>
             <div className="row mb2">
               <button className={`chip chip-filter${!filterCat ? " on" : ""}`} onClick={() => setFilterCat("")}>Tutte</button>
@@ -605,9 +605,9 @@ export function ZoneView({ entityId }: { entityId: string }) {
                 </div>
               );
             })}
-            {!sum.length ? <Alert kind="info">Nessun soggetto con recensioni in questa zona{filterCat ? " per la categoria selezionata" : ""}.</Alert> : null}
+            {!sum.length ? <Alert kind="info">Nessun soggetto con indagini in questa zona{filterCat ? " per la categoria selezionata" : ""}.</Alert> : null}
             <MethodNoteBox />
-            <div className="section-head mt3"><h2>Recensioni della zona</h2></div>
+            <div className="section-head mt3"><h2>Indagini della zona</h2></div>
             {data.premium.locked ? (
               <>
                 <PremiumLockedBox lockedCount={data.premium.lockedCount} daysPerReview={data.premium.daysPerReview} logged={!!user} />
@@ -623,8 +623,8 @@ export function ZoneView({ entityId }: { entityId: string }) {
               </div>
             )}
             <div className="mt2">
-              <a className="btn btn-ghost" href={`#/scheda/${entityId}`}>Tutte le recensioni e i criteri della zona</a>{" "}
-              <a className="btn btn-primary" href={`#/recensione?entity=${entityId}`}>Recensisci questa zona</a>
+              <a className="btn btn-ghost" href={`#/scheda/${entityId}`}>Tutte le indagini e i criteri della zona</a>{" "}
+              <a className="btn btn-primary" href={`#/recensione?entity=${entityId}`}>Indaga questa zona</a>
             </div>
           </div>
           <aside>
@@ -635,7 +635,7 @@ export function ZoneView({ entityId }: { entityId: string }) {
             <div className="card">
               <h3 style={{ marginTop: 0 }}>Dati aggregati, privacy tutelata</h3>
               <p className="small mb1">Le valutazioni di zona sono mostrate solo in forma aggregata: medie, conteggi e classifiche.</p>
-              <p className="small mb0">Dalla mappa e dai riepiloghi non è possibile risalire a chi ha scritto una recensione né a quando è stata scritta. Le persone fisiche non compaiono sulle mappe pubbliche. Se i dati sono troppo pochi, gli aggregati vengono soppressi.</p>
+              <p className="small mb0">Dalla mappa e dai riepiloghi non è possibile risalire a chi ha contribuito a un'indagine né a quando è stata scritta. Le persone fisiche non compaiono sulle mappe pubbliche. Se i dati sono troppo pochi, gli aggregati vengono soppressi.</p>
             </div>
           </aside>
         </div>

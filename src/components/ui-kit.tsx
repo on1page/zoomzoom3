@@ -29,7 +29,7 @@ export function Stars({ score, size = 17 }: { score: number | null; size?: numbe
   const pct = (stars5 / 5) * 100;
   const clipId = `sc${++starSeq}`;
   const label = score == null
-    ? "nessuna recensione"
+    ? "nessuna indagine"
     : `${fmt1(stars5).replace(/,0$/, "")} stelle su 5 (punteggio ${fmt1(score)} su 10)`;
   const row = Array.from({ length: 5 }, (_, i) => (
     <path key={i} d={starPathD(size / 2 + i * (size + gap), size / 2, R)} />
@@ -67,7 +67,7 @@ export const DemoChip = () => (
   <span className="badge-demo" title="Contenuto generato per la demo: non corrisponde a persone o fatti reali.">Dato fittizio</span>
 );
 export const insuffChip = (n: number) => (
-  <span className="badge-insuff" title="Media calcolata su poche recensioni: non è statisticamente solida.">Dati insufficienti ({n})</span>
+  <span className="badge-insuff" title="Media calcolata su poche indagini: non è statisticamente solida.">Dati insufficienti ({n})</span>
 );
 
 /* ---------- Punteggio ---------- */
@@ -78,7 +78,7 @@ export function ScoreLine({ stats, size = 17 }: { stats: { n: number; mean: numb
       {stats.mean != null
         ? <span className="score-num">{fmt1(stats.mean)}<small>/10</small></span>
         : <span className="score-num">— <small>/10</small></span>}
-      <span className="score-n">{stats.n === 1 ? "1 recensione" : `${stats.n} recensioni`}</span>
+      <span className="score-n">{stats.n === 1 ? "1 indagine" : `${stats.n} indagini`}</span>
       {stats.n > 0 && !stats.sufficient && insuffChip(stats.n)}
     </div>
   );
@@ -149,7 +149,7 @@ export function MethodNoteBox() {
     <div className="method-box">
       <h3>Come ordiniamo gli elenchi e le classifiche</h3>
       <p className="mb0">
-        Le classifiche usano una <strong>media ponderata</strong>: al punteggio medio viene applicato un peso verso la media della categoria finché una scheda non raggiunge almeno <strong>{min} recensioni</strong>. Così una singola recensione massima non basta a conquistare il primo posto, e le schede con pochi dati vengono segnalate come non sufficienti. <a href="#/come-funziona">Dettagli e formula</a>.
+        Le classifiche usano una <strong>media ponderata</strong>: al punteggio medio viene applicato un peso verso la media della categoria finché una scheda non raggiunge almeno <strong>{min} indagini</strong>. Così una singola indagine massima non basta a conquistare il primo posto, e le schede con pochi dati vengono segnalate come non sufficienti. <a href="#/come-funziona">Dettagli e formula</a>.
       </p>
     </div>
   );

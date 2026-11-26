@@ -61,8 +61,8 @@ export function SearchView() {
     <div className="container">
       <div className="section-head" style={{ paddingTop: 26 }}>
         <div>
-          <h1>Cerca schede e recensioni</h1>
-          <p className="sub">Immobili, professionisti, agenzie e soggetti recensibili. La consultazione è libera: non serve un account.</p>
+          <h1>Cerca schede e indagini</h1>
+          <p className="sub">Immobili, professionisti, agenzie e soggetti della casa. La consultazione è libera: non serve un account.</p>
         </div>
         {boot.site.openReviewsEnabled ? (
           <a className="btn btn-primary btn-sm" href="#/recensione">Non c&apos;è? Aggiungilo tu</a>
@@ -70,7 +70,7 @@ export function SearchView() {
       </div>
       {rows && !rows.length ? (
         <Alert kind="info">
-          Nessun risultato. Se l&apos;immobile che cerchi non è ancora qui, puoi <a href="#/recensione"><b>aggiungerlo tu dall&apos;indirizzo</b></a> e scrivere la prima recensione: niente catalogo vuoto, il primo mattone lo porti tu (con {boot.settings.premiumDaysPerReview} giorni di Premium).
+          Nessun risultato. Se l&apos;immobile che cerchi non è ancora qui, puoi <a href="#/recensione"><b>aggiungerlo tu dall&apos;indirizzo</b></a> e avviare la prima indagine della community: niente catalogo vuoto, il primo mattone lo porti tu (con {boot.settings.premiumDaysPerReview} giorni di Premium).
         </Alert>
       ) : null}
       <div className="grid grid-side">
@@ -122,14 +122,14 @@ export function SearchView() {
           </fieldset>
           <label className="checkline mb2">
             <input type="checkbox" checked={form.suff} onChange={e => setForm(f => ({ ...f, suff: e.target.checked }))} />
-            <span>Mostra solo schede con dati sufficienti (≥ {boot.settings.minReviews} recensioni)</span>
+            <span>Mostra solo schede con dati sufficienti (≥ {boot.settings.minReviews} indagini)</span>
           </label>
           <div className="field">
             <label htmlFor="so">Ordina per</label>
             <select id="so" value={form.ord} onChange={e => setForm(f => ({ ...f, ord: e.target.value }))}>
               <option value="rilevanza">Rilevanza (media ponderata)</option>
               <option value="punteggio">Punteggio medio</option>
-              <option value="recensioni">Numero di recensioni</option>
+              <option value="recensioni">Numero di indagini</option>
               <option value="nome">Nome</option>
             </select>
           </div>

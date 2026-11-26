@@ -100,8 +100,8 @@ export function WriteReviewOpenView({ presetEntityId }: { presetEntityId?: strin
   if (!user) {
     return (
       <div className="container section" style={{ maxWidth: 640 }}>
-        <h1>Scrivi una recensione</h1>
-        <Alert kind="info">Serve <a href="#/accedi">accedere</a> o <a href="#/registrati">creare un account</a> (email verificata e pseudonimo). Ogni recensione pubblicata attiva la <b>Membership Premium</b> ({boot.settings.premiumDaysPerReview} giorni).</Alert>
+        <h1>Scrivi la tua indagine</h1>
+        <Alert kind="info">Serve <a href="#/accedi">accedere</a> o <a href="#/registrati">creare un account</a> (email verificata e pseudonimo). Ogni indagine pubblicata attiva la <b>Membership Premium</b> ({boot.settings.premiumDaysPerReview} giorni).</Alert>
       </div>
     );
   }
@@ -123,14 +123,14 @@ export function WriteReviewOpenView({ presetEntityId }: { presetEntityId?: strin
       <div className="container section" style={{ maxWidth: 640 }}>
         <Alert kind="warn">
           <h1 style={{ margin: "0 0 8px", fontSize: "1.3rem" }}>Contributo aperto sospeso</h1>
-          Le recensioni aperte sono temporaneamente disattivate: usa l&apos;invito ricevuto per email oppure la <a href="#/verifica-esperienza">verifica documentale</a>.
+          Le indagini aperte sono temporaneamente disattivate: usa l&apos;invito ricevuto per email oppure la <a href="#/verifica-esperienza">verifica documentale</a>.
         </Alert>
       </div>
     );
   }
 
   // stepper: etichette e posizione corrente in base al percorso scelto
-  const labels = target === "altro" ? ["Soggetto", "Ricerca", "Recensione"] : ["Soggetto", "Luogo", "Scheda", "Recensione"];
+  const labels = target === "altro" ? ["Soggetto", "Ricerca", "Indagine"] : ["Soggetto", "Luogo", "Scheda", "Indagine"];
   const curIdx = step === "target" ? 0 : step === "place" ? 1 : step === "confirm" ? 2 : target === "altro" ? 2 : 3;
   const jump = (i: number) => {
     if (i >= curIdx) return;
@@ -170,8 +170,8 @@ export function WriteReviewOpenView({ presetEntityId }: { presetEntityId?: strin
           schedaNote={schedaNote}
           onBack={() => { setSel(null); setStep(target === "altro" ? "place" : "place"); }}
           onDone={async (entityId, premiumDays) => {
-            if (premiumDays > 0) toast(`Recensione pubblicata: Premium attivo per ${premiumDays} giorni.`);
-            else toast("Recensione pubblicata: grazie.");
+            if (premiumDays > 0) toast(`Indagine pubblicata: Premium attivo per ${premiumDays} giorni.`);
+            else toast("Indagine pubblicata: grazie.");
             await refreshBoot();
             navigate(`#/scheda/${entityId}`);
           }}
@@ -215,9 +215,9 @@ function TargetStep({ onPick }: { onPick: (t: Target) => void }) {
     <div className="container" style={{ maxWidth: 860, paddingTop: 26 }}>
       <div className="section-head">
         <div>
-          <h1 style={{ margin: 0 }}>Scrivi una recensione</h1>
+          <h1 style={{ margin: 0 }}>Scrivi la tua indagine</h1>
           <p className="sub" style={{ margin: "6px 0 0" }}>
-            <span className="pill pill-green" title={`Ogni recensione pubblicata attiva la Membership Premium: lettura integrale delle recensioni di tutte le schede per ${boot?.settings.premiumDaysPerReview} giorni. Il premio è per il contributo, non per il voto.`}>
+            <span className="pill pill-green" title={`Ogni indagine pubblicata attiva la Membership Premium: lettura integrale delle indagini di tutte le schede per ${boot?.settings.premiumDaysPerReview} giorni. Il premio è per il contributo, non per il voto.`}>
               Premium +{boot?.settings.premiumDaysPerReview} gg
             </span>{" "}
             <span className="pill pill-gray" title="Racconti un'esperienza personale, sotto pseudonimo. Segnalazioni e moderazione attive.">Pseudonimo</span>
@@ -228,7 +228,7 @@ function TargetStep({ onPick }: { onPick: (t: Target) => void }) {
       {gated ? (
         <Alert kind="warn">
           <span className="pill pill-amber" style={{ marginRight: 8 }}>Email da confermare</span>
-          Conferma l&apos;indirizzo dal <a href="#/profilo">collegamento ricevuto via email</a> prima di scrivere: la recensione si pubblica solo con email verificata.
+          Conferma l&apos;indirizzo dal <a href="#/profilo">collegamento ricevuto via email</a> prima di scrivere: l&apos;indagine si pubblica solo con email verificata.
         </Alert>
       ) : null}
 
@@ -493,7 +493,7 @@ function PlaceStep({ target, onBack, onInternal, onDraft }: {
                         {cat?.isPerson ? <span className="pill pill-amber">Verifica richiesta</span> : null}
                         {r.n > 0
                           ? <span className="small" style={{ whiteSpace: "nowrap" }}><Stars score={r.mean} size={12} /> {fmt1(r.mean ?? 0)}/10 · {r.n}</span>
-                          : <span className="pill pill-green">Prima recensione</span>}
+                          : <span className="pill pill-green">Prima indagine</span>}
                       </span>
                     </button>
                   );
@@ -502,7 +502,7 @@ function PlaceStep({ target, onBack, onInternal, onDraft }: {
             </>
           ) : internal && !internal.length && !noQuery ? (
             <Alert kind="info">
-              Nessuna scheda{q.trim() ? ` per “${q.trim()}”` : ""}: {target === "altro" ? "proponila qui sotto." : "cerca il luogo sulla mappa qui sotto e la scheda nasce con la tua recensione."}
+              Nessuna scheda{q.trim() ? ` per “${q.trim()}”` : ""}: {target === "altro" ? "proponila qui sotto." : "cerca il luogo sulla mappa qui sotto e la scheda nasce con la tua indagine."}
             </Alert>
           ) : null}
 
@@ -586,7 +586,7 @@ function SubjectProposal() {
       <div className="card mt3">
         <p className="mb1"><span className="pill pill-amber">In revisione allo staff</span></p>
         <p className="small mb1">Proposta inviata: <b>{name}</b>. Riceverai l&apos;esito via email{boot?.site.emailDelivery === "demo" ? " (casella demo)" : ""}.</p>
-        <p className="small muted mb0">Alla approvazione la scheda nasce nel catalogo e potrai scriverle la recensione.</p>
+        <p className="small muted mb0">Alla approvazione la scheda nasce nel catalogo e potrai scriverle la tua indagine.</p>
         <div className="row mt2">
           <a className="btn btn-primary btn-sm" href="#/cerca">Torna alla ricerca</a>
           <a className="btn btn-ghost btn-sm" href="#/profilo">Le mie proposte</a>
@@ -751,7 +751,7 @@ function ConfirmStep({ target, draft, setDraft, onBack, onReady }: {
           <p className="sub" style={{ margin: "6px 0 0" }}>
             {isImmobile
               ? <>Serve <span className="pill pill-green">città</span>, <span className="pill pill-green">via</span> e <span className="pill pill-green">civico</span>: il resto è facoltativo.</>
-              : <>Serve la <span className="pill pill-green">località</span>: il resto arriva con la recensione.</>}
+              : <>Serve la <span className="pill pill-green">località</span>: il resto arriva con l&apos;indagine.</>}
           </p>
         </div>
         <button className="btn btn-ghost btn-sm" onClick={onBack}>← Cambia luogo</button>
@@ -864,7 +864,7 @@ function ConfirmStep({ target, draft, setDraft, onBack, onReady }: {
                   />
                 </div>
               )}
-              <span className="pill pill-gray" title="Lascia vuoto per la scheda dell'edificio: nei condomini l'interno crea una scheda per unità, ognuna con le sue recensioni.">Facoltativo</span>
+              <span className="pill pill-gray" title="Lascia vuoto per la scheda dell'edificio: nei condomini l'interno crea una scheda per unità, ognuna con le sue indagini.">Facoltativo</span>
             </div>
           ) : null}
 
@@ -1011,20 +1011,20 @@ function ReviewStep({ sel, schedaNote, onBack, onDone }: {
   const canSend = okText && okPros && okHonesty && okPrice && !!kind && !busy;
 
   if (dup === "loading") {
-    return <div className="container section" style={{ maxWidth: 760 }}><p className="muted">Controllo le tue recensioni…</p></div>;
+    return <div className="container section" style={{ maxWidth: 760 }}><p className="muted">Controllo le tue indagini…</p></div>;
   }
 
   if (dup === "mine") {
     return (
       <div className="container section" style={{ maxWidth: 640 }}>
-        <h1>Recensione già scritta</h1>
+        <h1>Indagine già scritta</h1>
         <Alert kind="info">
           <span className="pill pill-amber" style={{ marginRight: 8 }}>Una per scheda</span>
-          Su <b>{sel.name}</b> c&apos;è già la tua recensione: ogni scheda accetta una recensione per utente. Puoi aggiornarla con una <b>rettifica motivata</b> (entro {boot.settings.rettificaDays} giorni dalla pubblicazione o dall&apos;ultimo aggiornamento).
+          Su <b>{sel.name}</b> c&apos;è già la tua indagine: ogni scheda accetta un&apos;indagine per utente. Puoi aggiornarla con una <b>rettifica motivata</b> (entro {boot.settings.rettificaDays} giorni dalla pubblicazione o dall&apos;ultimo aggiornamento).
         </Alert>
         <div className="row mt2">
           <a className="btn btn-primary" href={`#/scheda/${sel.id}`}>Vai alla scheda e rettifica</a>
-          <a className="btn btn-ghost" href="#/profilo">Le mie recensioni</a>
+          <a className="btn btn-ghost" href="#/profilo">Le mie indagini</a>
         </div>
       </div>
     );
@@ -1050,14 +1050,14 @@ function ReviewStep({ sel, schedaNote, onBack, onDone }: {
     <div className="container" style={{ maxWidth: 760, paddingTop: 18, paddingBottom: 30 }}>
       <div className="section-head">
         <div>
-          <h1 style={{ margin: 0 }}>La recensione</h1>
+          <h1 style={{ margin: 0 }}>L&apos;indagine</h1>
           <p className="sub" style={{ margin: "6px 0 0", display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
             <ChipCat cat={cat} href={false} /> <b>{sel.name}</b>
             {schedaNote?.created ? <span className="pill pill-green" title="La scheda è nata adesso, con i dati che hai confermato.">Nuova scheda</span> : null}
             {schedaNote?.reused ? <span className="pill pill-blue" title="Stai usando una scheda già presente nel catalogo.">Scheda esistente</span> : null}
-            <span className="pill pill-gray" title="Senza invito o verifica documentale la recensione è marcata «esperienza dichiarata». Puoi verificarla in ogni momento successivo.">Dichiarata</span>
+            <span className="pill pill-gray" title="Senza invito o verifica documentale l&apos;indagine è marcata «esperienza dichiarata». Puoi verificarla in ogni momento successivo.">Dichiarata</span>
             {boot.site.premiumEnabled ? (
-              <span className="pill pill-green" title={`Pubblicando ottieni ${boot.settings.premiumDaysPerReview} giorni di Membership Premium: lettura integrale delle recensioni di tutte le schede. Il premio è per il contributo, non per il voto.`}>
+              <span className="pill pill-green" title={`Pubblicando ottieni ${boot.settings.premiumDaysPerReview} giorni di Membership Premium: lettura integrale delle indagini di tutte le schede. Il premio è per il contributo, non per il voto.`}>
                 Premium +{boot.settings.premiumDaysPerReview} gg
               </span>
             ) : null}
@@ -1076,7 +1076,7 @@ function ReviewStep({ sel, schedaNote, onBack, onDone }: {
           });
           setBusy(false);
           if (res.ok) {
-            if (res.photos && res.photos.skipped > 0) toast(`${res.photos.skipped} ${res.photos.skipped === 1 ? "foto non valida è stata" : "foto non valide sono state"} scartata/e: la recensione è comunque pubblicata.`, "err");
+            if (res.photos && res.photos.skipped > 0) toast(`${res.photos.skipped} ${res.photos.skipped === 1 ? "foto non valida è stata" : "foto non valide sono state"} scartata/e: l&apos;indagine è comunque pubblicata.`, "err");
             await onDone(res.entityId, res.premium?.grantedDays || 0);
           } else setErr(res.error);
         }}>
@@ -1088,7 +1088,7 @@ function ReviewStep({ sel, schedaNote, onBack, onDone }: {
           </div>
           <ReviewFields cat={cat} form={form} setForm={setForm} />
           <PhotoInput photos={photos} onChange={setPhotos} enabled={!!boot.site.photosEnabled} />
-          <label className="checkline mb2" title="Di default sulla recensione compare solo la tua categoria di appartenenza (es. «Affittuario»): né nome né foto. Attiva qui soltanto se vuoi firmarla anche con pseudonimo e foto profilo, per questa sola recensione.">
+          <label className="checkline mb2" title="Di default sull&apos;indagine compare solo la tua categoria di appartenenza (es. «Affittuario»): né nome né foto. Attiva qui soltanto se vuoi firmarla anche con pseudonimo e foto profilo, per questa sola indagine.">
             <input type="checkbox" checked={form.showIdentity} onChange={e => setForm(f => ({ ...f, showIdentity: e.target.checked }))} />
             <span>Firma anche con pseudonimo e foto <span className="muted">(facoltativo: di default compare solo la tua categoria)</span></span>
           </label>
@@ -1106,8 +1106,8 @@ function ReviewStep({ sel, schedaNote, onBack, onDone }: {
             <span
               className={`zz-count ${form.showIdentity ? "" : "ok"}`}
               title={form.showIdentity
-                ? "La recensione sarà firmata con pseudonimo e foto profilo."
-                : "Sulla recensione compare solo la tua categoria: né pseudonimo né foto."}
+                ? "L&apos;indagine sarà firmata con pseudonimo e foto profilo."
+                : "Sull&apos;indagine compare solo la tua categoria: né pseudonimo né foto."}
             >
               {form.showIdentity ? "Con firma" : "Anonima"}
             </span>
@@ -1119,7 +1119,7 @@ function ReviewStep({ sel, schedaNote, onBack, onDone }: {
             className="btn btn-primary btn-block" type="submit" disabled={!canSend}
             title={!canSend ? "Completa i requisiti segnati in ambra qui sopra (il server applica le stesse regole)." : undefined}
           >
-            {busy ? "Pubblico…" : "Pubblica la recensione"}
+            {busy ? "Pubblico…" : "Pubblica l&apos;indagine"}
           </button>
           <p className="small muted" style={{ marginTop: 10, marginBottom: 0 }}>
             Pubblichi senza invito: l&apos;esperienza resta <b>dichiarata</b> — <a href="#/verifica-esperienza">verificabile dopo</a> con invito o documenti. Segnalazioni e moderazione restano attive.

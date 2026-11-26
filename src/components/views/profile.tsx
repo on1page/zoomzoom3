@@ -98,9 +98,9 @@ export function ProfileView() {
               </span>
             ) : <span className="pill pill-gray">Non attivo</span>}
           </div>
-          <p className="small mb1">Il Premium si guadagna contribuendo: ogni recensione verificata pubblicata attiva <b>{data.premium.daysPerReview} giorni</b> (accumulabili), con cui leggere le recensioni integrali di tutte le schede. Le medie e i conteggi restano pubblici per tutti.</p>
+          <p className="small mb1">Il Premium si guadagna contribuendo: ogni indagine pubblicata attiva <b>{data.premium.daysPerReview} giorni</b> (accumulabili), con cui leggere le indagini integrali di tutte le schede. Le medie e i conteggi restano pubblici per tutti.</p>
           {!data.premium.active ? (
-            <p className="small mb1">Per iniziare: <a href="#/verifica-esperienza">verifica un&apos;esperienza</a> e pubblica la tua prima recensione.</p>
+            <p className="small mb1">Per iniziare: <a href="#/verifica-esperienza">verifica un&apos;esperienza</a> e pubblica la tua prima indagine.</p>
           ) : null}
           {data.premium.grants.length ? (
             <details>
@@ -108,7 +108,7 @@ export function ProfileView() {
               <ul className="small premium-grants">
                 {data.premium.grants.map(g => (
                   <li key={g.id}>
-                    {g.origin === "admin" ? "Concessione dello staff" : g.origin === "seed" ? "Dato dimostrativo" : "Recensione"}
+                    {g.origin === "admin" ? "Concessione dello staff" : g.origin === "seed" ? "Dato dimostrativo" : "Indagine"}
                     {g.reviewEntityName ? ` · ${g.reviewEntityName}` : ""}: <b>+{g.days} giorni</b>
                     {g.revokedAt ? <> · <span className="pill pill-red">revocata</span>{g.revokedReason ? ` (${g.revokedReason})` : ""}</> : ` · valida fino al ${new Date(g.expiresAt).toLocaleDateString("it-IT")}`}
                   </li>
@@ -150,7 +150,7 @@ export function ProfileView() {
         )}
       </div>
       <div className="card mb2">
-        <h2 style={{ fontSize: "1.05rem", marginTop: 0 }}>Le tue recensioni</h2>
+        <h2 style={{ fontSize: "1.05rem", marginTop: 0 }}>Le tue indagini</h2>
         {data.reviews.length ? (
           <ul className="mb0">
             {data.reviews.map(r => (
@@ -163,7 +163,7 @@ export function ProfileView() {
               </li>
             ))}
           </ul>
-        ) : <p className="small muted mb0">Non hai ancora pubblicato recensioni.</p>}
+        ) : <p className="small muted mb0">Non hai ancora pubblicato indagini.</p>}
       </div>
       <div className="card">
         <h2 style={{ fontSize: "1.05rem", marginTop: 0 }}>Le tue segnalazioni</h2>
@@ -276,11 +276,11 @@ export function ProfileSettingsView() {
       <div className="card mb2">
         <h2 style={{ fontSize: "1.05rem", marginTop: 0 }}>Identità pubblica</h2>
         <p className="small muted">
-          Nelle tue recensioni compare di default <b>solo la categoria</b>:{" "}
+          Nelle tue indagini compare di default <b>solo la categoria</b>:{" "}
           {user.categoryId
             ? <>«{AUTHOR_CATEGORY_LABELS[user.categoryId] || user.categoryId}»</>
             : "al momento «Utente» (nessuna categoria dichiarata)"}
-          . Pseudonimo e foto compaiono soltanto quando attivi l&apos;apposita opzione, per ogni singola recensione.
+          . Pseudonimo e foto compaiono soltanto quando attivi l&apos;apposita opzione, per ogni singola indagine.
         </p>
         <div className="row" style={{ alignItems: "flex-start", flexWrap: "wrap", gap: 18 }}>
           <div className="field mb0">

@@ -182,12 +182,12 @@ export function RegisterView() {
           <div className="field">
             <label htmlFor="r-nick">Pseudonimo pubblico</label>
             <input id="r-nick" required minLength={3} value={nick} onChange={e => setNick(e.target.value)} placeholder="Es. Arianna_84" />
-            <span className="hint">Nome visibile quando decidi di firmare una recensione: scegli uno pseudonimo, non il tuo nome completo.</span>
+            <span className="hint">Nome visibile quando decidi di firmare un&apos;indagine: scegli uno pseudonimo, non il tuo nome completo.</span>
           </div>
           <div className="field">
             <label htmlFor="r-avatar">Foto profilo <span className="muted">(facoltativa)</span></label>
             <AvatarInput value={avatar} onChange={setAvatar} />
-            <span className="hint">Ricompresa senza metadati (posizione EXIF inclusa). Compare sulle tue recensioni solo se attivi l&apos;apposita opzione.</span>
+            <span className="hint">Ricompresa senza metadati (posizione EXIF inclusa). Compare sulle tue indagini solo se attivi l&apos;apposita opzione.</span>
           </div>
           <div className="field">
             <label htmlFor="r-cat">A quale categoria appartieni?</label>
@@ -203,7 +203,7 @@ export function RegisterView() {
                   : "Soggetto d'impresa: puoi indicare il nome con cui sei conosciuto."}
               </span>
             ) : (
-              <span className="hint">Nelle recensioni compare di default solo la categoria: nickname e foto solo se li autorizzi di volta in volta.</span>
+              <span className="hint">Nelle indagini compare di default solo la categoria: nickname e foto solo se li autorizzi di volta in volta.</span>
             )}
           </div>
           {selCat && !selCat.person ? (

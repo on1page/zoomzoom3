@@ -237,19 +237,19 @@ export function UpdateReviewView({ reviewId }: { reviewId: string }) {
     })();
   }, [user, reviewId, boot]);
 
-  if (!user) return <div className="container section" style={{ maxWidth: 620 }}><Alert kind="info">Serve <a href="#/accedi">accedere</a> per rettificare una recensione.</Alert></div>;
+  if (!user) return <div className="container section" style={{ maxWidth: 620 }}><Alert kind="info">Serve <a href="#/accedi">accedere</a> per rettificare la tua indagine.</Alert></div>;
   if (state === "loading") return <div className="container section"><p className="muted">Caricamento…</p></div>;
-  if (state === "notFound") return <div className="container section" style={{ maxWidth: 620 }}><Alert kind="danger">Recensione non trovata.</Alert></div>;
+  if (state === "notFound") return <div className="container section" style={{ maxWidth: 620 }}><Alert kind="danger">Indagine non trovata.</Alert></div>;
   if (state === "notEditable") return (
     <div className="container section" style={{ maxWidth: 620 }}>
-      <Alert kind="danger">La recensione non è modificabile in autonomia: è stata nascosta dalla moderazione. Scrivi dal modulo <a href="#/contatti">contatti</a> per la procedura di correzione.</Alert>
+      <Alert kind="danger">L&apos;indagine non è modificabile in autonomia: è stata nascosta dalla moderazione. Scrivi dal modulo <a href="#/contatti">contatti</a> per la procedura di correzione.</Alert>
     </div>
   );
   if (state === "windowOver" || !rev || !boot) return (
     <div className="container section" style={{ maxWidth: 620 }}>
       <Alert kind="warn">
         <h1 style={{ margin: "0 0 8px", fontSize: "1.3rem" }}>Finestra di rettifica conclusa</h1>
-        Puoi aggiornare autonomamente entro {boot?.settings.rettificaDays ?? 30} giorni dalla pubblicazione. Dopo, le correzioni passano dalla moderazione: usa il modulo <a href="#/contatti">contatti</a> indicando la recensione.
+        Puoi aggiornare autonomamente entro {boot?.settings.rettificaDays ?? 30} giorni dalla pubblicazione. Dopo, le correzioni passano dalla moderazione: usa il modulo <a href="#/contatti">contatti</a> indicando l&apos;indagine.
       </Alert>
     </div>
   );
@@ -279,7 +279,7 @@ function UpdateReviewForm({ reviewId, rev }: { reviewId: string; rev: NonNullabl
     <div className="container" style={{ maxWidth: 760, paddingTop: 26, paddingBottom: 30 }}>
       <div className="section-head">
         <div>
-          <h1 style={{ margin: 0 }}>Aggiorna la recensione</h1>
+          <h1 style={{ margin: 0 }}>Aggiorna l&apos;indagine</h1>
           <p className="sub">{rev.entityName} · pubblicata {fmtMonthYear(rev.createdAt)} · aggiornabile entro {boot.settings.rettificaDays} giorni</p>
         </div>
       </div>
@@ -292,7 +292,7 @@ function UpdateReviewForm({ reviewId, rev }: { reviewId: string; rev: NonNullabl
             body: { ...form, updateReason: form.updateReason },
           });
           if (res.ok) {
-            toast("Recensione aggiornata.");
+            toast("Indagine aggiornata.");
             navigate(`#/scheda/${rev.entityId}`);
           } else setErr(res.error);
         }}>
@@ -355,10 +355,10 @@ function UpdateReviewForm({ reviewId, rev }: { reviewId: string; rev: NonNullabl
             <textarea id="rv-text" required minLength={100} value={form.text} onChange={e => setForm(f => ({ ...f, text: e.target.value }))} />
           </div>
           <div className="field">
-            <label htmlFor="rv-reason">Motivo della rettifica <span className="muted">(almeno 10 caratteri, sarà visibile sulla recensione)</span></label>
+            <label htmlFor="rv-reason">Motivo della rettifica <span className="muted">(almeno 10 caratteri, sarà visibile sull&apos;indagine)</span></label>
             <input id="rv-reason" required minLength={10} value={form.updateReason} onChange={e => setForm(f => ({ ...f, updateReason: e.target.value }))} placeholder="Es. aggiornamento dopo l'intervento promesso" />
           </div>
-          <label className="checkline mb2" title="Di default sulla recensione compare solo la tua categoria di appartenenza: né nome né foto. Attiva soltanto se vuoi firmarla anche con pseudonimo e foto profilo.">
+          <label className="checkline mb2" title="Di default sull'indagine compare solo la tua categoria di appartenenza: né nome né foto. Attiva soltanto se vuoi firmarla anche con pseudonimo e foto profilo.">
             <input type="checkbox" checked={form.showIdentity} onChange={e => setForm(f => ({ ...f, showIdentity: e.target.checked }))} />
             <span>Firma anche con pseudonimo e foto <span className="muted">(facoltativo: di default compare solo la tua categoria)</span></span>
           </label>

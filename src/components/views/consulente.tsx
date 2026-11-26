@@ -745,7 +745,7 @@ export function ConsulenteRequestFormView({ entityId }: { entityId?: string }) {
       <h1>Richiedi una perizia</h1>
       <Alert kind="info">
         Consulente: <b>{cons.name}</b> ({cons.profession} · {cons.zoneName}).<br />
-        Tariffa indicativa: <b>{cons.feeCents > 0 ? `€ ${fmtEuro(cons.feeCents)}` : "su richiesta"}</b> — verrà confermata dal consulente prima del pagamento. Il testo integrale delle recensioni di questa scheda resta soggetto alle regole Premium.
+        Tariffa indicativa: <b>{cons.feeCents > 0 ? `€ ${fmtEuro(cons.feeCents)}` : "su richiesta"}</b> — verrà confermata dal consulente prima del pagamento. Il testo integrale delle indagini di questa scheda resta soggetto alle regole Premium.
       </Alert>
       <div className="card">
         <form onSubmit={e => { e.preventDefault(); void submit(); }}>

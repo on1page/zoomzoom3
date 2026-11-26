@@ -36,8 +36,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   inviteDailyCap: 5,
   inviteApprovalAbove: 10,
   inviteExpiryDays: 7,
-  heroTitle: "Recensioni verificate su case, zone e servizi della casa",
-  heroSub: "Un portale indipendente, niente annunci né compravendita: recensioni verificate, prezzi dichiarati e avvertenze esplicite, per scegliere casa senza sorprese.",
+  heroTitle: "Indagini della community su case, zone e servizi della casa",
+  // Fase 1 del modello «indagini della community» (D11): il sito non chiede
+  // recensioni, offre indagini sugli immobili grazie alla community.
+  // «Indagine della community» = nome pubblico del contributo; «recensione»
+  // resta il termine delle regole, della moderazione e del percorso invito.
+  heroSub: "Un portale indipendente, niente annunci né compravendita: indagini sugli immobili grazie alla community, contributi verificati, prezzi dichiarati e avvertenze esplicite, per scegliere casa senza sorprese.",
   globalNotice: "Istanza dimostrativa: tutti i contenuti di questa istanza sono dati fittizi, eliminabili dal super amministratore.",
   proofRetentionDays: 30,
   mapMinAggregate: 3,

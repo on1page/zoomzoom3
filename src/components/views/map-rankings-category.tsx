@@ -26,7 +26,7 @@ export function MapView() {
       <div className="section-head" style={{ paddingTop: 26 }}>
         <div>
           <h1>Mappa delle reputazioni</h1>
-          <p className="sub">L&apos;intero territorio italiano su cartografia MapTiler minimale, con l&apos;estero oscurato. La reputazione si legge a prima vista: regioni colorate nella vista Italia, province e poi la suddivisione in tutti i comuni d&apos;Italia zoomando (confini ISTAT), e i pulsanti «Criterio» ricolorano il territorio per Servizi, Trasporti, Sicurezza, Verde e aria o Costi della vita. Punteggi aggregati: la mappa non rivela mai chi ha scritto una recensione né quando.</p>
+          <p className="sub">L&apos;intero territorio italiano su cartografia MapTiler minimale, con l&apos;estero oscurato. La reputazione si legge a prima vista: regioni colorate nella vista Italia, province e poi la suddivisione in tutti i comuni d&apos;Italia zoomando (confini ISTAT), e i pulsanti «Criterio» ricolorano il territorio per Servizi, Trasporti, Sicurezza, Verde e aria o Costi della vita. Punteggi aggregati: la mappa non rivela mai chi ha contribuito a un&apos;indagine né quando.</p>
         </div>
       </div>
       <div className="map-wrap" style={{ position: "relative" }}>
@@ -41,7 +41,7 @@ export function MapView() {
         <MapLegend />
       </div>
       <Alert kind="info">
-        <b>Privacy sulla mappa.</b> Sulla mappa pubblica compaiono solo immobili (il cui indirizzo è di per sé pubblico) e valutazioni <em>aggrega te</em> di città e zone. Persone fisiche (proprietari, affittuari) e altri soggetti privati non vengono geolocalizzati, e dai punti sulla mappa non è possibile risalire all&apos;autore o alla data di una recensione. Le schede zona mostrano solo medie e conteggi, mai recensioni individuali posizionate. Dove i dati sono troppo pochi per un aggregato sicuro, il valore viene soppresso.
+        <b>Privacy sulla mappa.</b> Sulla mappa pubblica compaiono solo immobili (il cui indirizzo è di per sé pubblico) e valutazioni <em>aggrega te</em> di città e zone. Persone fisiche (proprietari, affittuari) e altri soggetti privati non vengono geolocalizzati, e dai punti sulla mappa non è possibile risalire all&apos;autore o alla data di un contributo. Le schede zona mostrano solo medie e conteggi, mai indagini individuali posizionate. Dove i dati sono troppo pochi per un aggregato sicuro, il valore viene soppresso.
       </Alert>
       <div className="grid grid-3 mt3">
         {(data?.zones || []).map(z => (
@@ -51,13 +51,13 @@ export function MapView() {
               <div className="score-line">
                 <Stars score={z.aggregate.mean} />
                 <span className="score-num">{fmt1(z.aggregate.mean)}<small>/10</small></span>
-                <span className="score-n">{z.aggregate.n} recensioni</span>
+                <span className="score-n">{z.aggregate.n} indagini</span>
                 {!z.aggregate.sufficient ? insuffChip(z.aggregate.n) : null}
               </div>
             ) : (
-              <p className="small muted mb0">{z.suppressed ? "Aggregati non pubblicati: troppo pochi dati per non risalire a persone." : "Nessuna recensione."}</p>
+              <p className="small muted mb0">{z.suppressed ? "Aggregati non pubblicati: troppo pochi dati per non risalire a persone." : "Nessuna indagine."}</p>
             )}
-            <p className="small muted mb0">Sintesi della città: migliori 3 per categoria, filtri e recensioni aggregate.</p>
+            <p className="small muted mb0">Sintesi della città: migliori 3 per categoria, filtri e indagini aggregate.</p>
           </a>
         ))}
       </div>
@@ -106,8 +106,8 @@ export function RankingsView() {
       </div>
       <div className="method-box mb2">
         <h3>Il metodo (visibile e riproducibile)</h3>
-        <p>Ogni classifica ordina le schede per <b>punteggio di classifica</b>, una media ponderata: <code>PC = (n · M + m · C) / (n + m)</code> dove <code>M</code> è la media della scheda, <code>n</code> il numero di recensioni, <code>C</code> la media della categoria{section ? <> (qui <b>C = {fmt1(section.method.prior)}</b>)</> : null} e <code>m = {min}</code> la soglia minima di recensioni.</p>
-        <p className="mb0">Con poche recensioni il punteggio resta vicino alla media della categoria: così <b>una sola valutazione massima non può conquistare il primo posto</b>. Le schede sotto la soglia ({min} recensioni) restano visibili ma sono escluse dal podio e segnalate con &quot;dati insufficienti&quot;. Quando in una categoria non ci sono abbastanza schede con dati sufficienti, il dato viene mostrato con avvertenza invece di fingere una classifica solida. I punteggi di categorie diverse non sono direttamente confrontabili: ogni classifica è interna alla propria categoria.</p>
+        <p>Ogni classifica ordina le schede per <b>punteggio di classifica</b>, una media ponderata: <code>PC = (n · M + m · C) / (n + m)</code> dove <code>M</code> è la media della scheda, <code>n</code> il numero di indagini, <code>C</code> la media della categoria{section ? <> (qui <b>C = {fmt1(section.method.prior)}</b>)</> : null} e <code>m = {min}</code> la soglia minima di indagini.</p>
+        <p className="mb0">Con poche indagini il punteggio resta vicino alla media della categoria: così <b>una sola valutazione massima non può conquistare il primo posto</b>. Le schede sotto la soglia ({min} indagini) restano visibili ma sono escluse dal podio e segnalate con &quot;dati insufficienti&quot;. Quando in una categoria non ci sono abbastanza schede con dati sufficienti, il dato viene mostrato con avvertenza invece di fingere una classifica solida. I punteggi di categorie diverse non sono direttamente confrontabili: ogni classifica è interna alla propria categoria.</p>
       </div>
       <div className="tabs" role="tablist">
         {boot.categories.map(c => (
@@ -116,7 +116,7 @@ export function RankingsView() {
         ))}
       </div>
       {suff.length < 3 && rows.length ? (
-        <Alert kind="warn">In questa categoria meno di tre schede raggiungono la soglia di {min} recensioni: la classifica è da considerare indicativa.</Alert>
+        <Alert kind="warn">In questa categoria meno di tre schede raggiungono la soglia di {min} indagini: la classifica è da considerare indicativa.</Alert>
       ) : null}
       <div className="table-wrap">
         <table className="table">
@@ -124,7 +124,7 @@ export function RankingsView() {
           <thead>
             <tr>
               <th scope="col">#</th><th scope="col">Scheda</th><th scope="col">Media</th>
-              <th scope="col">Punteggio classifiche</th><th scope="col" className="num">Recensioni</th><th scope="col">Affidabilità</th>
+              <th scope="col">Punteggio classifiche</th><th scope="col" className="num">Indagini</th><th scope="col">Affidabilità</th>
             </tr>
           </thead>
           <tbody>
@@ -141,7 +141,7 @@ export function RankingsView() {
                 <td>{x.sufficient ? <span className="pill pill-green">Dati sufficienti</span> : insuffChip(x.n)}</td>
               </tr>
             )) : (
-              <tr><td colSpan={6} className="muted">Nessuna scheda con recensioni in questa categoria.</td></tr>
+              <tr><td colSpan={6} className="muted">Nessuna scheda con indagini in questa categoria.</td></tr>
             )}
           </tbody>
         </table>
@@ -156,7 +156,7 @@ export function RankingsView() {
             </div>
             <div className="score-line mt1">
               <Stars score={x.mean} />
-              <span className="score-n">{x.n} recensioni</span>
+              <span className="score-n">{x.n} indagini</span>
               {!x.sufficient ? insuffChip(x.n) : null}
             </div>
           </a>
@@ -202,7 +202,7 @@ export function CategoryView({ catId }: { catId: string }) {
             </div>
           </div>
           <div>
-            <span className="pill pill-gray">{rows.length} schede con recensioni</span>{" "}
+            <span className="pill pill-gray">{rows.length} schede con indagini</span>{" "}
             <span className="pill pill-gray">{cat.criteria.length} criteri dedicati</span>
           </div>
         </div>
@@ -218,7 +218,7 @@ export function CategoryView({ catId }: { catId: string }) {
               n: x.n, mean: x.mean, sufficient: x.sufficient, rank: i < 3 ? i + 1 : undefined,
             } as EntCardData} cat={cat} zoneName={zoneName} />
           ))}
-          {!rows.length ? <Alert kind="info">Ancora nessuna recensione in questa categoria.</Alert> : null}
+          {!rows.length ? <Alert kind="info">Ancora nessuna indagine in questa categoria.</Alert> : null}
         </div>
         <div className="section-head mt3">
           <h2>Criteri di valutazione di questa categoria</h2>
@@ -227,7 +227,7 @@ export function CategoryView({ catId }: { catId: string }) {
           <ul className="mb0" style={{ columns: 2 }}>
             {cat.criteria.map(c => <li key={c.key} style={{ breakInside: "avoid" }}>{c.label}</li>)}
           </ul>
-          <p className="small muted mt2 mb0">I criteri sono specifici di questa categoria e non vengono riutilizzati tra categorie diverse. Le recensioni conservano la versione dei criteri usata al momento della pubblicazione.</p>
+          <p className="small muted mt2 mb0">I criteri sono specifici di questa categoria e non vengono riutilizzati tra categorie diverse. Le indagini conservano la versione dei criteri usata al momento della pubblicazione.</p>
         </div>
         <MethodNoteBox />
       </div>

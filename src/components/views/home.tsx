@@ -83,7 +83,7 @@ export function HomeView() {
     <>
       <section className="hero">
         <div className="container">
-          <h1>Recensioni <em>verificate</em> su case, zone e servizi della casa</h1>
+          <h1>Indagini <em>della community</em> su case, zone e servizi della casa</h1>
           <p className="lead">{boot.settings.heroSub}</p>
           <div className="hero-box">
             <form className="searchbar" role="search" onSubmit={submitSearch}>
@@ -96,13 +96,13 @@ export function HomeView() {
               <button className="btn btn-primary" type="submit">Cerca</button>
             </form>
             <div className="hero-badges">
-              <span className="hero-badge"><CheckSvg /> Immobili e zone: recensioni aperte a tutti</span>
+              <span className="hero-badge"><CheckSvg /> Immobili e zone: indagini aperte a tutti</span>
               <span className="hero-badge"><CheckSvg /> Persone: solo con esperienza verificata</span>
-              <span className="hero-badge"><CheckSvg /> Una recensione per esperienza</span>
+              <span className="hero-badge"><CheckSvg /> Un&apos;indagine per esperienza</span>
               <span className="hero-badge"><CheckSvg /> Consultazione libera, senza registrazione</span>
             </div>
             <div className="row mt2" style={{ alignItems: "center", flexWrap: "wrap" }}>
-              <a className="btn btn-primary" href="#/recensione">Scrivi una recensione</a>
+              <a className="btn btn-primary" href="#/recensione">Scrivi la tua indagine</a>
               <span className="small muted">Basta l&apos;indirizzo: +{boot.settings.premiumDaysPerReview} giorni Premium per ogni contributo pubblicato</span>
             </div>
           </div>
@@ -116,7 +116,7 @@ export function HomeView() {
           <div className="section-head">
             <div>
               <h2>La mappa delle reputazioni</h2>
-              <p className="sub">Tutto il territorio italiano su cartografia MapTiler minimale: regioni e province colorate per reputazione e, zoomando, la suddivisione in tutti i comuni d&apos;Italia (confini ISTAT), colorati dove ci sono recensioni. Medie aggregate per città e punti colorati per fascia di punteggio. I pulsanti «Criterio» ricolorano il territorio per Servizi, Trasporti, Sicurezza, Verde e aria, Costi della vita. I contenuti delle città demo sono dati fittizi.</p>
+              <p className="sub">Tutto il territorio italiano su cartografia MapTiler minimale: regioni e province colorate per reputazione e, zoomando, la suddivisione in tutti i comuni d&apos;Italia (confini ISTAT), colorati dove la community ha già indagato. Medie aggregate per città e punti colorati per fascia di punteggio. I pulsanti «Criterio» ricolorano il territorio per Servizi, Trasporti, Sicurezza, Verde e aria, Costi della vita. I contenuti delle città demo sono dati fittizi.</p>
             </div>
             <a className="btn btn-ghost btn-sm" href="#/mappa">Apri la mappa completa</a>
           </div>
@@ -124,7 +124,7 @@ export function HomeView() {
             <MapViewport />
             <MapLegend />
           </div>
-          <p className="small muted mt2 mb0">Dalla mappa non si risale a chi ha scritto una recensione né a quando: le persone fisiche non compaiono mai tra i punti geografici.</p>
+          <p className="small muted mt2 mb0">Dalla mappa non si risale a chi ha contribuito a un&apos;indagine né a quando: le persone fisiche non compaiono mai tra i punti geografici.</p>
         </div>
       </section>
 
@@ -139,8 +139,8 @@ export function HomeView() {
           </div>
           <div className="steps">
             <div className="step"><h3>Esperienza reale, due strade</h3><p>Per <b>immobili e zone</b> basta dichiarare la tua esperienza: nessun invito, il badge resta “dichiarata”. Per le <b>persone</b> serve l&apos;invito del soggetto o la verifica documentale: il badge “verificata” vale qualcosa proprio per questo.</p></div>
-            <div className="step"><h3>Contributo con incentivo</h3><p>Ogni recensione pubblicata attiva giorni di Membership Premium, che sbloccano i testi integrali; chi allega una foto sblocca anche le foto degli altri. Il premio è per il contributo, non per il voto.</p></div>
-            <div className="step"><h3>Community e moderazione</h3><p>Gli utenti Premium validano o disconfermano le recensioni (pollice su/giù); segnalazioni e moderazione con decisioni motivate chiudono il cerchio: chi bara perde il vantaggio ottenuto.</p></div>
+            <div className="step"><h3>Contributo con incentivo</h3><p>Ogni indagine pubblicata attiva giorni di Membership Premium, che sbloccano i testi integrali; chi allega una foto sblocca anche le foto degli altri. Il premio è per il contributo, non per il voto.</p></div>
+            <div className="step"><h3>Community e moderazione</h3><p>Gli utenti Premium validano o disconfermano le indagini (pollice su/giù); segnalazioni e moderazione con decisioni motivate chiudono il cerchio: chi bara perde il vantaggio ottenuto.</p></div>
           </div>
         </div>
       </section>
@@ -149,7 +149,7 @@ export function HomeView() {
         <div className="container">
           <div className="section-head">
             <div>
-              <h2>Cosa puoi recensire</h2>
+              <h2>Cosa puoi indagare</h2>
               <p className="sub">Sette categorie, ciascuna con criteri di valutazione dedicati: domande diverse per soggetti diversi.</p>
             </div>
           </div>
@@ -174,7 +174,7 @@ export function HomeView() {
       <section className="section">
         <div className="container">
           <div className="grid grid-2">
-            {topList("immobile", "Immobili più apprezzati", "Primi tre per media ponderata, con numero di recensioni visibile.")}
+            {topList("immobile", "Immobili più apprezzati", "Primi tre per media ponderata, con numero di indagini visibile.")}
             {topList("zona", "Zone più apprezzate", "Le valutazioni aggregate di chi ci vive o ci lavora.")}
           </div>
         </div>
@@ -187,18 +187,18 @@ export function HomeView() {
           <div className="grid grid-2">
             <div>
               <h2>Imparzialità per costruzione</h2>
-              <p>Le classifiche seguono una media ponderata che richiede un minimo di recensioni prima di considerare solida una media: una valutazione isolata, anche massima, non determina il primo posto.</p>
+              <p>Le classifiche seguono una media ponderata che richiede un minimo di indagini prima di considerare solida una media: una valutazione isolata, anche massima, non determina il primo posto.</p>
               <p>La pubblicità, quando attiva, è chiaramente separata e non influenza punteggi, medie né ordine dei risultati. Ogni decisione di moderazione è tracciata in un registro riservato, con possibilità di appello.</p>
               <p className="mb0">Consulta <a href="#/come-funziona">come funziona</a> e le <a href="#/regole-recensioni">regole delle recensioni</a>.</p>
             </div>
             <div>
               <div className="card">
                 <h3 className="mt0">Hai vissuto un&apos;esperienza con la casa?</h3>
-                <p className="small">Per immobili e zone scrivi <b>subito, senza invito</b>: basta trovare la scheda o aggiungere l&apos;indirizzo. Ogni recensione pubblicata attiva {boot.settings.premiumDaysPerReview} giorni di Premium.</p>
-                <a className="btn btn-primary" href="#/recensione">Scrivi una recensione</a>{" "}
+                <p className="small">Per immobili e zone l&apos;indagine parte <b>subito, senza invito</b>: basta trovare la scheda o aggiungere l&apos;indirizzo. Ogni indagine pubblicata attiva {boot.settings.premiumDaysPerReview} giorni di Premium.</p>
+                <a className="btn btn-primary" href="#/recensione">Scrivi la tua indagine</a>{" "}
                 <a className="btn btn-ghost" href="#/come-funziona">Prima voglio capire</a>
                 <hr />
-                <p className="small muted mb0">Cerchi invece cosa dicono di un quartiere? Vai alla <a href="#/mappa">mappa delle reputazioni</a>. Finora {fmtInt(boot.stats.reviews)} recensioni su {fmtInt(boot.stats.entities)} schede.</p>
+                <p className="small muted mb0">Cerchi invece cosa dicono di un quartiere? Vai alla <a href="#/mappa">mappa delle reputazioni</a>. Finora {fmtInt(boot.stats.reviews)} indagini su {fmtInt(boot.stats.entities)} schede.</p>
               </div>
             </div>
           </div>

@@ -131,7 +131,7 @@ export function Header() {
           </nav>
           <span className="spacer"></span>
           {boot?.site.openReviewsEnabled ? (
-            <a className="btn btn-primary btn-sm btn-scrivi" href="#/recensione">Scrivi una recensione</a>
+            <a className="btn btn-primary btn-sm btn-scrivi" href="#/recensione">Scrivi la tua indagine</a>
           ) : null}
           {user ? (
             <UserMenu />
@@ -148,7 +148,7 @@ export function Header() {
         </div>
       </header>
       <div className={`mobile-nav${mobileOpen ? " open" : ""}`}>
-        {boot?.site.openReviewsEnabled ? <a className="mobile-cta" href="#/recensione" onClick={() => setMobileOpen(false)}>Scrivi una recensione</a> : null}
+        {boot?.site.openReviewsEnabled ? <a className="mobile-cta" href="#/recensione" onClick={() => setMobileOpen(false)}>Scrivi la tua indagine</a> : null}
         <a href="#/cerca" onClick={() => setMobileOpen(false)}>Cerca</a>
         <a href="#/mappa" onClick={() => setMobileOpen(false)}>Mappa</a>
         <a href="#/classifiche" onClick={() => setMobileOpen(false)}>Classifiche</a>
@@ -296,7 +296,7 @@ export function AdSlot({ position }: { position: string }) {
       <ins className="adsbygoogle" style={{ display: "block" }}
         data-ad-client={boot.site.adsClient}
         data-ad-format="auto" data-full-width-responsive="true"></ins>
-      <div className="small">Annuncio chiaramente separato da recensioni e classifiche: non influenza punteggi, medie né ordine dei risultati.</div>
+      <div className="small">Annuncio chiaramente separato dalle indagini e dalle classifiche: non influenza punteggi, medie né ordine dei risultati.</div>
     </aside>
   );
 }
@@ -313,7 +313,7 @@ export function Footer() {
               <BrandMark size={30} />
               <span className="brand-name">{boot?.site.name || "ZoomZoom"}</span>
             </div>
-            <p className="small mt2">Portale indipendente di recensioni verificate su case, zone e servizi della casa. Nessun annuncio, nessuna compravendita, nessuna prenotazione: solo esperienze verificate.</p>
+            <p className="small mt2">Portale indipendente: indagini sugli immobili grazie alla community — su case, zone e servizi della casa. Nessun annuncio, nessuna compravendita, nessuna prenotazione: solo esperienze verificate.</p>
             {boot?.site.demoMode ? (
               <p className="small">Istanza dimostrativa: i contenuti sono dati fittizi e il sito non costituisce consulenza legale.</p>
             ) : null}
