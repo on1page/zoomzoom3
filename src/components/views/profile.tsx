@@ -1,7 +1,7 @@
 "use client";
 // ZoomZoom — area personale: panoramica, inviti, impostazioni con 2FA
 // (attivazione con segreto mostrato una sola volta, codici di backup).
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useApp } from "@/lib/client/store";
 import { api, fmt1, fmtMonthYear } from "@/lib/client/api";
 import { Alert, Modal, VerifBadge } from "../ui-kit";
@@ -44,8 +44,16 @@ type Overview = {
     origin: string; status: string; note: string | null; createdAt: string;
     review: { id: string; score: number; status: string } | null;
   }>;
-  reviews: Array<{ id: string; entity: { id: string; name: string }; score: number; status: string; createdAt: string; updatedAt: string | null; updateReason: string | null }>;
+  reviews: Array<{
+    id: string; entity: { id: string; name: string }; score: number; status: string; createdAt: string; updatedAt: string | null; updateReason: string | null;
+    utility: { points: number; validVotes: number; anomalousVotes: number; confirmed: boolean } | null;
+  }>;
   reports: Array<{ id: string; reason: string; status: string; createdAt: string; targetId: string }>;
+  utility: {
+    enabled: boolean; points: number; windowDays: number;
+    badges: Array<{ code: string; label: string; description: string; points: number; categories: number; awardedAt: string; expiresAt: string; active: boolean }>;
+    appeals: Array<{ id: string; entityName: string | null; reason: string; status: string; answer: string | null; createdAt: string; resolvedAt: string | null }>;
+  };
 };
 
 function RequireLogin() {
@@ -60,10 +68,106 @@ function RequireLogin() {
   return null;
 }
 
+/* ---------- Riconoscimento di utilità della community ---------- */
+// Punti, badge e ricorsi: premia quanto le proprie indagini AIUTANO gli altri
+// a decidere (voti «utile» nella finestra mobile), mai le stelle né il volume.
+function UtilityRecognitionCard({ data, reload }: { data: Overview; reload: () => void }) {
+  const { toast } = useApp();
+  const u = data.utility;
+  const own = data.reviews.filter(r => r.status === "published");
+  const [appealFor, setAppealFor] = useState("");
+  const [appealReason, setAppealReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const sendAppeal = async () => {
+    if (busy) return;
+    setBusy(true);
+    const res = await api<{ message?: string }>("/api/utility/appeal", {
+      body: { reviewId: appealFor || undefined, reason: appealReason },
+    });
+    setBusy(false);
+    if (res.ok) {
+      toast(res.message || "Ricorso presentato.");
+      setAppealReason("");
+      setAppealFor("");
+      reload();
+    } else toast(res.error, "err");
+  };
+  return (
+    <div className="card mb2">
+      <div className="premium-card-head">
+        <h2 style={{ fontSize: "1.05rem", margin: 0 }}>Riconoscimenti della community</h2>
+        {u.badges.some(b => b.active) ? (
+          <span className="pill pill-green">{u.badges.filter(b => b.active).length} attiv{u.badges.filter(b => b.active).length === 1 ? "o" : "i"}</span>
+        ) : <span className="pill pill-gray">Nessuno per ora</span>}
+      </div>
+      <p className="small mb1">
+        La community segnala quali indagini l&apos;hanno aiutata a decidere: qui vedi i tuoi <b>punti di utilità</b> nella finestra mobile di {u.windowDays} giorni (ricalcolo quotidiano).
+        Non premiamo le stelle né il numero di contributi: <a href="#/come-funziona">come funziona il riconoscimento</a>.
+      </p>
+      <p className="small mb1"><b>{fmt1(u.points)}</b> punti di utilità · {own.filter(r => r.utility?.confirmed).length} indagini a utilità confermata</p>
+      {u.badges.length ? (
+        <ul className="small mb1" style={{ marginBottom: 10 }}>
+          {u.badges.map(b => (
+            <li key={b.code} style={{ marginBottom: 6 }}>
+              <span className={`pill ${b.active ? "pill-amber" : "pill-gray"}`}>{b.label}</span>
+              {b.active
+                ? <> · riconfermato finché la soglia resta raggiunta (scadenza {new Date(b.expiresAt).toLocaleDateString("it-IT")})</>
+                : <> · scaduto: la soglia non è più raggiunta nella finestra</>}
+              <br /><span className="muted">{b.description}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <details>
+        <summary className="small">Contesta una penalizzazione (ricorso)</summary>
+        <p className="small muted mb1">Se ritieni che voti validi sulle tue indagini siano stati esclusi come «anomali» (scambi reciproci o raffiche), puoi presentare un ricorso: lo staff risponde qui sotto con una decisione motivata. Se è accolto, i voti esclusi tornano a contare dal ricalcolo successivo.</p>
+        <div className="field">
+          <label htmlFor="ap-review">Indagine coingente</label>
+          <select id="ap-review" value={appealFor} onChange={e => setAppealFor(e.target.value)}>
+            <option value="">Ricorso generale (nessuna indagine specifica)</option>
+            {own.map(r => (
+              <option key={r.id} value={r.id}>
+                {r.entity.name} · {r.utility ? `${fmt1(r.utility.points)} punti` : "senza punteggio"}{r.utility?.anomalousVotes ? ` · ${r.utility.anomalousVotes} voti esclusi` : ""}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="ap-reason">Perché contesti (almeno 20 caratteri)</label>
+          <textarea id="ap-reason" rows={3} value={appealReason} onChange={e => setAppealReason(e.target.value)} placeholder="Es. i voti esclusi arrivano da utenti che non conosco: ritengo siano letture genuine."></textarea>
+        </div>
+        <button className="btn btn-primary btn-sm" disabled={busy || appealReason.trim().length < 20} onClick={() => void sendAppeal()}>
+          Presenta il ricorso
+        </button>
+      </details>
+      {u.appeals.length ? (
+        <details className="mt1">
+          <summary className="small">Storico ricorsi ({u.appeals.length})</summary>
+          <ul className="small mb0">
+            {u.appeals.map(a => (
+              <li key={a.id} style={{ marginBottom: 8 }}>
+                {new Date(a.createdAt).toLocaleDateString("it-IT")} · {a.entityName || "ricorso generale"} ·{" "}
+                {a.status === "open" ? <span className="pill pill-amber">in valutazione</span>
+                  : a.status === "accepted" ? <span className="pill pill-green">accolto</span>
+                  : <span className="pill pill-red">respinto</span>}
+                <br /><span className="muted">{a.reason.slice(0, 160)}{a.reason.length > 160 ? "…" : ""}</span>
+                {a.answer ? <><br />Risposta dello staff: {a.answer.slice(0, 200)}{a.answer.length > 200 ? "…" : ""}</> : null}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
 export function ProfileView() {
   const { user, boot } = useApp();
   const [data, setData] = useState<Overview | null>(null);
   useEffect(() => {
+    if (user) void api<Overview>("/api/me/overview").then(res => { if (res.ok) setData(res); });
+  }, [user]);
+  const reload = useCallback(() => {
     if (user) void api<Overview>("/api/me/overview").then(res => { if (res.ok) setData(res); });
   }, [user]);
   const guard = RequireLogin();
@@ -119,6 +223,7 @@ export function ProfileView() {
           <p className="small muted mb0"><a href="#/premium">Come funziona il Premium</a> · incluso nella <a href="#/profilo-impostazioni">esportazione dati</a></p>
         </div>
       ) : null}
+      {data.utility.enabled ? <UtilityRecognitionCard data={data} reload={reload} /> : null}
       <div className="card mb2">
         <h2 style={{ fontSize: "1.05rem", marginTop: 0 }}>Le tue esperienze verificate</h2>
         {data.experiences.length ? (
@@ -157,6 +262,9 @@ export function ProfileView() {
               <li key={r.id} className="small" style={{ marginBottom: 8 }}>
                 <a href={`#/scheda/${r.entity.id}`}>{r.entity.name}</a> · {fmt1(r.score)}/10 · {fmtMonthYear(r.createdAt)}
                 {r.updatedAt ? ` · aggiornata ${fmtMonthYear(r.updatedAt)}` : ""}
+                {r.utility ? (
+                  <> · <span className="pill pill-green" title="Punti di utilità nella finestra mobile di 30 giorni">{fmt1(r.utility.points)} punti di utilità</span>{r.utility.confirmed ? " · utilità confermata" : ""}{r.utility.anomalousVotes ? ` · ${r.utility.anomalousVotes} ${r.utility.anomalousVotes === 1 ? "voto escluso" : "voti esclusi"} dai controlli anti-abuso` : ""}</>
+                ) : null}
                 {" "}{r.status === "published"
                   ? <a className="btn btn-ghost btn-xs" href={`#/rettifica/${r.id}`}>Aggiorna / rettifica</a>
                   : <span className="pill pill-red">Nascosta dalla moderazione</span>}

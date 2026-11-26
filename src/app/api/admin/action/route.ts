@@ -3,8 +3,9 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireStaff } from "@/lib/server/auth";
-import { updateSettings, invalidateSettingsCache } from "@/lib/server/settings";
+import { getSettings, updateSettings, invalidateSettingsCache } from "@/lib/server/settings";
 import { revokePremiumForReview, restorePremiumForReview, grantPremiumManually, revokeAllPremium } from "@/lib/server/premium";
+import { recomputeUtility } from "@/lib/server/utility";
 import { sendMail } from "@/lib/server/mailer";
 import { auditLog, securityLog } from "@/lib/server/audit";
 import { assertSameOrigin, readJson, handleError, fail } from "@/lib/server/http";
@@ -113,6 +114,67 @@ export async function POST(req: Request) {
         if (author) {
           await sendMail(author.email, "Una tua foto è stata rimossa",
             `La moderazione ha rimosso una foto allegata a una tua recensione con questa motivazione: ${reason}`);
+        }
+        return NextResponse.json({ ok: true });
+      }
+
+      /* ---- riconoscimento di utilità (community) ---- */
+      case "utility.recalc": {
+        // ricalcolo manuale degli stessi conti del job giornaliero (trasparenza:
+        // stessi numeri, stessa formula, stessa finestra mobile di 30 giorni)
+        const actor = await requireStaff("mod.reviews");
+        const settings = await getSettings();
+        if (!settings.utilityEnabled) return fail("Il riconoscimento di utilità è disattivato nelle impostazioni.", 409);
+        const stats = await recomputeUtility();
+        await auditLog({
+          actorId: actor.id, actorRole: actor.role,
+          action: "Riconoscimento di utilità ricalcolato",
+          targetType: "utility", targetId: null,
+          reason: reason || `Indagini con punteggio: ${stats.reviewsScored}; voti anomali esclusi: ${stats.votesAnomalous}.`,
+        });
+        return NextResponse.json({ ok: true, stats });
+      }
+      case "utility.appeal.resolve": {
+        // decisione sul ricorso: l'autore contesta voti esclusi come anomali
+        const actor = await requireStaff("mod.reviews");
+        if (reason.length < 15) return fail("Motivazione obbligatoria (almeno 15 caratteri): sarà comunicata all'utente.");
+        const appeal = await db.utilityAppeal.findUnique({
+          where: { id: p.id },
+          include: { review: { select: { id: true, userId: true } }, user: { select: { id: true, email: true } } },
+        });
+        if (!appeal || appeal.status !== "open") return fail("Ricorso non disponibile o già deciso.", 409);
+        const decision = p.decision === "accepted" ? "accepted" : "rejected";
+        await db.utilityAppeal.update({
+          where: { id: appeal.id },
+          data: { status: decision, answer: reason, resolvedAt: new Date(), resolvedById: actor.id },
+        });
+        // ricorso accolto: al ricalcolo i controlli di reciprocità/raffica su
+        // quell'indagine vengono sospesi e i voti esclusi tornano a contare
+        if (decision === "accepted" && appeal.review) {
+          await db.reviewUtility.upsert({
+            where: { reviewId: appeal.review.id },
+            create: { reviewId: appeal.review.id, trustOverride: true },
+            update: { trustOverride: true },
+          });
+          const settings = await getSettings();
+          if (settings.utilityEnabled) await recomputeUtility();
+        }
+        const codeLabel = decision === "accepted" ? "accolto" : "respinto";
+        await auditLog({
+          actorId: actor.id, actorRole: actor.role,
+          action: `Ricorso di utilità ${codeLabel}`,
+          targetType: "utility", targetId: appeal.reviewId,
+          reason,
+        });
+        if (appeal.user) {
+          await sendMail(
+            appeal.user.email,
+            `Ricorso ${codeLabel}`,
+            `Il tuo ricorso sulla penalità di utilità è stato ${codeLabel}. Motivazione: ${reason} ` +
+            (decision === "accepted"
+              ? "I voti esclusi sulla tua indagine tornano a contare dal prossimo ricalcolo."
+              : "I controlli anti-abuso restano attivi: puoi ripresentare il ricorso con nuovi elementi."),
+          );
         }
         return NextResponse.json({ ok: true });
       }
@@ -427,6 +489,7 @@ export async function POST(req: Request) {
         if (typeof s.openReviewsEnabled === "boolean") patch.openReviewsEnabled = s.openReviewsEnabled;
         if (typeof s.photosEnabled === "boolean") patch.photosEnabled = s.photosEnabled;
         if (typeof s.votesEnabled === "boolean") patch.votesEnabled = s.votesEnabled;
+        if (typeof s.utilityEnabled === "boolean") patch.utilityEnabled = s.utilityEnabled;
         if (typeof s.consulentiEnabled === "boolean") patch.consulentiEnabled = s.consulentiEnabled;
         if (typeof s.platformIban === "string") patch.platformIban = s.platformIban.trim().toUpperCase().replace(/\s+/g, "").slice(0, 40);
         if (typeof s.paymentInstructions === "string") patch.paymentInstructions = s.paymentInstructions.trim().slice(0, 600);

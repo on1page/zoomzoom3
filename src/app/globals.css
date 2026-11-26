@@ -540,6 +540,15 @@ table.table { width: 100%; border-collapse: collapse; font-size: .9rem; }
 .vote-btn.down.on { border-color: #A63A2B; background: #F7ECEA; }
 .vote-n { font-weight: 600; }
 
+/* chip di riconoscimento di utilità e trasparenza (sotto la barra voti) */
+.utility-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 8px;
+}
+
 /* selettore posizione (aggiunta immobile) */
 .loc-picker-box { margin-top: 4px; }
 .loc-picker {

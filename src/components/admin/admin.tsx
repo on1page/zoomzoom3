@@ -14,6 +14,7 @@ const SECTIONS: Array<[string, string, string | null, string | null]> = [
   ["segnalazioni", "Segnalazioni", "mod.reports", "reports"],
   ["contestazioni", "Contestazioni", "mod.disputes", "disputes"],
   ["recensioni", "Recensioni", "mod.reviews", null],
+  ["utilita", "Utilità e riconoscimenti", "mod.reviews", "utility"],
   ["foto", "Foto recensioni", "mod.reviews", null],
   ["esperienze", "Esperienze e verifiche", "mod.experiences", "experiences"],
   ["inviti", "Inviti", "admin.invites", null],
@@ -178,6 +179,7 @@ export function AdminView({ section }: { section: string }) {
         if (q.href.includes("entita")) c.proposals = q.count;
         if (q.href.includes("consulenti")) c.consulenti = q.count;
         if (q.href.includes("utenti")) c.privacy = q.count;
+        if (q.href.includes("utilita")) c.utility = q.count;
       }
       setCounts(c);
     }
@@ -210,7 +212,7 @@ export function AdminView({ section }: { section: string }) {
             <h2>{actionModalTitles[actionModal.kind]}</h2>
             <button className="modal-close" onClick={() => setActionModal(null)} aria-label="Chiudi">×</button>
           </div>
-          {actionModal.kind === "report.decide" || actionModal.kind === "dispute.decide" || actionModal.kind === "proposal.approve" ? (
+          {actionModal.kind === "report.decide" || actionModal.kind === "dispute.decide" || actionModal.kind === "proposal.approve" || actionModal.kind === "utility.appeal.resolve" ? (
             <div className="field">
               <label htmlFor="ad-action">Esito</label>
               <select id="ad-action" value={decision} onChange={e => setDecision(e.target.value)}>
@@ -223,6 +225,11 @@ export function AdminView({ section }: { section: string }) {
                   <>
                     <option value="keep">Associazione mantenuta</option>
                     <option value="hide">Sospendi la scheda per correzione</option>
+                  </>
+                ) : actionModal.kind === "utility.appeal.resolve" ? (
+                  <>
+                    <option value="accepted">Accogli: i voti esclusi tornano a contare</option>
+                    <option value="rejected">Respingi: i controlli restano attivi</option>
                   </>
                 ) : (
                   <>
@@ -279,6 +286,7 @@ const actionModalTitles: Record<string, string> = {
   "entity.toggle": "Pubblica/nascondi scheda",
   "review.restore": "Ripristina la recensione",
   "photo.remove": "Rimuovi la foto",
+  "utility.appeal.resolve": "Decisione sul ricorso di utilità",
 };
 
 /* ---------- Sezioni ---------- */
@@ -431,6 +439,108 @@ function AdminSection({ section, data, onAction, reload }: {
                 ))}
               </tbody>
             </table>
+          </div>
+        </>
+      );
+    }
+
+    case "utilita": {
+      const enabled = (d?.enabled !== false);
+      const stats = (d?.stats || {}) as {
+        lastCalculatedAt: string | null; votesInWindow: number; reviewsScored: number;
+        confirmedReviews: number; anomalousVotes: number; badgeCounts: Record<string, number>; openAppeals: number;
+      };
+      const rules = (d?.rules || {}) as {
+        windowDays: number; capPerReview: number; bonusFactor: number; burstPerDay: number; reciprocalMin: number;
+        badges: Array<{ code: string; label: string; description: string; threshold: number; minCategories: number }>;
+      };
+      const appeals = (d?.appeals || []) as Array<{
+        id: string; user: { nickname: string; email: string } | null;
+        review: { id: string; entityName: string; utility: { points: number; validVotes: number; anomalousVotes: number } | null } | null;
+        reason: string; status: string; answer: string | null; createdAt: string; resolvedAt: string | null;
+      }>;
+      const top = (d?.top || []) as Array<{ entityName: string; author: string; points: number; validVotes: number; anomalousVotes: number; confirmed: boolean }>;
+      const recalc = async () => {
+        const res = await api<{ stats: { reviewsScored: number; votesAnomalous: number; badgesAssigned: number } }>("/api/admin/action", {
+          body: { action: "utility.recalc", reason: "Ricalcolo manuale dal back office." },
+        });
+        if (res.ok) {
+          toast(`Ricalcolo completato: ${res.stats.reviewsScored} indagini con punteggio, ${res.stats.votesAnomalous} voti anomali esclusi, ${res.stats.badgesAssigned} badge attivi.`);
+          void reload();
+        } else toast(res.error, "err");
+      };
+      return (
+        <>
+          <div className="admin-head"><h1>Utilità e riconoscimenti</h1><span className="pill pill-gray">premia chi aiuta a decidere, non le stelle né il volume</span></div>
+          {!enabled ? <Alert kind="warn"><b>Funzione disattivata.</b> Il riconoscimento di utilità è spento nelle impostazioni: voti e riconoscimenti non vengono calcolati.</Alert> : null}
+          <Alert kind="info">Punti = voti «utile» validi pesati (tetto {rules.capPerReview} per indagine) − voti anomali, su finestra mobile di {rules.windowDays} giorni, bonus ×{rules.bonusFactor} se l&apos;utilità si conferma su più settimane. Le stelle non entrano mai nella formula. Il ricalcolo parte ogni giorno da un job automatico; qui si può anticipare a mano.</Alert>
+          <div className="stat-grid">
+            <div className="stat"><div className="v">{stats.votesInWindow}</div><div className="l">Voti «utile» nella finestra</div></div>
+            <div className="stat"><div className="v">{stats.reviewsScored}</div><div className="l">Indagini con punteggio</div><div className="d">{stats.confirmedReviews} a utilità confermata</div></div>
+            <div className="stat"><div className="v">{stats.anomalousVotes}</div><div className="l">Voti anomali esclusi</div><div className="d">scambi reciproci e raffiche</div></div>
+            <div className="stat"><div className="v">{Object.values(stats.badgeCounts || {}).reduce((a, b) => a + b, 0)}</div><div className="l">Badge attivi</div><div className="d">{rules.badges?.map(b => `${b.label}: ${stats.badgeCounts?.[b.code] || 0}`).join(" · ")}</div></div>
+          </div>
+          <div className="card mb2">
+            <div className="premium-card-head">
+              <h2 style={{ fontSize: "1.05rem", marginTop: 0 }}>Ricalcolo</h2>
+              {stats.lastCalculatedAt ? <span className="pill pill-gray">ultimo: {fmtDateTime(stats.lastCalculatedAt)}</span> : <span className="pill pill-gray">mai eseguito</span>}
+            </div>
+            <p className="small mb1">Stessi conti del job giornaliero (finestra mobile di {rules.windowDays} giorni): nessun risultato «speciale» dal back office, tutto tracciato nel log.</p>
+            <button className="btn btn-primary btn-sm" onClick={() => void recalc()} disabled={!enabled}>Ricalcola ora</button>
+          </div>
+          <div className="card mb2" style={{ overflowX: "auto" }}>
+            <h2 style={{ fontSize: "1.05rem", marginTop: 0 }}>Ricorsi ({stats.openAppeals} aperti)</h2>
+            <p className="small muted">L&apos;autore contesta l&apos;esclusione di voti ritenuti anomali. Accogliendo il ricorso, i controlli su quell&apos;indagine vengono sospesi e i voti esclusi tornano a contare dal ricalcolo successivo; la risposta motivata viene comunicata per email.</p>
+            <div className="table-wrap">
+              <table className="table">
+                <thead><tr><th scope="col">Utente</th><th scope="col">Indagine</th><th scope="col">Motivo</th><th scope="col">Stato</th><th scope="col">Azioni</th></tr></thead>
+                <tbody>
+                  {appeals.map(a => (
+                    <tr key={a.id}>
+                      <td className="small">{a.user ? <>{a.user.nickname}<br /><span className="muted">{a.user.email}</span></> : <em>utente rimosso</em>}</td>
+                      <td className="small">
+                        {a.review ? (
+                          <>{a.review.entityName}<br />{a.review.utility
+                            ? <span className="muted">{fmt1(a.review.utility.points)} punti · {a.review.utility.validVotes} voti validi · {a.review.utility.anomalousVotes} esclusi</span>
+                            : <span className="muted">ancora senza punteggio</span>}</>
+                        ) : <em>ricorso generale</em>}
+                      </td>
+                      <td className="small">{a.reason.slice(0, 200)}{a.reason.length > 200 ? "…" : ""}{a.answer ? <><br /><span className="pill pill-gray">risposta:</span> {a.answer.slice(0, 150)}{a.answer.length > 150 ? "…" : ""}</> : null}</td>
+                      <td>
+                        {a.status === "open" ? <span className="pill pill-amber">In valutazione</span>
+                          : a.status === "accepted" ? <span className="pill pill-green">Accolto</span>
+                          : <span className="pill pill-red">Respinto</span>}
+                        {a.resolvedAt ? <div className="small muted">{fmtDateTime(a.resolvedAt)}</div> : null}
+                      </td>
+                      <td>{a.status === "open" ? <button className="btn btn-primary btn-xs" onClick={() => onAction("utility.appeal.resolve", a.id)}>Decidi</button> : null}</td>
+                    </tr>
+                  ))}
+                  {!appeals.length ? <tr><td colSpan={5}>Nessun ricorso.</td></tr> : null}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div className="card">
+            <h2 style={{ fontSize: "1.05rem", marginTop: 0 }}>Indagini con più punti di utilità (monitoraggio)</h2>
+            <p className="small muted">Solo per lo staff, ordinato per punti di utilità (mai volume, mai stelle): serve a controllare che il riconoscimento non si concentri in modo sospetto.</p>
+            <div className="table-wrap">
+              <table className="table">
+                <thead><tr><th scope="col">Indagine</th><th scope="col">Autore</th><th scope="col">Punti</th><th scope="col">Voti validi</th><th scope="col">Anomali</th><th scope="col">Confermata</th></tr></thead>
+                <tbody>
+                  {top.map((t, i) => (
+                    <tr key={i}>
+                      <td className="small">{t.entityName}</td>
+                      <td className="small">{t.author}</td>
+                      <td><b>{fmt1(t.points)}</b></td>
+                      <td>{t.validVotes}</td>
+                      <td>{t.anomalousVotes || "—"}</td>
+                      <td>{t.confirmed ? <span className="pill pill-green">sì</span> : <span className="pill pill-gray">no</span>}</td>
+                    </tr>
+                  ))}
+                  {!top.length ? <tr><td colSpan={6}>Nessuna indagine con punteggio: servono voti «utile» nella finestra.</td></tr> : null}
+                </tbody>
+              </table>
+            </div>
           </div>
         </>
       );
@@ -987,11 +1097,12 @@ function SettingsSection({ initial }: { initial: Record<string, unknown> | null 
     openReviewsEnabled: s.openReviewsEnabled !== false,
     photosEnabled: s.photosEnabled !== false,
     votesEnabled: s.votesEnabled !== false,
+    utilityEnabled: s.utilityEnabled !== false,
     consulentiEnabled: s.consulentiEnabled !== false,
     platformIban: String(s.platformIban ?? ""),
     paymentInstructions: String(s.paymentInstructions ?? ""),
   });
-  const fields: Array<[Exclude<keyof typeof form, "premiumEnabled" | "openReviewsEnabled" | "photosEnabled" | "votesEnabled" | "consulentiEnabled" | "platformIban" | "paymentInstructions">, string, string]> = [
+  const fields: Array<[Exclude<keyof typeof form, "premiumEnabled" | "openReviewsEnabled" | "photosEnabled" | "votesEnabled" | "utilityEnabled" | "consulentiEnabled" | "platformIban" | "paymentInstructions">, string, string]> = [
     ["minReviews", "Soglia recensioni sufficienti (m della formula)", "Peso della media di categoria nella media ponderata; le schede sotto questa soglia sono segnala te come non sufficienti."],
     ["rettificaDays", "Finestra di rettifica (giorni)", "Giorni per aggiornare autonomamente una recensione con rettifica motivata."],
     ["inviteDailyCap", "Inviti al giorno per scheda", "Limite anti-abuso per soggetto verificato."],
@@ -1052,6 +1163,14 @@ function SettingsSection({ initial }: { initial: Record<string, unknown> | null 
               Voti di utilità attivi (pollice su/giù degli utenti Premium)
             </label>
             <span className="hint">I conteggi esistenti restano nel database; disattivando, i pulsanti scompaiono dalle schede.</span>
+          </div>
+          <div className="field">
+            <label htmlFor="s-utilityEnabled">
+              <input id="s-utilityEnabled" type="checkbox" checked={form.utilityEnabled}
+                onChange={e => setForm(f => ({ ...f, utilityEnabled: e.target.checked }))} />{" "}
+              Riconoscimento di utilità attivo (punti, badge, ricorsi)
+            </label>
+            <span className="hint">Il ricalcolo quotidiano assegna punti e riconoscimenti sulla finestra di 30 giorni. Disattivandolo, etichette e badge non compaiono più (i voti restano, se i voti sono attivi).</span>
           </div>
           <div className="field">
             <label htmlFor="s-consulentiEnabled">

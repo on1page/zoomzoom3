@@ -22,6 +22,8 @@ export type AppSettings = {
   openReviewsPerDay: number;     // limite anti-abuso: recensioni aperte e nuove schede per utente al giorno
   photosEnabled: boolean;        // foto allegate alle recensioni
   votesEnabled: boolean;         // voti di utilità (pollice su/giù) riservati ai Premium
+  // riconoscimento di utilità: punti, badge e ricorsi (ricalcolo periodico)
+  utilityEnabled: boolean;
   consulentiEnabled: boolean;    // Consulenti tecnici: iscrizioni e richieste di perizia
   platformIban: string;          // IBAN della piattaforma per i pagamenti delle perizie (vuoto = istruzioni generiche)
   paymentInstructions: string;   // istruzioni mostrate all'utente per saldare una richiesta accettata
@@ -54,6 +56,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   openReviewsPerDay: 5,
   photosEnabled: true,
   votesEnabled: true,
+  // riconoscimento di utilità: premia quanto un contributo aiuta a decidere
+  // (mai le stelle, mai il volume); vedi src/lib/server/utility.ts
+  utilityEnabled: true,
   consulentiEnabled: true,
   platformIban: "",
   paymentInstructions: "",

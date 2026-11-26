@@ -7,6 +7,7 @@ import { getSettings } from "@/lib/server/settings";
 import { getCategories } from "@/lib/server/categories";
 import { handleError, fail } from "@/lib/server/http";
 import { REPORT_STATUS_LABELS, REPORT_REASONS } from "@/lib/server/validation";
+import { UTILITY_BADGES, UTILITY_RULES } from "@/lib/server/utility";
 
 export async function GET(_req: Request, ctx: { params: Promise<{ section: string }> }) {
   try {
@@ -28,6 +29,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ section: strin
         const consulentiPending = await db.consultantProfile.count({ where: { status: "pending" } });
         const perizieDaPagare = await db.periziaRequest.count({ where: { status: "accepted" } });
         const perizieDaAccreditare = await db.periziaRequest.count({ where: { status: "delivered" } });
+        const utilityAppeals = await db.utilityAppeal.count({ where: { status: "open" } });
         const queues = [
           hasPerm(admin.role, "mod.reports") && { label: "Segnalazioni da valutare", href: "#/admin/segnalazioni", count: reports },
           hasPerm(admin.role, "mod.experiences") && { label: "Verifiche di esperienza da esaminare", href: "#/admin/esperienze", count: exps },
@@ -37,6 +39,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ section: strin
           hasPerm(admin.role, "admin.entities") && { label: "Perizie: pagamenti da registrare", href: "#/admin/perizie", count: perizieDaPagare },
           hasPerm(admin.role, "admin.entities") && { label: "Perizie: accrediti da eseguire", href: "#/admin/perizie", count: perizieDaAccreditare },
           hasPerm(admin.role, "admin.users") && { label: "Richieste privacy", href: "#/admin/utenti", count: privacy },
+          hasPerm(admin.role, "mod.reviews") && { label: "Ricorsi di utilità", href: "#/admin/utilita", count: utilityAppeals },
         ].filter(Boolean);
         return NextResponse.json({ ok: true, stats: { users, reviews, reports, exps }, queues, security, role: admin.role, roleLabel: ROLE_LABELS[admin.role] });
       }
@@ -77,6 +80,87 @@ export async function GET(_req: Request, ctx: { params: Promise<{ section: strin
             id: d.id, entity: d.entity, claimantEmail: d.claimantEmail, claim: d.claim,
             status: d.status, createdAt: d.createdAt.toISOString(),
             decisions: d.decisions.map(x => ({ action: x.action, reason: x.reason, at: x.at.toISOString(), by: x.by.nickname })),
+          })),
+        });
+      }
+
+      case "utilita": {
+        // riconoscimento di utilità: statistica del ricalcolo, ricorsi, badge.
+        // L'elenco «top» è solo per il monitoraggio dello staff, ordinato per
+        // PUNTI DI UTILITÀ (non volume, non stelle) e mai esposto al pubblico.
+        await requireStaff("mod.reviews");
+        const windowStart = new Date(Date.now() - UTILITY_RULES.windowDays * 86400000);
+        const [utilityRows, votesInWindow, appeals, badges, settings, lastCalc] = await Promise.all([
+          db.reviewUtility.findMany({
+            include: { review: { select: { entity: { select: { name: true } }, user: { select: { nickname: true, email: true } } } } },
+            orderBy: { points: "desc" },
+            take: 50,
+          }),
+          db.reviewVote.count({ where: { value: 1, createdAt: { gte: windowStart } } }),
+          db.utilityAppeal.findMany({
+            orderBy: { createdAt: "desc" },
+            take: 50,
+            include: {
+              user: { select: { nickname: true, email: true } },
+              review: {
+                select: {
+                  id: true, entity: { select: { name: true } },
+                  utility: { select: { points: true, validVotes: true, anomalousVotes: true } },
+                },
+              },
+            },
+          }),
+          db.utilityBadge.findMany({ select: { code: true } }),
+          getSettings(),
+          db.reviewUtility.findFirst({ orderBy: { calculatedAt: "desc" }, select: { calculatedAt: true } }),
+        ]);
+        const badgeCounts = {} as Record<string, number>;
+        for (const b of badges) badgeCounts[b.code] = (badgeCounts[b.code] || 0) + 1;
+        return NextResponse.json({
+          ok: true,
+          enabled: settings.utilityEnabled,
+          stats: {
+            lastCalculatedAt: lastCalc ? lastCalc.calculatedAt.toISOString() : null,
+            votesInWindow,
+            reviewsScored: utilityRows.length,
+            confirmedReviews: utilityRows.filter(u => u.confirmed).length,
+            anomalousVotes: utilityRows.reduce((a, u) => a + u.anomalousVotes, 0),
+            badgeCounts,
+            openAppeals: appeals.filter(a => a.status === "open").length,
+          },
+          rules: {
+            windowDays: UTILITY_RULES.windowDays,
+            capPerReview: UTILITY_RULES.capPerReview,
+            bonusFactor: UTILITY_RULES.bonusFactor,
+            burstPerDay: UTILITY_RULES.burstPerDay,
+            reciprocalMin: UTILITY_RULES.reciprocalMin,
+            badges: UTILITY_BADGES.map(b => ({ code: b.code, label: b.label, description: b.description, threshold: b.threshold, minCategories: b.minCategories })),
+          },
+          appeals: appeals.map(a => ({
+            id: a.id,
+            user: a.user ? { nickname: a.user.nickname, email: a.user.email } : null,
+            review: a.review ? {
+              id: a.review.id,
+              entityName: a.review.entity.name,
+              utility: a.review.utility ? {
+                points: a.review.utility.points,
+                validVotes: a.review.utility.validVotes,
+                anomalousVotes: a.review.utility.anomalousVotes,
+              } : null,
+            } : null,
+            reason: a.reason,
+            status: a.status,
+            answer: a.answer,
+            createdAt: a.createdAt.toISOString(),
+            resolvedAt: a.resolvedAt ? a.resolvedAt.toISOString() : null,
+          })),
+          top: utilityRows.slice(0, 10).map(u => ({
+            entityName: u.review.entity.name,
+            author: u.review.user ? u.review.user.nickname : "—",
+            points: u.points,
+            validVotes: u.validVotes,
+            anomalousVotes: u.anomalousVotes,
+            confirmed: u.confirmed,
           })),
         });
       }

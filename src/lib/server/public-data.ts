@@ -29,13 +29,31 @@ export type PublicReview = {
   updatedAt: string | null;
   updateReason: string | null;
   isDemo: boolean;
+  // trasparenza: la recensione ha generato giorni Premium per l'autore
+  // (contributo incentivato, da etichettare in chiaro al pubblico)
+  incentivized: boolean;
+  // riconoscimenti di utilità attivi dell'autore (segnale di qualità, non
+  // dato personale: si mostrano anche sulle recensioni anonime)
+  authorBadges: string[];
 };
 
 export async function publicReviewsForEntity(entityId: string): Promise<PublicReview[]> {
+  const now = new Date();
   const revs = await db.review.findMany({
     where: { entityId },
     orderBy: { createdAt: "desc" },
-    include: { user: { select: { nickname: true } }, criteriaVersion: true },
+    include: {
+      user: {
+        select: {
+          nickname: true,
+          // solo i badge NON scaduti: la finestra mobile li spegne da sola
+          utilityBadges: { where: { expiresAt: { gt: now } }, select: { code: true } },
+        },
+      },
+      criteriaVersion: true,
+      // etichetta di trasparenza: grant Premium generato da questo contributo
+      premiumGrant: { select: { revokedAt: true } },
+    },
   });
   return revs.map(r => {
     let labels: Record<string, string> | null = null;
@@ -65,6 +83,8 @@ export async function publicReviewsForEntity(entityId: string): Promise<PublicRe
       updatedAt: r.updatedAt?.toISOString() || null,
       updateReason: r.updateReason,
       isDemo: r.isDemo,
+      incentivized: !!r.premiumGrant && !r.premiumGrant.revokedAt,
+      authorBadges: r.user.utilityBadges.map(b => b.code),
     };
   });
 }

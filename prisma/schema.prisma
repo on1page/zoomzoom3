@@ -67,6 +67,9 @@ model User {
   privacyRequests   PrivacyRequest[]
   premiumGrants     PremiumGrant[]
   reviewVotes       ReviewVote[]
+  // riconoscimento di utilità: badge guadagnati e ricorsi presentati
+  utilityBadges     UtilityBadge[]
+  utilityAppeals    UtilityAppeal[]
   // Consulente Tecnico: profilo professionale (uno per utente, se iscritto)
   consultantProfile ConsultantProfile?
   perizieRequested  PeriziaRequest[] @relation("periziaRequester")
@@ -333,6 +336,9 @@ model Review {
   premiumGrant PremiumGrant?
   photos ReviewPhoto[]
   votes  ReviewVote[]
+  // riconoscimento di utilità: punteggio ricalcolato periodicamente
+  utility ReviewUtility?
+  utilityAppeals UtilityAppeal[]
 
   @@index([entityId, status])
   @@index([userId])
@@ -391,6 +397,81 @@ model ReviewVote {
 
   @@unique([reviewId, userId])
   @@index([reviewId])
+}
+
+/* ============================================================
+   RICONOSCIMENTO DI UTILITÀ — premia quanto un contributo AIUTA
+   gli altri a decidere, NON il giudizio espresso con le stelle e
+   NON il volume. I punti derivano dai soli voti "utile" (value=1)
+   nella finestra mobile di 30 giorni, con controlli anti-abuso;
+   il ricalcolo è periodico (job giornaliero, vedi /api/cron/utility)
+   così nessun picco iniziale conquista subito il massimo.
+   ============================================================ */
+
+// Punteggio di utilità di UNA recensione (snapshot del ricalcolo).
+model ReviewUtility {
+  id             String   @id @default(cuid())
+  reviewId       String   @unique
+  review         Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  // voti "utile" validi nella finestra (dopo i controlli anti-abuso)
+  validVotes     Int      @default(0)
+  // voti esclusi: scambi reciproci, raffiche, account disabilitati
+  anomalousVotes Int      @default(0)
+  // somma pesata dei voti validi (ogni votante vale in base alla propria
+  // anzianità e affidabilità: ponderazione prudente, mai un voto sulla persona)
+  weightedVotes  Float    @default(0)
+  // punti finali: tetto per recensione, penalità voti anomali, bonus temporale
+  points         Float    @default(0)
+  // settimane distinte coperte dai voti validi (per il bonus nel tempo)
+  weeksSpread    Int      @default(0)
+  // utilità confermata dalla community nel tempo (etichetta pubblica)
+  confirmed      Boolean  @default(false)
+  // ricorso accolto: i controlli anti-abuso su questa recensione vengono
+  // riesaminati allo storico successivo (i voti esclusi tornano a contare)
+  trustOverride  Boolean  @default(false)
+  calculatedAt   DateTime @default(now())
+
+  @@index([confirmed])
+}
+
+// Badge di utilità dell'utente: si riconferma a ogni ricalcolo sulla
+// finestra mobile (nessun riconoscimento permanente a volume).
+// Codici: contributo-utile | voce-affidabile | guida-community.
+model UtilityBadge {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  code       String
+  // punti e numero di categorie con utilità confermata al momento del
+  // riconoscimento (trasparenza verso chi li ha ricevuti)
+  points     Float    @default(0)
+  categories Int      @default(0)
+  awardedAt  DateTime @default(now())
+  // scadenza della validità: oltre questa data il badge non compare più
+  // (il ricalcolo quotidiano lo rinnova finché la soglia resta raggiunta)
+  expiresAt  DateTime
+
+  @@unique([userId, code])
+  @@index([userId])
+}
+
+// Ricorso: l'autore contesta l'esclusione di voti ritenuti anomali
+// (penalità di utilità). Risolto solo dallo staff, con risposta motivata.
+// open | accepted | rejected (validazione applicativa).
+model UtilityAppeal {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reviewId     String?
+  review       Review?   @relation(fields: [reviewId], references: [id], onDelete: SetNull)
+  reason       String
+  status       String    @default("open")
+  answer       String?
+  createdAt    DateTime  @default(now())
+  resolvedAt   DateTime?
+  resolvedById String?
+
+  @@index([status])
 }
 
 model Report {

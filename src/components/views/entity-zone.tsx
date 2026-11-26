@@ -3,8 +3,11 @@
 // Contributo aperto: chi non ha il Premium vede le ultime 3 recensioni in
 // anteprima offuscata (il testo integrale non lascia mai il server), le foto
 // restano riservate ai Premium e a chi ha contribuito con una foto, i voti
-// di utilità (pollice su/giù) sono conteggi pubblici ma li esprimono i
+// di utilità (utile per decidere) sono conteggi pubblici ma li esprimono i
 // Premium. Le recensioni senza invito mostrano il badge "dichiarata".
+// Riconoscimento di utilità: le indagini che aiutano davvero a decidere
+// ricevono l'etichetta «utilità confermata»; i contributi che hanno
+// attivato giorni Premium per l'autore sono etichettati «incentivato».
 import { useCallback, useEffect, useState } from "react";
 import { useApp } from "@/lib/client/store";
 import { api, fmt1, fmtInt, fmtMonthYear } from "@/lib/client/api";
@@ -32,6 +35,13 @@ type ReviewItem = {
   photos: Array<{ id: string; width: number; height: number }>;
   votes: { up: number; down: number };
   myVote: number | null;
+  // riconoscimento di utilità: «confirmed» = la community l'ha trovata utile
+  // nel tempo (ricalcolo periodico su finestra di 30 giorni)
+  utility?: { enabled: boolean; confirmed: boolean };
+  // trasparenza: il contributo ha attivato giorni Premium per l'autore
+  incentivized?: boolean;
+  // riconoscimenti di utilità attivi dell'autore (segnale di qualità)
+  authorBadges?: string[];
   teaser?: boolean;
 };
 
@@ -70,6 +80,7 @@ type EntityPayload = {
   };
   photos: { enabled: boolean; canView: boolean; viaContribution: boolean };
   votes: { enabled: boolean; canVote: boolean };
+  utility: { enabled: boolean };
   settings: { minReviews: number; rettificaDays: number };
 };
 
@@ -140,6 +151,12 @@ function PhotosStrip({ r, canView, hintContribution }: { r: ReviewItem; canView:
   );
 }
 
+const UTILITY_BADGE_LABELS: Record<string, string> = {
+  "contributo-utile": "Contributo utile",
+  "voce-affidabile": "Voce affidabile",
+  "guida-community": "Guida della community",
+};
+
 function VoteBar({ r, canVote, enabled }: { r: ReviewItem; canVote: boolean; enabled: boolean }) {
   const { user } = useApp();
   const [v, setV] = useState({ up: r.votes.up, down: r.votes.down, mine: r.myVote });
@@ -155,16 +172,39 @@ function VoteBar({ r, canVote, enabled }: { r: ReviewItem; canVote: boolean; ena
   };
   return (
     <div className="vote-bar">
-      <span className="small muted">Ti risulta attendibile?</span>
+      <span className="small muted">Ti è stata utile per decidere?</span>
       <button type="button" className={`vote-btn up${v.mine === 1 ? " on" : ""}`} disabled={!canVote || busy}
         onClick={() => void vote(1)}
-        title={canVote ? "Confermi la plausibilità di questa indagine" : "Il voto è riservato agli utenti Premium: si ottiene pubblicando un'indagine"}
-        aria-label="Pollice su: indagine attendibile">👍 <span className="vote-n">{v.up}</span></button>
+        title={canVote ? "Questa indagine mi ha aiutato a decidere: la segnalo come utile" : "Il voto è riservato agli utenti Premium: si ottiene pubblicando un'indagine"}
+        aria-label="Voto utile: questa indagine mi ha aiutato a decidere">👍 <span className="vote-n">{v.up}</span></button>
       <button type="button" className={`vote-btn down${v.mine === -1 ? " on" : ""}`} disabled={!canVote || busy}
         onClick={() => void vote(-1)}
-        title={canVote ? "Questa indagine non ti torna: esprimi il disconoscimento" : "Il voto è riservato agli utenti Premium: si ottiene pubblicando un'indagine"}
-        aria-label="Pollice giù: indagine non confermata">👎 <span className="vote-n">{v.down}</span></button>
+        title={canVote ? "Questa indagine non mi ha aiutato a decidere" : "Il voto è riservato agli utenti Premium: si ottiene pubblicando un'indagine"}
+        aria-label="Non mi è stata utile per decidere">👎 <span className="vote-n">{v.down}</span></button>
       {!canVote ? <span className="small muted">{user ? "votano gli utenti Premium" : <a href="#/accedi">accedi per votare</a>}</span> : null}
+    </div>
+  );
+}
+
+// Chip di trasparenza e riconoscimento sotto una indagine: utilità confermata
+// nel tempo, contributo incentivato (giorni Premium all'autore), riconoscimenti
+// dell'autore. Pesi/voti anomali mai esposti: la formula è pubblica nella pagina
+// «Come funziona».
+function UtilityChips({ r }: { r: ReviewItem }) {
+  if (!r.utility?.enabled && !r.incentivized) return null;
+  const badges = (r.authorBadges || []).filter(b => UTILITY_BADGE_LABELS[b]);
+  if (!r.utility?.confirmed && !r.incentivized && !badges.length) return null;
+  return (
+    <div className="utility-chips">
+      {r.utility?.confirmed ? (
+        <span className="pill pill-green" title="La community ha trovato utile questa indagine: voti validi nella finestra di 30 giorni, dopo i controlli anti-abuso">Utilità confermata</span>
+      ) : null}
+      {badges.map(b => (
+        <span key={b} className="pill pill-amber" title="Riconoscimento di utilità dell'autore: quanto le sue indagini aiutano a decidere (mai le stelle, mai il volume)">{UTILITY_BADGE_LABELS[b]}</span>
+      ))}
+      {r.incentivized ? (
+        <span className="pill pill-gray" title="Trasparenza: l'autore ha ricevuto giorni di Membership Premium per questo contributo">Contenuto incentivato</span>
+      ) : null}
     </div>
   );
 }
@@ -251,6 +291,7 @@ function ReviewCard({ r, photos, votes, onReport }: {
       {photos.enabled ? <PhotosStrip r={r} canView={photos.canView} hintContribution={!!user && !photos.canView} /> : null}
       {r.updateReason ? <p className="updated-note">Motivo dell&apos;aggiornamento: {r.updateReason}</p> : null}
       <VoteBar r={r} canVote={votes.canVote} enabled={votes.enabled} />
+      <UtilityChips r={r} />
       <div className="review-foot">
         {r.isDemo ? <DemoChip /> : null}
         <span className="spacer"></span>
@@ -268,6 +309,9 @@ export function EntityView({ id }: { id: string }) {
   const [notFound, setNotFound] = useState(false);
   const [disputeOpen, setDisputeOpen] = useState(false);
   const [reportFor, setReportFor] = useState<string | null>(null);
+  // ordinamento delle indagini: recenti oppure «più utili» (utilità confermata
+  // e voti, mai le stelle) — vantaggio leggero per chi contribuisce bene
+  const [sortMode, setSortMode] = useState<"recent" | "useful">("recent");
 
   const load = useCallback(async () => {
     const res = await api<EntityPayload>(`/api/public/entity/${id}`);
@@ -285,6 +329,15 @@ export function EntityView({ id }: { id: string }) {
   const ent = data.entity;
   const zoneName = ent.zoneId ? boot.zones.find(z => z.id === ent.zoneId)?.name : null;
   const st = ent.stats;
+  const sortedReviews = sortMode === "useful" && data.utility.enabled
+    ? [...data.reviews].sort((a, b) => {
+        const conf = (a.utility?.confirmed ? 1 : 0) - (b.utility?.confirmed ? 1 : 0);
+        if (conf !== 0) return -conf;
+        const ups = a.votes.up - b.votes.up;
+        if (ups !== 0) return -ups;
+        return b.createdAt.localeCompare(a.createdAt);
+      })
+    : data.reviews;
 
   return (
     <>
@@ -350,6 +403,16 @@ export function EntityView({ id }: { id: string }) {
               <span className="pill pill-gray">
                 {data.premium.locked ? data.publishedCount : data.reviews.length} pubblicate{data.hiddenCount ? ` · ${data.hiddenCount} nascoste dalla moderazione` : ""}
               </span>
+              {data.utility.enabled && data.reviews.length > 1 ? (
+                <label className="small muted" htmlFor="ordina-indagini" style={{ whiteSpace: "nowrap" }}>
+                  Ordina per{" "}
+                  <select id="ordina-indagini" value={sortMode} onChange={e => setSortMode(e.target.value === "useful" ? "useful" : "recent")}
+                    title="«Più utili» ordina per utilità confermata e voti ricevuti, mai per le stelle">
+                    <option value="recent">Più recenti</option>
+                    <option value="useful">Più utili per la community</option>
+                  </select>
+                </label>
+              ) : null}
             </div>
             {data.premium.locked ? (
               <PremiumLockedBox lockedCount={data.premium.lockedCount} daysPerReview={data.premium.daysPerReview} logged={!!user} />
@@ -364,7 +427,7 @@ export function EntityView({ id }: { id: string }) {
               {data.premium.locked && data.reviews.length ? (
                 <p className="small muted" style={{ marginTop: 10 }}>Queste sono le tue indagini su questa scheda (sempre visibili a te):</p>
               ) : null}
-              {data.reviews.map(r => (
+              {sortedReviews.map(r => (
                 <ReviewCard key={r.id} r={r} photos={data.photos} votes={data.votes} onReport={setReportFor} />
               ))}
               {!data.reviews.length && !data.teasers.length ? (

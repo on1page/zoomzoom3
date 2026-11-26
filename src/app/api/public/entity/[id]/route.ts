@@ -18,6 +18,7 @@ import { getCurrentUser } from "@/lib/server/auth";
 import { hasPremiumAccess, premiumStateOf } from "@/lib/server/premium";
 import { publicEntity, publicReviewsForEntity, photoMetaForEntity } from "@/lib/server/public-data";
 import { obfuscateReviewText, photoAccessOf, voteSummariesForEntity, myVotesForEntity } from "@/lib/server/review-access";
+import { utilitySummariesForEntity } from "@/lib/server/utility";
 import { publicConsultantForEntity } from "@/lib/server/consultants";
 import { handleError } from "@/lib/server/http";
 
@@ -48,11 +49,13 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     const hiddenCount = reviews.length - published.length;
 
     const fullAccess = hasPremiumAccess(user, settings);
-    const [photoMeta, voteSum, myVotes, photoAccess] = await Promise.all([
+    const [photoMeta, voteSum, myVotes, photoAccess, utilitySum] = await Promise.all([
       settings.photosEnabled ? photoMetaForEntity(id) : Promise.resolve(new Map<string, { id: string; width: number; height: number }[]>()),
       settings.votesEnabled ? voteSummariesForEntity(id) : Promise.resolve(new Map<string, { up: number; down: number }>()),
       user ? myVotesForEntity(id, user.id) : Promise.resolve(new Map<string, number>()),
       photoAccessOf(user, settings),
+      // riconoscimento di utilità: «utilità confermata» sulla recensione
+      settings.utilityEnabled ? utilitySummariesForEntity(id) : Promise.resolve(new Map<string, { confirmed: boolean; validVotes: number; anomalousVotes: number; points: number }>()),
     ]);
 
     // arricchisce una recensione con foto (metadati) e voti; senza accesso
@@ -81,6 +84,14 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
         photos: photoMeta.get(r.id) || [],
         votes: voteSum.get(r.id) || { up: 0, down: 0 },
         myVote: myVotes.has(r.id) ? myVotes.get(r.id)! : null,
+        // riconoscimento di utilità (finestra 30 giorni, ricalcolo periodico)
+        utility: {
+          enabled: settings.utilityEnabled,
+          confirmed: !!(utilitySum.get(r.id)?.confirmed),
+        },
+        // trasparenza: contributo che ha attivato giorni Premium per l'autore
+        incentivized: !!r.incentivized,
+        authorBadges: r.authorBadges || [],
         teaser,
       };
       if (teaser) {
@@ -136,6 +147,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
         enabled: settings.votesEnabled,
         canVote: settings.votesEnabled && !!user && (["moderator", "admin", "superadmin"].includes(user.role) || premiumStateOf(user).active),
       },
+      utility: { enabled: settings.utilityEnabled },
       settings: { minReviews: settings.minReviews, rettificaDays: settings.rettificaDays },
     });
   } catch (e) {
