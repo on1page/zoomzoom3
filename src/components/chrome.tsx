@@ -322,6 +322,7 @@ export function Footer() {
             <h4>Il progetto</h4>
             <a href="#/come-funziona">Come funziona la verifica</a>
             <a href="#/premium">Membership Premium</a>
+            <a href="#/abbonamento">Abbonamento</a>
             <a href="#/cerca">Cerca un soggetto</a>
             <a href="#/mappa">Mappa delle reputazioni</a>
             <a href="#/classifiche">Classifiche</a>

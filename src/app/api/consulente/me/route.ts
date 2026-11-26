@@ -9,10 +9,11 @@ import { requireUser } from "@/lib/server/auth";
 import { getSettings } from "@/lib/server/settings";
 import { readJson, handleError, fail } from "@/lib/server/http";
 import { eurosToCents } from "@/lib/server/consultants";
+import { sweepPerizie } from "@/lib/server/perizie";
 
 export const dynamic = "force-dynamic";
 
-async function serializeRequests(view: "consultant" | "requester", userId: string) {
+async function serializeRequests(view: "consultant" | "requester", userId: string, settings: Awaited<ReturnType<typeof getSettings>>) {
   const rows = await db.periziaRequest.findMany({
     where: view === "consultant" ? { consultant: { userId } } : { requesterId: userId },
     orderBy: { createdAt: "desc" },
@@ -20,47 +21,70 @@ async function serializeRequests(view: "consultant" | "requester", userId: strin
     include: {
       consultant: { include: { zone: true } },
       requester: { select: { nickname: true } },
+      zone: true,
     },
   });
-  return rows.map(r => ({
-    id: r.id,
-    kind: r.kind,
-    address: r.address,
-    zoneId: r.zoneId,
-    description: r.description,
-    status: r.status,
-    feeCents: r.feeCents,
-    rejectReason: r.rejectReason,
-    reportTitle: r.reportTitle,
-    deliveredAt: r.deliveredAt?.toISOString() ?? null,
-    paidAt: r.paidAt?.toISOString() ?? null,
-    payoutCents: r.payoutCents,
-    commissionCents: r.commissionCents,
-    createdAt: r.createdAt.toISOString(),
-    // lato consulente serve il nickname del richiedente; lato richiedente
-    // il nome del consulente (mai l'email: riservata)
-    counterpart: view === "consultant"
-      ? { nickname: r.requester.nickname }
-      : { name: `${r.consultant.firstName} ${r.consultant.lastName}`, profession: r.consultant.profession },
-    canDeliver: view === "consultant" && r.status === "paid",
-    canAccept: view === "consultant" && r.status === "requested",
-    canReject: view === "consultant" && r.status === "requested",
-    canCancel: view === "requester" && ["requested", "accepted"].includes(r.status),
-  }));
+  return rows.map(r => {
+    // K9 (modello D11, impostazione periziaHideRequesterUntilAccept): il
+    // nickname del richiedente arriva al consulente solo DOPO l'accettazione
+    // (accepted/paid/delivered/closed); finché è in attesa resta riservato
+    const requesterVisibleToConsultant = !settings.periziaHideRequesterUntilAccept
+      || ["accepted", "paid", "delivered", "closed"].includes(r.status);
+    return {
+      id: r.id,
+      code: r.code,
+      kind: r.kind,
+      address: r.address,
+      zoneId: r.zoneId,
+      zoneName: r.zone ? r.zone.name : null,
+      description: r.description,
+      status: r.status,
+      feeCents: r.feeCents,
+      rejectReason: r.rejectReason,
+      reportTitle: r.reportTitle,
+      deliveredAt: r.deliveredAt?.toISOString() ?? null,
+      paidAt: r.paidAt?.toISOString() ?? null,
+      deadlineAt: r.deadlineAt?.toISOString() ?? null,
+      expiresAt: r.expiresAt?.toISOString() ?? null,
+      voidCount: r.voidCount,
+      entityId: r.entityId,
+      payoutCents: r.payoutCents,
+      commissionCents: r.commissionCents,
+      createdAt: r.createdAt.toISOString(),
+      // lato consulente il nickname del richiedente (dopo l'accettazione, se
+      // K9 attivo); lato richiedente il nome del consulente (mai l'email).
+      // La richiesta in bacheca (consulente NULL) per il richiedente dice
+      // «bacheca di zona», per il consulente non compare affatto (sta nella
+      // bacheca dedicata, senza dati del richiedente).
+      counterpart: view === "consultant"
+        ? { nickname: requesterVisibleToConsultant ? r.requester.nickname : null }
+        : r.consultant
+          ? { name: `${r.consultant.firstName} ${r.consultant.lastName}`, profession: r.consultant.profession }
+          : { name: null, profession: null, bacheca: true },
+      canDeliver: view === "consultant" && r.status === "paid",
+      canAccept: view === "consultant" && r.status === "requested",
+      canReject: view === "consultant" && r.status === "requested",
+      canCancel: view === "requester" && ["requested", "accepted", "open", "expired"].includes(r.status),
+      canRepropose: view === "requester" && r.status === "expired",
+    };
+  });
 }
 
 export async function GET() {
   try {
     const user = await requireUser();
+    const settings = await getSettings();
+    // scadenze maturate (bacheca scaduta, incarico nullo) applicate prima di
+    // leggere: l'utente vede sempre lo stato reale
+    await sweepPerizie(settings);
     const prof = await db.consultantProfile.findUnique({
       where: { userId: user.id },
       include: { zone: true, docs: { select: { id: true, kind: true, originalName: true, sizeBytes: true, createdAt: true } } },
     });
     const [incoming, outgoing] = await Promise.all([
-      serializeRequests("consultant", user.id),
-      serializeRequests("requester", user.id),
+      serializeRequests("consultant", user.id, settings),
+      serializeRequests("requester", user.id, settings),
     ]);
-    const settings = await getSettings();
     return NextResponse.json({
       ok: true,
       profile: prof ? {
@@ -74,6 +98,8 @@ export async function GET() {
         ibanCheck: prof.ibanCheck, ibanCheckedAt: prof.ibanCheckedAt?.toISOString() ?? null,
         status: prof.status, rejectReason: prof.rejectReason,
         entityId: prof.entityId,
+        incarichiCompletati: prof.incarichiCompletati,
+        incarichiNulli: prof.incarichiNulli,
         docs: prof.docs,
         createdAt: prof.createdAt.toISOString(),
       } : null,

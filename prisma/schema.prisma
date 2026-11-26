@@ -73,6 +73,9 @@ model User {
   // Consulente Tecnico: profilo professionale (uno per utente, se iscritto)
   consultantProfile ConsultantProfile?
   perizieRequested  PeriziaRequest[] @relation("periziaRequester")
+  // ordini di abbonamento Premium (percorso ② del modello D11: chi non
+  // contribuisce paga il piano Silver/Gold/Platinum)
+  subscriptionOrders SubscriptionOrder[] @relation("subscriptionOrders")
 
   @@index([role])
 }
@@ -208,6 +211,9 @@ model Entity {
   reviews     Review[]
   experiences Experience[]
   disputes    Dispute[]
+  // indagini professionali consegnate collegate a questa scheda (chiusura
+  // del cerchio: la relazione consegnata crea o aggiorna la scheda)
+  perizie     PeriziaRequest[] @relation("perizieEntity")
 
   @@index([categoryId, status])
   @@index([zoneId])
@@ -660,6 +666,12 @@ model ConsultantProfile {
 
   docs     ConsultantDoc[]
   requests PeriziaRequest[] @relation("periziaConsultant")
+  // feedback di serietà (percorso ③ del modello D11): incarichi consegnati
+  // entro la scadenza e incarichi mancati (relazione non consegnata entro il
+  // termine): ogni mancato fa ripubblicare la richiesta in bacheca e conta
+  // qui. Pubblico sulla scheda del consulente come segnale di affidabilità.
+  incarichiCompletati Int @default(0)
+  incarichiNulli     Int @default(0)
 
   @@index([status])
 }
@@ -682,36 +694,63 @@ model ConsultantDoc {
   @@index([consultantId])
 }
 
-// Richiesta di perizia tecnica o valutazione immobiliare a un
-// consulente approvato. Flusso e stati:
-//   requested → accepted (il consulente conferma la tariffa)
-//            → paid (il super amministratore registra il pagamento
-//               ricevuto dalla piattaforma)
-//            → delivered (relazione consegnata: qui si calcolano
-//               accredito al consulente e commissione piattaforma)
-//            → closed (accredito eseguito dal super amministratore)
+// Richiesta di perizia tecnica o valutazione immobiliare. Flusso e stati:
+//   open → (bacheca di zona: nessun consulente ancora incaricato; scade dopo
+//          bachecaExpiryDays giorni → expired, il richiedente può riproporla)
+//        → accepted (un consulente accetta/ritira l'incarico confermando la
+//          tariffa: diretto o dalla bacheca con «claim»)
+//        → paid (il super amministratore registra il pagamento ricevuto dalla
+//          piattaforma; parte il termine di periziaDeadlineDays giorni)
+//        → delivered (relazione consegnata: qui si calcolano accredito al
+//          consulente e commissione piattaforma; la scheda dell'indirizzo
+//          nasce o si aggiorna con l'indagine certificata — chiusura del
+//          cerchio del modello D11/K7)
+//        → closed (accredito eseguito dal super amministratore)
 //   uscite anticipate: rejected (consulente), cancelled (richiedente)
+//   incarico nullo: pagata ma relazione NON consegnata entro la scadenza →
+//   la richiesta torna in bacheca (open) con voidCount+1, il consulente
+//   riceve incarichiNulli+1 (feedback di serietà pubblico).
 model PeriziaRequest {
   id          String    @id @default(cuid())
   requesterId String
   requester   User      @relation("periziaRequester", fields: [requesterId], references: [id], onDelete: Cascade)
-  consultantId String
-  consultant  ConsultantProfile @relation("periziaConsultant", fields: [consultantId], references: [id], onDelete: Cascade)
+  // consulente incaricato. NULL = richiesta in BACHECA DI ZONA: la vedono gli
+  // approvati che coprono la zona, il primo che accetta (claim) lo diventa.
+  consultantId String?
+  consultant  ConsultantProfile? @relation("periziaConsultant", fields: [consultantId], references: [id])
   // Perizia tecnica | Valutazione immobiliare | Altro
   kind        String
   address     String    // indirizzo dell'immobile oggetto della richiesta
   zoneId      String?
   zone        Zone?     @relation(fields: [zoneId], references: [id])
   description String
-  // requested | accepted | rejected | paid | delivered | closed | cancelled
+  // requested | open | accepted | rejected | paid | delivered | closed |
+  // cancelled | expired | (void non è uno stato: è il ritorno in bacheca)
   status      String    @default("requested")
+  // codice-causale del pagamento (es. PZ-4K7F2Q): breve, univoco, mai usato
+  // prima dell'accettazione; il richiedente lo usa nel bonifico tracciato
+  code        String?   @unique
   feeCents    Int?      // tariffa confermata dal consulente all'accettazione
   rejectReason String?
   reportTitle String?
   reportBody  String?   // testo della relazione (reso come PDF scaricabile)
+  // sintesi pubblica dell'esito che il consulente può pubblicare alla consegna:
+  // compare sulla scheda dell'indirizzo come «indagine certificata» (max 600)
+  publicSummary String?
+  // scheda dell'indirizzo creata o aggiornata alla consegna (chiusura K7)
+  entityId    String?
+  entity      Entity?  @relation("perizieEntity", fields: [entityId], references: [id])
   deliveredAt DateTime?
   paidAt      DateTime?
+  // termine per consegnare la relazione: paidAt + periziaDeadlineDays
+  deadlineAt  DateTime?
+  // scadenza della bacheca (open): oltre, expired
+  expiresAt   DateTime?
   paymentRef  String?   // riferimento del pagamento registrato dallo staff
+  // quante volte l'incarico è risultato nullo (pagato ma non consegnato):
+  // ogni volta la richiesta è ripubblicata in bacheca e il consulente mancano
+  // riceve incarichiNulli+1
+  voidCount   Int       @default(0)
   // ripartizione calcolata ALLA CONSEGNA: accredito 90% / commissione 10%
   payoutCents     Int?
   commissionCents Int?
@@ -721,4 +760,34 @@ model PeriziaRequest {
 
   @@index([consultantId, status])
   @@index([requesterId])
+  @@index([status, zoneId])
+}
+
+// Ordine di abbonamento Premium (percorso ② del modello D11: «chi non
+// contribuisce, paga»). Piani configurabili dal back office (default:
+// Silver 1 giorno / 1 €, Gold 7 giorni / 5 €, Platinum 30 giorni / 20 €).
+// Pagamento come le perizie: bonifico tracciato con causale-codice
+// (SUB-XXXXXX) e registrazione dello staff; alla registrazione nasce il
+// PremiumGrant di origine «acquisto». Nessun circuito di pagamento:
+// Stripe resta l'evoluzione successiva, non un prerequisito (K8).
+model SubscriptionOrder {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation("subscriptionOrders", fields: [userId], references: [id], onDelete: Cascade)
+  planSlug    String    // slug del piano (silver | gold | platinum)
+  planName    String    // nome del piano al momento dell'ordine (storico)
+  days        Int       // giorni Premium concessi alla registrazione
+  priceCents  Int       // importo da versare
+  code        String    @unique // causale del bonifico, es. SUB-4K7F2Q
+  // pending (in attesa del bonifico registrato dallo staff) | paid (Premium
+  // attivato) | cancelled (annullato dall'utente prima del pagamento o dallo staff)
+  status      String    @default("pending")
+  paymentRef  String?   // riferimento del bonifico registrato dallo staff
+  grantId     String?   // PremiumGrant creato alla registrazione (origine «acquisto»)
+  createdAt   DateTime  @default(now())
+  paidAt      DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([status])
 }

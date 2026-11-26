@@ -16,7 +16,7 @@ import { getCategory } from "@/lib/server/categories";
 import { getSettings } from "@/lib/server/settings";
 import { getCurrentUser } from "@/lib/server/auth";
 import { hasPremiumAccess, premiumStateOf } from "@/lib/server/premium";
-import { publicEntity, publicReviewsForEntity, photoMetaForEntity } from "@/lib/server/public-data";
+import { publicEntity, publicReviewsForEntity, photoMetaForEntity, certifiedIndagineForEntity } from "@/lib/server/public-data";
 import { obfuscateReviewText, photoAccessOf, voteSummariesForEntity, myVotesForEntity } from "@/lib/server/review-access";
 import { utilitySummariesForEntity } from "@/lib/server/utility";
 import { publicConsultantForEntity } from "@/lib/server/consultants";
@@ -39,11 +39,13 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
       return NextResponse.json({ ok: false, error: "Scheda non trovata." }, { status: 404 });
     }
     const cat = await getCategory(ent.categoryId);
-    const [pub, reviews, consultant] = await Promise.all([
+    const [pub, reviews, consultant, certified] = await Promise.all([
       publicEntity(id, settings.minReviews),
       publicReviewsForEntity(id),
       // scheda professionale (solo per la categoria Consulenti tecnici)
       ent.categoryId === "consulente" ? publicConsultantForEntity(id) : Promise.resolve(null),
+      // indagine professionale certificata collegata a questa scheda (K7)
+      certifiedIndagineForEntity(id),
     ]);
     const published = reviews.filter(r => r.status === "published");
     const hiddenCount = reviews.length - published.length;
@@ -122,6 +124,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
       entity: pub,
       category: cat,
       consultant,
+      certified,
       reviews: reviewsOut,
       teasers,
       hiddenCount,

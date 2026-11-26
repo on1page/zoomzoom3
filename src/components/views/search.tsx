@@ -1,6 +1,6 @@
 "use client";
 // ZoomZoom — ricerca con filtri chiari e ordinamento trasparente.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "@/lib/client/store";
 import { navigate, useHashRoute } from "@/lib/client/router";
 import { api } from "@/lib/client/api";
@@ -16,6 +16,11 @@ export function SearchView() {
   const route = useHashRoute();
   const p = route.params;
   const [rows, setRows] = useState<SearchRow[] | null>(null);
+  // Atterraggio diretto su #/cerca?q=…: partono due ricerche (la prima, senza
+  // filtri, per il primo render con la route predefinita; poi quella reale).
+  // Se la prima risponde per ultima NON deve sovrascrivere i filtri: conta le
+  // invocazioni e applica solo la risposta più recente.
+  const searchSeq = useRef(0);
   const [form, setForm] = useState({
     q: p.q || "", cats: p.cat ? p.cat.split(",") : [], zona: p.zona || "",
     pmin: p.pmin || "", pmax: p.pmax || "", punit: p.punit || "",
@@ -23,6 +28,7 @@ export function SearchView() {
   });
 
   const runSearch = useCallback(async () => {
+    const seq = ++searchSeq.current;
     const params = new URLSearchParams();
     if (p.q) params.set("q", p.q);
     if (p.cat) params.set("cat", p.cat);
@@ -33,6 +39,7 @@ export function SearchView() {
     if (p.pmax) params.set("pmax", p.pmax);
     if (p.punit) params.set("punit", p.punit);
     const res = await api<{ rows: SearchRow[] }>(`/api/public/search?${params.toString()}`);
+    if (seq !== searchSeq.current) return; // risposta superata da una più recente
     setRows(res.ok ? res.rows : []);
   }, [p.q, p.cat, p.zona, p.suff, p.ord, p.pmin, p.pmax, p.punit]);
 
@@ -71,6 +78,9 @@ export function SearchView() {
       {rows && !rows.length ? (
         <Alert kind="info">
           Nessun risultato. Se l&apos;immobile che cerchi non è ancora qui, puoi <a href="#/recensione"><b>aggiungerlo tu dall&apos;indirizzo</b></a> e avviare la prima indagine della community: niente catalogo vuoto, il primo mattone lo porti tu (con {boot.settings.premiumDaysPerReview} giorni di Premium).
+          {boot.site.periziaBachecaEnabled && boot.site.consulentiEnabled ? (
+            <><br />Oppure <a href={`#/indagine${p.q ? `?addr=${encodeURIComponent(p.q)}` : ""}`}><b>chiedi un&apos;indagine professionale</b></a> per questo indirizzo: geometri, ingegneri e periti della zona ricevono la richiesta e il primo che accetta consegna una relazione scritta (con pagamento tracciato e consegna entro {boot.settings.periziaDeadlineDays} giorni).</>
+          ) : null}
         </Alert>
       ) : null}
       <div className="grid grid-side">

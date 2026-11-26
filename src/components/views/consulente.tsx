@@ -6,11 +6,18 @@
 //                                                       stato, dashboard del
 //                                                       consulente approvato
 //   ConsulenteRequestsView  (#/consulente-richieste)  richieste inviate
-//                                                       (stato, pagamento,
-//                                                       scarico del PDF)
+//                                                       (stato, pagamento
+//                                                       con causale-codice,
+//                                                       riproposta, scarico PDF)
 //   ConsulenteRequestFormView (#/consulente-richiesta?to=<scheda>)
 //                                                       modulo di richiesta
 //                                                       di perizia/valutazione
+//   IndagineProView         (#/indagine)              richiesta di indagine
+//                                                       professionale DALLA
+//                                                       RICERCA SENZA RISULTATI
+//                                                       (percorso ③ del modello
+//                                                       D11): va in bacheca di
+//                                                       zona, senza consulente
 //   ConsultantCard                                    sezione professionale
 //                                                       della scheda pubblica
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -50,16 +57,21 @@ type ProfiloConsultant = {
 };
 
 export type Richiesta = {
-  id: string; kind: string; address: string; description: string;
+  id: string; code: string | null; kind: string; address: string; description: string;
   status: string; feeCents: number | null; rejectReason: string | null;
   reportTitle: string | null; deliveredAt: string | null; paidAt: string | null;
+  deadlineAt: string | null; expiresAt: string | null;
+  voidCount: number; entityId: string | null;
+  zoneName: string | null;
   payoutCents: number | null; commissionCents: number | null;
   createdAt: string;
-  counterpart: { nickname?: string; name?: string; profession?: string };
-  canDeliver?: boolean; canAccept?: boolean; canReject?: boolean; canCancel?: boolean;
+  counterpart: { nickname?: string | null; name?: string | null; profession?: string | null; bacheca?: boolean };
+  canDeliver?: boolean; canAccept?: boolean; canReject?: boolean; canCancel?: boolean; canRepropose?: boolean;
 };
 
 const STATUS_LABEL: Record<string, string> = {
+  open: "In bacheca di zona — in attesa di un consulente",
+  expired: "Scaduta in bacheca senza accettazioni",
   requested: "In attesa di risposta",
   accepted: "Accettata — in attesa di pagamento",
   rejected: "Rifiutata",
@@ -71,11 +83,19 @@ const STATUS_LABEL: Record<string, string> = {
 
 function StatusPill({ status }: { status: string }) {
   const cls: Record<string, string> = {
+    open: "pill pill-blue",
+    expired: "pill pill-gray",
     requested: "pill pill-gray", accepted: "pill pill-amber", rejected: "pill pill-red",
     paid: "pill pill-blue", delivered: "pill pill-green", closed: "pill pill-green",
     cancelled: "pill pill-gray",
   };
   return <span className={cls[status] || "pill pill-gray"}>{STATUS_LABEL[status] || status}</span>;
+}
+
+/** Chiusura del cerchio (K7): link alla scheda nata o aggiornata dalla consegna. */
+function SchedaCollegata({ entityId }: { entityId: string | null }) {
+  if (!entityId) return null;
+  return <p className="small mb0" style={{ marginTop: 6 }}>Chiusura del cerchio: la consegna ha <a href={`#/scheda/${entityId}`}><b>creato o aggiornato la scheda dell&apos;indirizzo</b></a> con l&apos;indagine certificata.</p>;
 }
 
 /* ================================================================
@@ -116,10 +136,10 @@ export function ConsulenteView() {
             <ol className="small" style={{ paddingLeft: 20 }}>
               <li>Il consulente si iscrive dal suo account (2FA attiva obbligatoria) con anagrafica, zona di esercizio, raggio d&apos;azione, titolo, documenti di qualifica e identificazione, partita IVA, IBAN e tariffa.</li>
               <li>Lo staff esamina la domanda e, se idonea, approva: la scheda professionale entra nel catalogo.</li>
-              <li>Un utente registrato richiede la perizia dalla scheda del consulente; il consulente accetta confermando la tariffa.</li>
-              <li>L&apos;utente paga la tariffa alla piattaforma; il consulente consegna la relazione in PDF e riceve l&apos;accredito (tariffa meno il 10% che resta alla piattaforma) solo a consegna avvenuta.</li>
+              <li>Un utente registrato richiede la perizia <b>dalla scheda del consulente</b> oppure <b>dalla ricerca senza risultati</b> (in bacheca di zona: la vedono i consulenti che coprono la zona, nessun dato del richiedente fino all&apos;accettazione).</li>
+              <li>Il consulente accetta confermando la tariffa; l&apos;utente paga alla piattaforma con bonifico e causale-codice; il consulente consegna la relazione in PDF entro 7 giorni solari e riceve l&apos;accredito (tariffa meno il 10% che resta alla piattaforma) solo a consegna avvenuta. Alla consegna, la scheda dell&apos;indirizzo nasce o si aggiorna con l&apos;indagine certificata.</li>
             </ol>
-            <p className="small mb0">Per iniziare <a href="#/accedi">accedi</a> o <a href="#/registrati">registrati</a>; per chiedere una perizia, apri la scheda di un consulente dalla <a href="#/cerca">ricerca</a> o dalla categoria <a href="#/categoria/consulente">Consulenti</a>.</p>
+            <p className="small mb0">Per iniziare <a href="#/accedi">accedi</a> o <a href="#/registrati">registrati</a>; per chiedere un&apos;indagine, apri la scheda di un consulente dalla <a href="#/cerca">ricerca</a>, usa <a href="#/indagine">la richiesta per indirizzo</a> o guarda la categoria <a href="#/categoria/consulente">Consulenti</a>.</p>
           </div>
         ) : loading ? (
           <p className="muted">Caricamento del tuo profilo consulente…</p>
@@ -491,6 +511,93 @@ function DocsManager({ prof, onChanged }: { prof: ProfiloConsultant; onChanged: 
   );
 }
 
+/* ---------- bacheca di zona (percorso ③ del modello D11) ---------- */
+
+export type BachecaRow = {
+  id: string; code: string | null; kind: string; address: string;
+  zoneName: string; province: string | null; description: string;
+  createdAt: string; expiresAt: string | null;
+  voidCount: number; feeCents: number | null;
+};
+
+function BachecaDiZona({ onChanged }: { onChanged: () => void }) {
+  const { boot, toast } = useApp();
+  const [rows, setRows] = useState<BachecaRow[] | null>(null);
+  const [zone, setZone] = useState<{ name: string; province: string | null; radiusKm: number } | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [fee, setFee] = useState("");
+
+  const load = useCallback(async () => {
+    const res = await api<{ rows: BachecaRow[]; zone: { name: string; province: string | null }; radiusKm: number }>("/api/consulente/bacheca");
+    if (res.ok) { setRows(res.rows || []); setZone({ name: res.zone.name, province: res.zone.province, radiusKm: res.radiusKm }); }
+    else setRows([]);
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  const claim = async (id: string, fixedFee: number | null) => {
+    setBusy(id);
+    const res = await api(`/api/consulente/requests/${id}/action`, {
+      body: { action: "claim", ...(fixedFee != null ? {} : { feeEuros: fee }) },
+    });
+    setBusy(null);
+    if (res.ok) { toast("Incarico ritirato: ora è tuo."); onChanged(); void load(); }
+    else toast(res.error, "err");
+  };
+
+  if (!boot) return null;
+  const dateIt = (s: string | null) => s ? new Date(s).toLocaleDateString("it-IT") : null;
+
+  return (
+    <>
+      <h2>Bacheca di zona</h2>
+      <p className="small muted">
+        Le richieste di indagine professionale per immobili entro {zone ? `${zone.radiusKm} km da ${zone.name}${zone.province ? ` (${zone.province})` : ""}` : "il tuo raggio d'azione"}.
+        Nessun dato del richiedente finché non ritiri l&apos;incarico: alla richiesta vedi solo tipo, indirizzo e descrizione.
+        {boot.settings.bachecaExpiryDays ? <> Ogni richiesta resta in bacheca {boot.settings.bachecaExpiryDays} giorni, poi scade.</> : null}
+      </p>
+      {rows == null ? (
+        <p className="muted">Caricamento della bacheca…</p>
+      ) : rows.length ? (
+        rows.map(r => (
+          <article key={r.id} className="card mb2">
+            <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+              <h3 style={{ margin: 0 }}>{r.kind} · {r.address}</h3>
+              <span className="pill pill-blue">Bacheca di zona</span>
+            </div>
+            <p className="small muted" style={{ marginTop: 6 }}>
+              {r.zoneName}{r.province ? ` (${r.province})` : ""} · {fmtDateTime(r.createdAt)}
+              {r.expiresAt ? <> · disponibile fino al <b>{dateIt(r.expiresAt)}</b></> : null}
+              {r.voidCount > 0 ? <> · ripubblicata dopo {r.voidCount} {r.voidCount === 1 ? "incarico nullo" : "incarichi nulli"}</> : null}
+            </p>
+            <p className="small" style={{ whiteSpace: "pre-wrap" }}>{r.description}</p>
+            {r.voidCount > 0 && r.feeCents != null ? (
+              <p className="small">Tariffa <b>già versata</b> dal richiedente: € {fmtEuro(r.feeCents)}. Se ritiri l&apos;incarico, accetti a queste condizioni.</p>
+            ) : null}
+            <div className="row" style={{ alignItems: "flex-end", flexWrap: "wrap", gap: 8 }}>
+              {r.voidCount > 0 ? null : (
+                <div className="field mb0" style={{ minWidth: 140 }}>
+                  <label htmlFor={`cl-${r.id}`}>La tua tariffa (€) *</label>
+                  <input id={`cl-${r.id}`} value={fee} inputMode="decimal" placeholder="es. 250" onChange={e => setFee(e.target.value)} />
+                </div>
+              )}
+              <button
+                className="btn btn-primary"
+                disabled={busy === r.id || (r.voidCount === 0 && !fee.trim())}
+                onClick={() => void claim(r.id, r.voidCount > 0 ? r.feeCents : null)}
+              >
+                {busy === r.id ? "Ritiro…" : "Ritira l'incarico"}
+              </button>
+            </div>
+            <p className="small muted mb0" style={{ marginTop: 6 }}>Se ritiri, il richiedente paga la tariffa alla piattaforma (con la causale-codice della richiesta) e tu consegni la relazione entro {boot.settings.periziaDeadlineDays} giorni dal pagamento registrato, con 2FA attiva.</p>
+          </article>
+        ))
+      ) : (
+        <p className="small muted">Nessuna richiesta in bacheca entro il tuo raggio d&apos;azione: quando qualcuno chiederà un&apos;indagine nella tua zona, comparirà qui e riceverai un avviso via email.</p>
+      )}
+    </>
+  );
+}
+
 /* ---------- dashboard del consulente approvato ---------- */
 
 function ConsultantDashboard({ prof, incoming, onChanged }: { prof: ProfiloConsultant; incoming: Richiesta[]; onChanged: () => void }) {
@@ -549,9 +656,11 @@ function ConsultantDashboard({ prof, incoming, onChanged }: { prof: ProfiloConsu
         <button className="btn btn-primary" onClick={() => void saveEdit()} disabled={busy}>{busy ? "Salvo…" : "Salva"}</button>
       </div>
 
+      <BachecaDiZona onChanged={onChanged} />
+
       <h2>Richieste ricevute</h2>
       {incoming.length ? incoming.map(r => <RequestCard key={r.id} r={r} role="consultant" onChanged={onChanged} />) : (
-        <p className="small muted">Nessuna richiesta al momento: compariranno qui. Gli utenti ti trovano dalla tua scheda nel catalogo.</p>
+        <p className="small muted">Nessuna richiesta al momento: le nuove richieste dirette compariranno qui, quelle aperte dalla ricerca finiscono nella bacheca di zona qui sopra.</p>
       )}
     </>
   );
@@ -562,12 +671,13 @@ function ConsultantDashboard({ prof, incoming, onChanged }: { prof: ProfiloConsu
    ================================================================ */
 
 function RequestCard({ r, role, onChanged, payment }: { r: Richiesta; role: "user" | "consultant"; onChanged: () => void; payment?: { iban: string; instructions: string } }) {
-  const { toast } = useApp();
+  const { toast, boot } = useApp();
   const [busy, setBusy] = useState(false);
   const [fee, setFee] = useState(r.feeCents != null ? String(r.feeCents / 100) : "");
   const [rejectReason, setRejectReason] = useState("");
   const [title, setTitle] = useState(r.reportTitle || "");
   const [body, setBody] = useState("");
+  const [publicSummary, setPublicSummary] = useState("");
   const [open, setOpen] = useState<string | null>(null);
 
   const act = async (action: string, extra: Record<string, unknown> = {}) => {
@@ -578,6 +688,8 @@ function RequestCard({ r, role, onChanged, payment }: { r: Richiesta; role: "use
     else toast(res.error, "err");
   };
 
+  const dateIt = (s: string | null) => s ? new Date(s).toLocaleDateString("it-IT") : null;
+
   return (
     <article className="card mb2">
       <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
@@ -585,13 +697,40 @@ function RequestCard({ r, role, onChanged, payment }: { r: Richiesta; role: "use
         <StatusPill status={r.status} />
       </div>
       <p className="small muted" style={{ marginTop: 6 }}>
-        {role === "consultant" ? <>Da: {r.counterpart.nickname}</> : <>Consulente: {r.counterpart.name} ({r.counterpart.profession})</>}
+        {role === "consultant" ? (
+          r.counterpart.nickname
+            ? <>Da: {r.counterpart.nickname}</>
+            : <>Da: utente riservato <span className="muted">(visibile solo dopo l&apos;accettazione dell&apos;incarico)</span></>
+        ) : (
+          r.counterpart.bacheca || !r.counterpart.name
+            ? <>Consulente: da abbinare (bacheca di zona)</>
+            : <>Consulente: {r.counterpart.name} ({r.counterpart.profession})</>
+        )}
+        {r.zoneName ? <> · {r.zoneName}</> : null}
         {" · "}{fmtDateTime(r.createdAt)}
         {r.feeCents != null ? <> · tariffa € {fmtEuro(r.feeCents)}</> : null}
-        {r.status === "delivered" || r.status === "closed" ? <> · tuo accredito € {fmtEuro(r.payoutCents)} (commissione € {fmtEuro(r.commissionCents)})</> : null}
+        {r.voidCount > 0 ? <> · ripubblicata dopo {r.voidCount} {r.voidCount === 1 ? "incarico nullo" : "incarichi nulli"}</> : null}
       </p>
       <p className="small" style={{ whiteSpace: "pre-wrap" }}>{r.description}</p>
       {r.rejectReason ? <p className="small muted">Motivo del rifiuto: {r.rejectReason}</p> : null}
+
+      {role === "user" && r.status === "open" ? (
+        <p className="small mb1">
+          La richiesta è in <b>bacheca di zona</b>: i consulenti che coprono {r.zoneName || "la zona"} sono stati avvisati.
+          {r.expiresAt ? <> Scade il <b>{dateIt(r.expiresAt)}</b>: oltre, puoi riproporla o annullarla.</> : null}
+        </p>
+      ) : null}
+      {role === "user" && r.status === "expired" ? (
+        <Alert kind="warn">
+          Nessun consulente ha accettato entro il {dateIt(r.expiresAt)}. Puoi <b>riproporre</b> la richiesta (i consulenti della zona riceveranno un nuovo invito) oppure <b>annullarla</b>.
+        </Alert>
+      ) : null}
+      {role === "user" && r.status === "paid" && r.deadlineAt ? (
+        <p className="small">Relazione in corso: consegna entro il <b>{dateIt(r.deadlineAt)}</b>. Oltre quel termine l&apos;incarico risulta nullo e la richiesta torna in bacheca (la tariffa già versata resta valida per il prossimo consulente).</p>
+      ) : null}
+      {role === "consultant" && r.status === "paid" && r.deadlineAt ? (
+        <p className="small">Consegna la relazione entro il <b>{dateIt(r.deadlineAt)}</b>: oltre quel termine l&apos;incarico risulta nullo, la richiesta torna in bacheca e il mancato adempimento entra nel tuo feedback di serietà.</p>
+      ) : null}
 
       {role === "consultant" && r.canAccept ? (
         <div className="card card-pad-s mb1">
@@ -625,7 +764,12 @@ function RequestCard({ r, role, onChanged, payment }: { r: Richiesta; role: "use
             <label htmlFor={`rb-${r.id}`}>Testo della relazione * (almeno 300 caratteri)</label>
             <textarea id={`rb-${r.id}`} rows={8} value={body} onChange={e => setBody(e.target.value)} placeholder={"Struttura suggerita:\n1. Premessa e incarico\n2. Descrizione dell'immobile\n3. Verifiche eseguite\n4. Valutazione / esito\n5. Conclusioni"} />
           </div>
-          <button className="btn btn-primary" disabled={busy || title.trim().length < 5 || body.trim().length < 300} onClick={() => void act("deliver", { title, body })}>Consegna la relazione</button>
+          <div className="field">
+            <label htmlFor={`rs-${r.id}`}>Sintesi pubblica per la scheda dell&apos;indirizzo (facoltativa, max 600)</label>
+            <textarea id={`rs-${r.id}`} rows={3} value={publicSummary} onChange={e => setPublicSummary(e.target.value)} placeholder="Es. L'immobile è in buono stato strutturale; impianti a norma; ascensore non a norma. Nessun dato personale di terzi." />
+            <span className="hint">Alla consegna la scheda dell&apos;indirizzo nasce o si aggiorna con l&apos;indagine certificata: chiunque cercherà quest&apos;indirizzo la troverà. Qui puoi pubblicare una sintesi dell&apos;esito — la relazione integrale resta del richiedente. Niente dati personali di terzi.</span>
+          </div>
+          <button className="btn btn-primary" disabled={busy || title.trim().length < 5 || body.trim().length < 300} onClick={() => void act("deliver", { title, body, publicSummary })}>Consegna la relazione</button>
         </div>
       ) : null}
 
@@ -636,12 +780,17 @@ function RequestCard({ r, role, onChanged, payment }: { r: Richiesta; role: "use
           {payment?.instructions ? <p className="small" style={{ whiteSpace: "pre-wrap" }}>{payment.instructions}</p> : (
             <p className="small muted">Le istruzioni di pagamento (IBAN e causale) sono indicate qui dal gestore della piattaforma; in caso contrario contatta l&apos;amministrazione dal modulo contatti.</p>
           )}
-          <p className="small muted mb0">Causale consigliata: <span className="mono">perizia {r.id}</span></p>
+          <p className="small mb0">Causale del bonifico (usala esattamente così): <span className="mono" style={{ background: "var(--paper)", padding: "2px 8px", borderRadius: 6 }}>perizia {r.code || r.id}</span></p>
+          {boot?.settings.periziaDeadlineDays ? <p className="small muted mt1 mb0">Dopo la registrazione del pagamento il consulente avrà {boot.settings.periziaDeadlineDays} giorni solari per consegnare la relazione.</p> : null}
         </div>
       ) : null}
 
       {r.status === "delivered" || r.status === "closed" ? (
-        r.reportTitle ? <p className="small mb1"><b>Relazione consegnata:</b> {r.reportTitle}</p> : null
+        <>
+          {r.reportTitle ? <p className="small mb1"><b>Relazione consegnata:</b> {r.reportTitle}</p> : null}
+          {role === "consultant" ? <p className="small muted mb0">Tuo accredito € {fmtEuro(r.payoutCents)} (commissione della piattaforma € {fmtEuro(r.commissionCents)}).</p> : null}
+          <SchedaCollegata entityId={r.entityId} />
+        </>
       ) : null}
 
       <div className="row">
@@ -650,6 +799,9 @@ function RequestCard({ r, role, onChanged, payment }: { r: Richiesta; role: "use
         ) : null}
         {role === "user" && r.canCancel ? (
           <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void act("cancel")}>Annulla la richiesta</button>
+        ) : null}
+        {role === "user" && r.canRepropose ? (
+          <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => void act("repropose")}>Riproponi in bacheca</button>
         ) : null}
       </div>
     </article>
@@ -689,7 +841,7 @@ export function ConsulenteRequestsView() {
         <p className="small">Sei anche consulente: le richieste che RICEVI sono nella <a href="#/consulente">dashboard del consulente</a>.</p>
       ) : null}
       {me.outgoing.length ? me.outgoing.map(r => <RequestCard key={r.id} r={r} role="user" onChanged={load} payment={me.payment} />) : (
-        <p className="small muted">Non hai ancora richiesto nessuna perizia. Trova un consulente dalla categoria <a href="#/categoria/consulente">Consulenti</a> e apri la sua scheda.</p>
+        <p className="small muted">Non hai ancora richiesto nessuna perizia. Trova un consulente dalla categoria <a href="#/categoria/consulente">Consulenti</a>, apri la sua scheda, oppure <a href="#/indagine">chiedi un&apos;indagine per un indirizzo</a>: la richiesta va in bacheca di zona e chi copre la zona riceve l&apos;avviso.</p>
       )}
     </div>
   );
@@ -699,11 +851,59 @@ export function ConsulenteRequestsView() {
    Vista: modulo di richiesta perizia (dalla scheda di un consulente)
    ================================================================ */
 
+/** Selettore città per le richieste: zona del catalogo (elenco) oppure
+ *  qualsiasi località italiana dalla ricerca geocodificata. Serve alla
+ *  bacheca di zona e alla chiusura del cerchio (K7). */
+function CityPickerForRequest({ zoneId, place, setZoneId, setPlace, error }: {
+  zoneId: string | null;
+  place: { name: string; zoneName: string | null; province: string | null; region: string | null; lat: number; lng: number } | null;
+  setZoneId: (v: string | null) => void;
+  setPlace: (p: { name: string; zoneName: string | null; province: string | null; region: string | null; lat: number; lng: number } | null) => void;
+  error?: string | null;
+}) {
+  const { boot } = useApp();
+  return (
+    <div className="field">
+      <label htmlFor="rq-city">Città dell&apos;immobile *</label>
+      {place ? (
+        <div className="row" style={{ alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span className="pill pill-green">{place.zoneName || place.name}{place.province ? ` (${place.province})` : ""}</span>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setPlace(null); setZoneId(null); }}>Cambia</button>
+        </div>
+      ) : (
+        <div className="row" style={{ alignItems: "flex-end", gap: 8, flexWrap: "wrap" }}>
+          <div className="field mb0" style={{ flex: 1, minWidth: 170 }}>
+            <label htmlFor="rq-city-sel" className="small">Dall&apos;elenco</label>
+            <select id="rq-city-sel" value={zoneId || ""} onChange={e => setZoneId(e.target.value || null)}>
+              <option value="">Scegli la città…</option>
+              {(boot?.zones || []).map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
+            </select>
+          </div>
+          <div style={{ flex: 2, minWidth: 220 }}>
+            <PlaceSearch
+              id="rq-city" localZones={boot?.zones} placeholder="…o cerca qualsiasi località italiana"
+              selected={null}
+              onPick={p => {
+                setPlace(p);
+                setZoneId(null); // scelta dal geocoder: annulla l'eventuale selezione dall'elenco
+              }}
+            />
+          </div>
+        </div>
+      )}
+      <span className="hint">La città serve a trovare i consulenti che coprono la zona e a collegare la relazione alla scheda dell&apos;indirizzo.</span>
+      {error ? <span className="error-msg" style={{ display: "block" }}>{error}</span> : null}
+    </div>
+  );
+}
+
 export function ConsulenteRequestFormView({ entityId }: { entityId?: string }) {
   const { boot, user, toast } = useApp();
   const [cons, setCons] = useState<{ name: string; profession: string; feeCents: number; zoneName: string } | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [f, setF] = useState({ kind: PERIZIA_KINDS[0], address: "", description: "" });
+  const [zoneId, setZoneId] = useState<string | null>(null);
+  const [place, setPlace] = useState<{ name: string; zoneName: string | null; province: string | null; region: string | null; lat: number; lng: number } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -730,8 +930,14 @@ export function ConsulenteRequestFormView({ entityId }: { entityId?: string }) {
 
   const submit = async () => {
     setErr(null); setBusy(true);
-    const res = await api<{ requestId: string }>("/api/consulente/requests", {
-      body: { entityId, kind: f.kind, address: f.address, description: f.description },
+    const res = await api<{ requestId: string; code: string | null }>("/api/consulente/requests", {
+      body: {
+        entityId, kind: f.kind, address: f.address, description: f.description,
+        zoneId: place ? undefined : (zoneId || undefined),
+        zone: place
+          ? { name: place.zoneName || place.name, province: place.province, region: place.region, lat: place.lat, lng: place.lng }
+          : undefined,
+      },
     });
     setBusy(false);
     if (res.ok) {
@@ -760,16 +966,126 @@ export function ConsulenteRequestFormView({ entityId }: { entityId?: string }) {
             <label htmlFor="rq-addr">Indirizzo dell&apos;immobile *</label>
             <input id="rq-addr" required minLength={5} placeholder="Es. Via Roma 1, Milano" value={f.address} onChange={e => setF({ ...f, address: e.target.value })} />
           </div>
+          <CityPickerForRequest zoneId={zoneId} place={place} setZoneId={setZoneId} setPlace={setPlace} />
           <div className="field">
             <label htmlFor="rq-desc">Descrivi la richiesta * (almeno 30 caratteri)</label>
             <textarea id="rq-desc" required rows={6} minLength={30} placeholder="Es. Vorrei una valutazione indipendente di un appartamento di 80 m2 al terzo piano con cantina, prima di fare un'offerta…" value={f.description} onChange={e => setF({ ...f, description: e.target.value })} />
             <span className="hint">Niente dati personali di terzi. Il consulente valuterà l&apos;incarico prima che tu paghi.</span>
           </div>
           {err ? <p className="error-msg" style={{ display: "block" }}>{err}</p> : null}
-          <button className="btn btn-primary" type="submit" disabled={busy}>{busy ? "Invio…" : "Invia la richiesta"}</button>
+          <button className="btn btn-primary" type="submit" disabled={busy || (!zoneId && !place)}>{busy ? "Invio…" : "Invia la richiesta"}</button>
         </form>
       </div>
-      <p className="small muted mt2">Come prosegue: il consulente accetta (o rifiuta) → paghi la tariffa alla piattaforma → ricevi la relazione in PDF → il consulente riceve l&apos;accredito solo a consegna avvenuta.</p>
+      <p className="small muted mt2">Come prosegue: il consulente accetta (o rifiuta) → paghi la tariffa alla piattaforma con la causale-codice della richiesta → ricevi la relazione in PDF entro {boot?.settings.periziaDeadlineDays || 7} giorni → il consulente riceve l&apos;accredito solo a consegna avvenuta.</p>
+    </div>
+  );
+}
+
+/* ================================================================
+   Vista: richiesta di indagine professionale DALLA RICERCA (percorso ③
+   del modello D11): quando l'indirizzo cercato non c'è, si può chiedere
+   una perizia o valutazione professionale: la richiesta entra in BACHECA
+   DI ZONA (nessun consulente indicato: ritira l'incarico chi copre la zona)
+   ================================================================ */
+
+export function IndagineProView({ prefill }: { prefill?: string }) {
+  const { boot, user, toast } = useApp();
+  const [f, setF] = useState({
+    kind: PERIZIA_KINDS[0],
+    address: prefill ? decodeURIComponent(prefill).slice(0, 160) : "",
+    description: "",
+  });
+  const [zoneId, setZoneId] = useState<string | null>(null);
+  const [place, setPlace] = useState<{ name: string; zoneName: string | null; province: string | null; region: string | null; lat: number; lng: number } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<{ expiresAt: string | null } | null>(null);
+
+  if (!boot) return <div className="container section"><p className="muted">Caricamento…</p></div>;
+  if (!boot.site.consulentiEnabled) {
+    return (
+      <div className="container section" style={{ maxWidth: 640 }}>
+        <h1>Indagine professionale</h1>
+        <Alert kind="warn">Il servizio di indagini professionali è temporaneamente sospeso.</Alert>
+      </div>
+    );
+  }
+
+  const submit = async () => {
+    setErr(null); setBusy(true);
+    const res = await api<{ requestId: string; code: string | null; expiresAt: string | null }>("/api/consulente/requests", {
+      body: {
+        kind: f.kind, address: f.address, description: f.description,
+        zoneId: place ? undefined : (zoneId || undefined),
+        zone: place
+          ? { name: place.zoneName || place.name, province: place.province, region: place.region, lat: place.lat, lng: place.lng }
+          : undefined,
+      },
+    });
+    setBusy(false);
+    if (res.ok) {
+      setDone({ expiresAt: res.expiresAt });
+      toast("Richiesta pubblicata in bacheca di zona.");
+    } else setErr(res.error);
+  };
+
+  const dateIt = (s: string | null) => s ? new Date(s).toLocaleDateString("it-IT") : null;
+
+  return (
+    <div className="container section" style={{ maxWidth: 680 }}>
+      <h1>Chiedi un&apos;indagine professionale</h1>
+      <Alert kind="info">
+        L&apos;indirizzo che cerchi non è ancora nel catalogo della community? Puoi affidarlo a un professionista: <b>geometri, ingegneri, periti e agenti immobiliari</b> approvati dallo staff, con accesso protetto da 2FA.
+        La richiesta entra nella <b>bacheca di zona</b>: i consulenti che coprono la zona ricevono l&apos;avviso e il primo che ritira l&apos;incarico conferma la tariffa. Paghi solo dopo l&apos;accettazione, con bonifico tracciato e causale-codice; la relazione arriva entro {boot.settings.periziaDeadlineDays} giorni solari dal pagamento registrato, in PDF scaricabile.
+      </Alert>
+
+      {!user ? (
+        <div className="card">
+          <p className="small mb1">Per chiedere un&apos;indagine professionale serve un account registrato con email verificata (chi paga e chi consegna devono essere identificabili, diversamente dalle indagini della community).</p>
+          <div className="row">
+            <a className="btn btn-primary" href="#/accedi">Accedi</a>
+            <a className="btn btn-ghost" href="#/registrati">Registrati</a>
+          </div>
+        </div>
+      ) : !user.emailVerified ? (
+        <Alert kind="warn">Conferma prima l&apos;indirizzo email dal collegamento ricevuto via email: le richieste di indagine professionale partono solo da account verificati.</Alert>
+      ) : done ? (
+        <div className="card">
+          <h2 style={{ marginTop: 0 }}>Richiesta pubblicata in bacheca di zona</h2>
+          <p className="small">I consulenti che coprono {place ? (place.zoneName || place.name) : "la città scelta"} sono stati avvisati.</p>
+          {done.expiresAt ? <p className="small">Se nessuno ritira l&apos;incarico entro il <b>{dateIt(done.expiresAt)}</b>, la richiesta scade: potrai riproporla o annullarla dalla pagina «Le mie richieste».</p> : null}
+          <p className="small muted mb0">Non hai ancora pagato niente: la tariffa si conferma all&apos;accettazione dell&apos;incarico, con la causale-codice che troverai nella pagina delle richieste.</p>
+          <div className="row mt1">
+            <a className="btn btn-primary" href="#/consulente-richieste">Le mie richieste</a>
+            <button className="btn btn-ghost" onClick={() => setDone(null)}>Nuova richiesta</button>
+          </div>
+        </div>
+      ) : (
+        <div className="card">
+          <form onSubmit={e => { e.preventDefault(); void submit(); }}>
+            <div className="field">
+              <label htmlFor="ip-kind">Tipo di richiesta *</label>
+              <select id="ip-kind" value={f.kind} onChange={e => setF({ ...f, kind: e.target.value })}>
+                {PERIZIA_KINDS.map(k => <option key={k} value={k}>{k}</option>)}
+              </select>
+              <span className="hint">Perizia tecnica (stato, difetti, conformità) o valutazione immobiliare (valore di mercato).</span>
+            </div>
+            <div className="field">
+              <label htmlFor="ip-addr">Indirizzo dell&apos;immobile *</label>
+              <input id="ip-addr" required minLength={5} placeholder="Es. Via Roma 1" value={f.address} onChange={e => setF({ ...f, address: e.target.value })} />
+            </div>
+            <CityPickerForRequest zoneId={zoneId} place={place} setZoneId={setZoneId} setPlace={setPlace} />
+            <div className="field">
+              <label htmlFor="ip-desc">Descrivi la richiesta * (almeno 30 caratteri)</label>
+              <textarea id="ip-desc" required rows={6} minLength={30} placeholder="Es. Vorrei una valutazione indipendente di un appartamento di 80 m2 al terzo piano con cantina, prima di fare un'offerta…" value={f.description} onChange={e => setF({ ...f, description: e.target.value })} />
+              <span className="hint">Niente dati personali di terzi. Nessun consulente vedrà i tuoi dati finché non accetta l&apos;incarico.</span>
+            </div>
+            {err ? <p className="error-msg" style={{ display: "block" }}>{err}</p> : null}
+            <button className="btn btn-primary" type="submit" disabled={busy || (!zoneId && !place)}>{busy ? "Invio…" : "Pubblica in bacheca di zona"}</button>
+          </form>
+        </div>
+      )}
+      <p className="small muted mt2">Alla consegna, la scheda dell&apos;indirizzo nasce o si aggiorna con l&apos;indagine certificata: il prossimo che cerca questo indirizzo trova la scheda (chiusura del cerchio). Preferisci la via della community? <a href="#/recensione">Aggiungi tu l&apos;indirizzo</a> e avvia la prima indagine gratuita.</p>
     </div>
   );
 }
@@ -780,6 +1096,12 @@ export function ConsulenteRequestFormView({ entityId }: { entityId?: string }) {
 
 export function ConsultantCard({ c, entityId }: { c: NonNullable<PublicCons>; entityId: string }) {
   const { user } = useApp();
+  // feedback di serietà: pubblico solo quando c'è almeno una consegna registrata
+  const rel = c.reliability;
+  const relPill = !rel ? null
+    : rel.mancati === 0 ? <span className="pill pill-green">incarichi sempre consegnati ({rel.completati})</span>
+    : rel.completati >= rel.mancati * 2 ? <span className="pill pill-amber">{rel.mancati} {rel.mancati === 1 ? "incarico mancato" : "incarichi mancati"} su {rel.completati + rel.mancati}</span>
+    : <span className="pill pill-red">incarichi spesso mancati ({rel.mancati} su {rel.completati + rel.mancati})</span>;
   return (
     <section className="card mb2" style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-start" }}>
       {c.hasPhoto ? (
@@ -798,6 +1120,7 @@ export function ConsultantCard({ c, entityId }: { c: NonNullable<PublicCons>; en
           Zona di esercizio: <b>{c.zoneName}</b>{c.province ? ` (${c.province})` : ""} · raggio d&apos;azione {c.radiusKm} km<br />
           Tariffa: <b>{c.feeCents > 0 ? `€ ${fmtEuro(c.feeCents)}` : "su richiesta"}</b> · P.IVA {c.vatNumber}
         </p>
+        {relPill ? <p className="small mb0" style={{ marginTop: 4 }}>{relPill} <span className="muted">feedback di serietà: incarichi consegnati entro la scadenza ({rel!.completati}) e mancati ({rel!.mancati})</span></p> : null}
         {c.bio ? <p className="small muted" style={{ whiteSpace: "pre-wrap" }}>{c.bio}</p> : null}
         <div className="row mt1">
           <button className="btn btn-primary" onClick={() => navigate(user ? `#/consulente-richiesta?to=${entityId}` : "#/accedi")}>
@@ -805,7 +1128,7 @@ export function ConsultantCard({ c, entityId }: { c: NonNullable<PublicCons>; en
           </button>
           <a className="btn btn-ghost" href="#/consulente-richieste">Le mie richieste</a>
         </div>
-        <p className="small muted mt1 mb0">Relazione scritta consegnata in PDF, dietro pagamento della tariffa. L&apos;accredito al consulente avviene solo a consegna avvenuta (10% trattenuto dalla piattaforma).</p>
+        <p className="small muted mt1 mb0">Relazione scritta consegnata in PDF, dietro pagamento della tariffa. L&apos;accredito al consulente avviene solo a consegna avvenuta (10% trattenuto dalla piattaforma). Chi non consegna entro il termine perde l&apos;incarico: la richiesta torna in bacheca e il mancato è pubblico qui sopra.</p>
       </div>
     </section>
   );
@@ -815,4 +1138,5 @@ type PublicCons = {
   id: string; firstName: string; lastName: string; profession: string; title: string;
   bio: string | null; zoneName: string; province: string | null; region: string | null;
   radiusKm: number; feeCents: number; vatNumber: string | null; hasPhoto: boolean; twoFactor: boolean;
+  reliability: { completati: number; mancati: number } | null;
 };

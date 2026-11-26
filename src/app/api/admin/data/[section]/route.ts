@@ -8,6 +8,7 @@ import { getCategories } from "@/lib/server/categories";
 import { handleError, fail } from "@/lib/server/http";
 import { REPORT_STATUS_LABELS, REPORT_REASONS } from "@/lib/server/validation";
 import { UTILITY_BADGES, UTILITY_RULES } from "@/lib/server/utility";
+import { sweepPerizie } from "@/lib/server/perizie";
 
 export async function GET(_req: Request, ctx: { params: Promise<{ section: string }> }) {
   try {
@@ -27,8 +28,13 @@ export async function GET(_req: Request, ctx: { params: Promise<{ section: strin
         ]);
         const security = await db.securityLog.findMany({ orderBy: { at: "desc" }, take: 5 });
         const consulentiPending = await db.consultantProfile.count({ where: { status: "pending" } });
+        // scadenze maturate applicate prima di contare (stato reale)
+        const settings = await getSettings();
+        await sweepPerizie(settings);
         const perizieDaPagare = await db.periziaRequest.count({ where: { status: "accepted" } });
         const perizieDaAccreditare = await db.periziaRequest.count({ where: { status: "delivered" } });
+        const perizieInBacheca = await db.periziaRequest.count({ where: { status: "open" } });
+        const abbonamentiDaRegistrare = await db.subscriptionOrder.count({ where: { status: "pending" } });
         const utilityAppeals = await db.utilityAppeal.count({ where: { status: "open" } });
         const queues = [
           hasPerm(admin.role, "mod.reports") && { label: "Segnalazioni da valutare", href: "#/admin/segnalazioni", count: reports },
@@ -38,6 +44,8 @@ export async function GET(_req: Request, ctx: { params: Promise<{ section: strin
           hasPerm(admin.role, "admin.entities") && { label: "Iscrizioni Consulenti tecnici", href: "#/admin/consulenti", count: consulentiPending },
           hasPerm(admin.role, "admin.entities") && { label: "Perizie: pagamenti da registrare", href: "#/admin/perizie", count: perizieDaPagare },
           hasPerm(admin.role, "admin.entities") && { label: "Perizie: accrediti da eseguire", href: "#/admin/perizie", count: perizieDaAccreditare },
+          hasPerm(admin.role, "admin.entities") && { label: "Perizie in bacheca di zona", href: "#/admin/perizie", count: perizieInBacheca },
+          hasPerm(admin.role, "admin.entities") && { label: "Abbonamenti: pagamenti da registrare", href: "#/admin/abbonamenti", count: abbonamentiDaRegistrare },
           hasPerm(admin.role, "admin.users") && { label: "Richieste privacy", href: "#/admin/utenti", count: privacy },
           hasPerm(admin.role, "mod.reviews") && { label: "Ricorsi di utilità", href: "#/admin/utilita", count: utilityAppeals },
         ].filter(Boolean);
@@ -357,33 +365,81 @@ export async function GET(_req: Request, ctx: { params: Promise<{ section: strin
             hasPhoto: c.photoData != null,
             docs: c.docs,
             requestsCount: c.requests.length,
+            incarichiCompletati: c.incarichiCompletati,
+            incarichiNulli: c.incarichiNulli,
             createdAt: c.createdAt.toISOString(),
+          })),
+        });
+      }
+
+      case "abbonamenti": {
+        // percorso ② del modello D11: ordini dei piani Premium. La visione è
+        // per chi gestisce le schede (come le perizie); la REGISTRAZIONE dei
+        // pagamenti resta del solo super amministratore (azione subscription.pay)
+        await requireStaff("admin.entities");
+        const [orders, settings] = await Promise.all([
+          db.subscriptionOrder.findMany({
+            orderBy: { createdAt: "desc" },
+            take: 200,
+            include: { user: { select: { nickname: true, email: true, premiumUntil: true } } },
+          }),
+          getSettings(),
+        ]);
+        return NextResponse.json({
+          ok: true,
+          plans: settings.premiumPlans,
+          plansEnabled: settings.premiumPlansEnabled,
+          platformIban: settings.platformIban,
+          orders: orders.map(o => ({
+            id: o.id,
+            user: o.user.nickname,
+            email: o.user.email,
+            planSlug: o.planSlug,
+            planName: o.planName,
+            days: o.days,
+            priceCents: o.priceCents,
+            code: o.code,
+            status: o.status,
+            paymentRef: o.paymentRef,
+            premiumUntil: o.user.premiumUntil && o.user.premiumUntil.getTime() > Date.now() ? o.user.premiumUntil.toISOString() : null,
+            createdAt: o.createdAt.toISOString(),
+            paidAt: o.paidAt ? o.paidAt.toISOString() : null,
           })),
         });
       }
 
       case "perizie": {
         await requireStaff("admin.entities");
+        const settings = await getSettings();
+        await sweepPerizie(settings);
         const rows = await db.periziaRequest.findMany({
           orderBy: { createdAt: "desc" }, take: 200,
           include: {
             consultant: { select: { firstName: true, lastName: true, profession: true, iban: true } },
             requester: { select: { nickname: true, email: true } },
+            zone: { select: { name: true } },
           },
         });
-        const settings = await getSettings();
         return NextResponse.json({
           ok: true,
           platformIban: settings.platformIban,
           perizie: rows.map(r => ({
-            id: r.id, kind: r.kind, address: r.address, description: r.description,
+            id: r.id, code: r.code, kind: r.kind, address: r.address, description: r.description,
             status: r.status, feeCents: r.feeCents, payoutCents: r.payoutCents,
             commissionCents: r.commissionCents, paymentRef: r.paymentRef,
             paidAt: r.paidAt?.toISOString() ?? null,
             deliveredAt: r.deliveredAt?.toISOString() ?? null,
+            deadlineAt: r.deadlineAt?.toISOString() ?? null,
+            expiresAt: r.expiresAt?.toISOString() ?? null,
+            voidCount: r.voidCount,
+            entityId: r.entityId,
+            publicSummary: r.publicSummary,
             createdAt: r.createdAt.toISOString(),
-            consultant: `${r.consultant.firstName} ${r.consultant.lastName} (${r.consultant.profession})`,
-            consultantIban: r.consultant.iban,
+            consultant: r.consultant
+              ? `${r.consultant.firstName} ${r.consultant.lastName} (${r.consultant.profession})`
+              : "— in bacheca di zona —",
+            consultantIban: r.consultant ? r.consultant.iban : null,
+            zoneName: r.zone ? r.zone.name : null,
             requester: r.requester.nickname, requesterEmail: r.requester.email,
           })),
         });

@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireStaff } from "@/lib/server/auth";
 import { getSettings, updateSettings, invalidateSettingsCache } from "@/lib/server/settings";
-import { revokePremiumForReview, restorePremiumForReview, grantPremiumManually, revokeAllPremium } from "@/lib/server/premium";
+import { revokePremiumForReview, restorePremiumForReview, grantPremiumManually, revokeAllPremium, awardPremiumForOrder } from "@/lib/server/premium";
 import { recomputeUtility } from "@/lib/server/utility";
 import { sendMail } from "@/lib/server/mailer";
 import { auditLog, securityLog } from "@/lib/server/audit";
@@ -19,6 +19,7 @@ type ActionBody = {
   appealReason?: string;
   appealBy?: string;
   settings?: Record<string, unknown>;
+  paymentRef?: string;
   role?: string;
   categoryId?: string;
   days?: number;
@@ -452,6 +453,67 @@ export async function POST(req: Request) {
         return NextResponse.json({ ok: true, ibanCheck: next });
       }
 
+      /* ---- abbonamenti Premium (percorso ② del modello D11) ---- */
+      case "subscription.pay": {
+        // registrazione del bonifico: SOLO il super amministratore, come per
+        // le perizie (i soldi passano dalle stesse mani)
+        const actor = await requireStaff("admin.entities");
+        if (actor.role !== "superadmin") {
+          return fail("Solo il super amministratore registra i pagamenti degli abbonamenti.", 403);
+        }
+        const order = await db.subscriptionOrder.findUnique({
+          where: { id: p.id },
+          include: { user: { select: { id: true, email: true, isDemo: true, role: true } } },
+        });
+        if (!order) return fail("Ordine non trovato.", 404);
+        if (order.status !== "pending") return fail("Si registra il pagamento di un ordine in attesa.", 409);
+        const settings = await getSettings();
+        if (!settings.premiumEnabled) return fail("Membership Premium è sospesa: impossibile attivare l'ordine.", 409);
+        const paymentRef = String(p.paymentRef || "").trim().slice(0, 160) || null;
+        const paidAt = new Date();
+        // il grant nasce qui (origine «acquisto»), con le stesse regole di
+        // accumulo e lo stesso cap dei premi per contributo
+        const res = await awardPremiumForOrder({
+          userId: order.userId, days: order.days, settings,
+        });
+        await db.subscriptionOrder.update({
+          where: { id: order.id },
+          data: { status: "paid", paidAt, paymentRef, grantId: res.grantId ?? null },
+        });
+        await auditLog({
+          actorId: actor.id, actorRole: actor.role,
+          action: "Pagamento abbonamento registrato",
+          targetType: "subscriptionOrder", targetId: order.id,
+          reason: `piano ${order.planName} · ${res.grantedDays} giorni · causale ${order.code}${paymentRef ? ` · rif. ${paymentRef}` : ""}`,
+          isDemo: order.user.isDemo,
+        });
+        void sendMail(
+          order.user.email,
+          "ZoomZoom — Premium attivato",
+          `Abbiamo registrato il pagamento del piano ${order.planName}: ${res.grantedDays} giorni di Membership Premium sono attivi${res.until ? ` fino al ${res.until.toLocaleDateString("it-IT")}` : ""}.
+Grazie! Puoi anche guadagnarti il Premium contribuendo con le indagini della community.`,
+          [{ label: "Il tuo profilo", href: "/#/profilo" }],
+        );
+        return NextResponse.json({ ok: true, status: "paid", grantedDays: res.grantedDays, until: res.until ? res.until.toISOString() : null });
+      }
+      case "subscription.cancel": {
+        const actor = await requireStaff("admin.entities");
+        if (actor.role !== "superadmin") {
+          return fail("Solo il super amministratore gestisce gli ordini di abbonamento.", 403);
+        }
+        const order = await db.subscriptionOrder.findUnique({ where: { id: p.id } });
+        if (!order) return fail("Ordine non trovato.", 404);
+        if (order.status !== "pending") return fail("L'ordine non è più annullabile in questo stato.", 409);
+        await db.subscriptionOrder.update({ where: { id: order.id }, data: { status: "cancelled" } });
+        await auditLog({
+          actorId: actor.id, actorRole: actor.role,
+          action: "Ordine di abbonamento annullato dallo staff",
+          targetType: "subscriptionOrder", targetId: order.id,
+          reason: reason || `piano ${order.planName}`,
+        });
+        return NextResponse.json({ ok: true, status: "cancelled" });
+      }
+
       /* ---- contenuti e impostazioni ---- */
       case "contents.update": {
         const actor = await requireStaff("admin.contents");
@@ -491,6 +553,17 @@ export async function POST(req: Request) {
         if (typeof s.votesEnabled === "boolean") patch.votesEnabled = s.votesEnabled;
         if (typeof s.utilityEnabled === "boolean") patch.utilityEnabled = s.utilityEnabled;
         if (typeof s.consulentiEnabled === "boolean") patch.consulentiEnabled = s.consulentiEnabled;
+        // percorso ② — abbonamenti Premium
+        if (typeof s.premiumPlansEnabled === "boolean") patch.premiumPlansEnabled = s.premiumPlansEnabled;
+        if (Array.isArray(s.premiumPlans)) {
+          const { sanitizePlans } = await import("@/lib/server/settings");
+          patch.premiumPlans = sanitizePlans(s.premiumPlans);
+        }
+        // percorso ③ — indagine professionale e bacheca di zona
+        if (typeof s.periziaBachecaEnabled === "boolean") patch.periziaBachecaEnabled = s.periziaBachecaEnabled;
+        if (typeof s.periziaHideRequesterUntilAccept === "boolean") patch.periziaHideRequesterUntilAccept = s.periziaHideRequesterUntilAccept;
+        const bed = num(s.bachecaExpiryDays, 1, 90); if (bed != null) patch.bachecaExpiryDays = bed;
+        const pdd = num(s.periziaDeadlineDays, 1, 60); if (pdd != null) patch.periziaDeadlineDays = pdd;
         if (typeof s.platformIban === "string") patch.platformIban = s.platformIban.trim().toUpperCase().replace(/\s+/g, "").slice(0, 40);
         if (typeof s.paymentInstructions === "string") patch.paymentInstructions = s.paymentInstructions.trim().slice(0, 600);
         if (typeof s.adsEnabled === "boolean") patch.adsEnabled = s.adsEnabled;

@@ -36,6 +36,9 @@ export async function GET() {
       openReviewsEnabled: settings.openReviewsEnabled,
       photosEnabled: settings.photosEnabled,
       votesEnabled: settings.votesEnabled,
+      // percorso ③ del modello D11: indagine professionale e bacheca di zona
+      consulentiEnabled: settings.consulentiEnabled,
+      periziaBachecaEnabled: settings.periziaBachecaEnabled,
     },
     categories: cats,
     zones: zones.map(z => ({
@@ -51,6 +54,12 @@ export async function GET() {
       heroSub: settings.heroSub,
       globalNotice: demoMode ? settings.globalNotice : "",
       premiumDaysPerReview: settings.premiumDaysPerReview,
+      // percorso ② del modello D11: piani in vendita (prezzi dichiarati)
+      premiumPlansEnabled: settings.premiumPlansEnabled,
+      premiumPlans: settings.premiumPlans,
+      // percorso ③: termini dichiarati dell'indagine professionale
+      periziaDeadlineDays: settings.periziaDeadlineDays,
+      bachecaExpiryDays: settings.bachecaExpiryDays,
     },
     stats: { reviews: totalReviews, entities: totalEntities },
     user: user ? {

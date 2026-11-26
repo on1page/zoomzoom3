@@ -28,6 +28,9 @@ export type SessionUser = {
   photoAccess?: boolean;
   photoViaContribution?: boolean;
 };
+export type PremiumPlanInfo = {
+  slug: string; name: string; days: number; priceCents: number;
+};
 export type Bootstrap = {
   site: {
     name: string; tagline: string; demoMode: boolean;
@@ -37,6 +40,8 @@ export type Bootstrap = {
     openReviewsEnabled: boolean;
     photosEnabled: boolean;
     votesEnabled: boolean;
+    consulentiEnabled: boolean;
+    periziaBachecaEnabled: boolean;
   };
   categories: CategoryInfo[];
   zones: ZoneInfo[];
@@ -44,6 +49,10 @@ export type Bootstrap = {
     minReviews: number; rettificaDays: number; inviteExpiryDays: number;
     heroTitle: string; heroSub: string; globalNotice: string;
     premiumDaysPerReview: number;
+    premiumPlansEnabled: boolean;
+    premiumPlans: PremiumPlanInfo[];
+    periziaDeadlineDays: number;
+    bachecaExpiryDays: number;
   };
   stats: { reviews: number; entities: number };
   user: SessionUser | null;

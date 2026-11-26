@@ -69,6 +69,13 @@ type EntityPayload = {
     id: string; firstName: string; lastName: string; profession: string; title: string;
     bio: string | null; zoneName: string; province: string | null; region: string | null;
     radiusKm: number; feeCents: number; vatNumber: string | null; hasPhoto: boolean; twoFactor: boolean;
+    reliability: { completati: number; mancati: number } | null;
+  } | null;
+  // indagine professionale certificata collegata a questa scheda (K7: la
+  // relazione consegnata crea o aggiorna la scheda dell'indirizzo)
+  certified: {
+    id: string; kind: string; title: string; summary: string | null;
+    deliveredAt: string; consultantName: string; consultantProfession: string;
   } | null;
   reviews: ReviewItem[];
   teasers: ReviewItem[];
@@ -388,6 +395,23 @@ export function EntityView({ id }: { id: string }) {
               ) : null}
             </div>
             {data.consultant ? <ConsultantCard c={data.consultant} entityId={ent.id} /> : null}
+            {data.certified ? (
+              <section className="card mb2" style={{ borderLeft: "4px solid var(--ok, #059669)" }}>
+                <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 6 }}>
+                  <h2 style={{ margin: 0, fontSize: "1.1rem" }}>Indagine professionale certificata</h2>
+                  <span className="pill pill-green">relazione consegnata</span>
+                </div>
+                <p className="small" style={{ marginTop: 6, marginBottom: 0 }}>
+                  <b>{data.certified.title}</b> · {data.certified.kind} di <b>{data.certified.consultantName}</b> ({data.certified.consultantProfession}), consegnata il {new Date(data.certified.deliveredAt).toLocaleDateString("it-IT")}.
+                </p>
+                {data.certified.summary ? (
+                  <p className="small" style={{ marginTop: 6, whiteSpace: "pre-wrap" }}><b>Sintesi dell&apos;esito:</b> {data.certified.summary}</p>
+                ) : (
+                  <p className="small muted" style={{ marginTop: 6 }}>La sintesi pubblica dell&apos;esito non è stata pubblicata dal consulente: la relazione integrale resta del richiedente, che l&apos;ha pagata.</p>
+                )}
+                <p className="small muted mb0" style={{ marginTop: 6 }}>Questa scheda nasce o si aggiorna con l&apos;indagine certificata: la relazione pagata alimenta il catalogo di tutti. Le indagini della community qui sotto restano dichiarate e soggette ai controlli di sempre.</p>
+              </section>
+            ) : null}
             {st.n > 0 ? (
               <>
                 <h2>Criteri specifici di questa categoria</h2>

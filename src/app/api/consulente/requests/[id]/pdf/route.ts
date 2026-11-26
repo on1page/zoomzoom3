@@ -31,11 +31,14 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
 
     const isStaff = ["moderator", "admin", "superadmin"].includes(me.role);
     const isRequester = r.requesterId === me.id;
-    const isConsultant = r.consultant.userId === me.id;
+    const isConsultant = r.consultant?.userId === me.id;
     if (!isRequester && !isConsultant && !isStaff) return fail("Permesso negato.", 403);
     if (r.status !== "delivered" && r.status !== "closed") {
       return fail("La relazione non è ancora stata consegnata.", 409);
     }
+    // la relazione si scarica solo delle richieste con un consulente incaricato
+    // (le consegnate ce l'hanno sempre; le in bacheca non hanno relazione)
+    if (!r.consultant) return fail("La richiesta non ha un consulente incaricato.", 409);
 
     const dataIt = (d: Date) => d.toLocaleDateString("it-IT", { day: "2-digit", month: "long", year: "numeric" });
     const blocks: PdfBlock[] = [

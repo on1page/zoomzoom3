@@ -38,6 +38,9 @@ type Overview = {
   premium: {
     enabled: boolean; active: boolean; until: string | null; daysPerReview: number;
     grants: Array<{ id: string; days: number; origin: string; grantedAt: string; expiresAt: string; revokedAt: string | null; revokedReason: string | null; reviewEntityName: string | null }>;
+    orders: Array<{ id: string; planSlug: string; planName: string; days: number; priceCents: number; code: string; status: string; paymentRef: string | null; createdAt: string; paidAt: string | null }>;
+    plansEnabled: boolean;
+    payment: { iban: string; instructions: string };
   };
   experiences: Array<{
     id: string; entity: { id: string; name: string; categoryId: string }; kind: string; period: string | null;
@@ -202,7 +205,7 @@ export function ProfileView() {
               </span>
             ) : <span className="pill pill-gray">Non attivo</span>}
           </div>
-          <p className="small mb1">Il Premium si guadagna contribuendo: ogni indagine pubblicata attiva <b>{data.premium.daysPerReview} giorni</b> (accumulabili), con cui leggere le indagini integrali di tutte le schede. Le medie e i conteggi restano pubblici per tutti.</p>
+          <p className="small mb1">Il Premium si guadagna contribuendo: ogni indagine pubblicata attiva <b>{data.premium.daysPerReview} giorni</b> (accumulabili), con cui leggere le indagini integrali di tutte le schede. Le medie e i conteggi restano pubblici per tutti.{data.premium.plansEnabled ? <> Se preferisci, puoi anche <a href="#/abbonamento">acquistare un abbonamento</a> (Silver, Gold o Platinum).</> : null}</p>
           {!data.premium.active ? (
             <p className="small mb1">Per iniziare: <a href="#/verifica-esperienza">verifica un&apos;esperienza</a> e pubblica la tua prima indagine.</p>
           ) : null}
@@ -212,12 +215,28 @@ export function ProfileView() {
               <ul className="small premium-grants">
                 {data.premium.grants.map(g => (
                   <li key={g.id}>
-                    {g.origin === "admin" ? "Concessione dello staff" : g.origin === "seed" ? "Dato dimostrativo" : "Indagine"}
+                    {g.origin === "admin" ? "Concessione dello staff" : g.origin === "acquisto" ? "Abbonamento acquistato" : g.origin === "seed" ? "Dato dimostrativo" : "Indagine"}
                     {g.reviewEntityName ? ` · ${g.reviewEntityName}` : ""}: <b>+{g.days} giorni</b>
                     {g.revokedAt ? <> · <span className="pill pill-red">revocata</span>{g.revokedReason ? ` (${g.revokedReason})` : ""}</> : ` · valida fino al ${new Date(g.expiresAt).toLocaleDateString("it-IT")}`}
                   </li>
                 ))}
               </ul>
+            </details>
+          ) : null}
+          {data.premium.orders && data.premium.orders.length ? (
+            <details>
+              <summary className="small">I tuoi abbonamenti ({data.premium.orders.length})</summary>
+              <ul className="small premium-grants">
+                {data.premium.orders.map(o => (
+                  <li key={o.id}>
+                    Piano <b>{o.planName}</b> ({o.days} {o.days === 1 ? "giorno" : "giorni"} · € {(o.priceCents / 100).toLocaleString("it-IT", { minimumFractionDigits: 2 })})
+                    {o.status === "pending" ? <> · <span className="pill pill-amber">in attesa del bonifico</span> causale <span className="mono">ZoomZoom Premium {o.code}</span></>
+                      : o.status === "paid" ? <> · <span className="pill pill-green">pagato{o.paidAt ? ` il ${new Date(o.paidAt).toLocaleDateString("it-IT")}` : ""}</span></>
+                      : <> · <span className="pill pill-gray">annullato</span></>}
+                  </li>
+                ))}
+              </ul>
+              <p className="small muted mb0">{data.premium.plansEnabled ? <>Piani e istruzioni di pagamento nella <a href="#/abbonamento">pagina abbonamento</a>.</> : "La vendita di abbonamenti è sospesa."}</p>
             </details>
           ) : null}
           <p className="small muted mb0"><a href="#/premium">Come funziona il Premium</a> · incluso nella <a href="#/profilo-impostazioni">esportazione dati</a></p>

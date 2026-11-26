@@ -22,6 +22,7 @@ const SECTIONS: Array<[string, string, string | null, string | null]> = [
   ["entita", "Schede e proposte", "admin.entities", "proposals"],
   ["consulenti", "Consulenti tecnici", "admin.entities", "consulenti"],
   ["perizie", "Perizie e pagamenti", "admin.entities", null],
+  ["abbonamenti", "Abbonamenti Premium", "admin.entities", "abbonamenti"],
   ["contenuti", "Contenuti del sito", "admin.contents", null],
   ["impostazioni", "Impostazioni", "admin.settings", null],
   ["log", "Log di moderazione", "audit.full", null],
@@ -180,6 +181,7 @@ export function AdminView({ section }: { section: string }) {
         if (q.href.includes("consulenti")) c.consulenti = q.count;
         if (q.href.includes("utenti")) c.privacy = q.count;
         if (q.href.includes("utilita")) c.utility = q.count;
+        if (q.href.includes("abbonamenti")) c.abbonamenti = q.count;
       }
       setCounts(c);
     }
@@ -757,7 +759,7 @@ function AdminSection({ section, data, onAction, reload }: {
         ibanCheck: string | null; ibanCheckedAt: string | null;
         status: string; rejectReason: string | null; entityId: string | null; hasPhoto: boolean;
         docs: Array<{ id: string; kind: string; originalName: string; sizeBytes: number }>;
-        requestsCount: number; createdAt: string;
+        requestsCount: number; incarichiCompletati: number; incarichiNulli: number; createdAt: string;
       }>;
       const pendenti = consulenti.filter(c => c.status === "pending");
       const altri = consulenti.filter(c => c.status !== "pending");
@@ -803,38 +805,53 @@ function AdminSection({ section, data, onAction, reload }: {
           <h2 style={{ fontSize: "1.05rem" }}>Iscritti ({altri.length})</h2>
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th scope="col">Nome</th><th scope="col">Professione</th><th scope="col">Zona</th><th scope="col" className="num">Richieste</th><th scope="col">Stato</th></tr></thead>
+              <thead><tr><th scope="col">Nome</th><th scope="col">Professione</th><th scope="col">Zona</th><th scope="col" className="num">Richieste</th><th scope="col" className="num">Serietà</th><th scope="col">Stato</th></tr></thead>
               <tbody>
-                {altri.map(c => (
-                  <tr key={c.id}>
-                    <td><b>{c.name}</b><br /><span className="small muted">{c.email}</span></td>
-                    <td className="small">{c.profession}</td>
-                    <td className="small">{c.zone}</td>
-                    <td className="num">{c.requestsCount}</td>
-                    <td>
-                      {c.status === "approved" ? <span className="pill pill-green">Approvato</span> : <span className="pill pill-red">Respinto</span>}
-                      {c.entityId ? <> <a className="small" href={`#/scheda/${c.entityId}`}>scheda</a></> : null}
-                      <div style={{ marginTop: 6 }}>{ibanPill(c)}</div>
-                      {c.ibanCheck !== "confirmed" ? <button className="btn btn-ghost btn-xs" style={{ marginTop: 6 }} onClick={() => onAction("consultant.ibanConfirm", c.id)}>Conferma IBAN</button> : null}
-                    </td>
-                  </tr>
-                ))}
-                {!altri.length ? <tr><td colSpan={5}>Nessun altro iscritto.</td></tr> : null}
+                {altri.map(c => {
+                  const tot = c.incarichiCompletati + c.incarichiNulli;
+                  return (
+                    <tr key={c.id}>
+                      <td><b>{c.name}</b><br /><span className="small muted">{c.email}</span></td>
+                      <td className="small">{c.profession}</td>
+                      <td className="small">{c.zone}</td>
+                      <td className="num">{c.requestsCount}</td>
+                      <td className="num">{tot > 0
+                        ? <span className={c.incarichiNulli === 0 ? "pill pill-green" : c.incarichiCompletati >= c.incarichiNulli * 2 ? "pill pill-amber" : "pill pill-red"} title="incarichi consegnati entro la scadenza / incarichi mancati">{c.incarichiCompletati} / {c.incarichiNulli}</span>
+                        : <span className="muted">—</span>}</td>
+                      <td>
+                        {c.status === "approved" ? <span className="pill pill-green">Approvato</span> : <span className="pill pill-red">Respinto</span>}
+                        {c.entityId ? <> <a className="small" href={`#/scheda/${c.entityId}`}>scheda</a></> : null}
+                        <div style={{ marginTop: 6 }}>{ibanPill(c)}</div>
+                        {c.ibanCheck !== "confirmed" ? <button className="btn btn-ghost btn-xs" style={{ marginTop: 6 }} onClick={() => onAction("consultant.ibanConfirm", c.id)}>Conferma IBAN</button> : null}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {!altri.length ? <tr><td colSpan={6}>Nessun altro iscritto.</td></tr> : null}
               </tbody>
             </table>
           </div>
+          <p className="small muted mt1">«Serietà»: incarichi consegnati entro la scadenza / incarichi mancati (pubblici sulla scheda del consulente). Un incarico mancato si registra quando la relazione non è consegnata entro il termine.</p>
         </>
       );
     }
 
     case "perizie": {
       const perizie = (d?.perizie || []) as Array<{
-        id: string; kind: string; address: string; description: string; status: string;
+        id: string; code: string | null; kind: string; address: string; description: string; status: string;
         feeCents: number | null; payoutCents: number | null; commissionCents: number | null;
         paymentRef: string | null; paidAt: string | null; deliveredAt: string | null; createdAt: string;
+        deadlineAt: string | null; expiresAt: string | null; voidCount: number;
+        entityId: string | null; publicSummary: string | null; zoneName: string | null;
         consultant: string; consultantIban: string | null; requester: string; requesterEmail: string;
       }>;
       const fmtE = (c: number | null) => c == null ? "—" : `€ ${(c / 100).toLocaleString("it-IT", { minimumFractionDigits: 2 })}`;
+      const dateIt = (s: string | null) => s ? new Date(s).toLocaleDateString("it-IT") : null;
+      const STATUS_IT: Record<string, string> = {
+        open: "In bacheca di zona", expired: "Scaduta in bacheca", requested: "In attesa",
+        accepted: "Accettata", rejected: "Rifiutata", paid: "Pagata", delivered: "Consegnata",
+        closed: "Conclusa", cancelled: "Annullata",
+      };
       const periziaAct = async (id: string, action: string, extra: Record<string, unknown> = {}) => {
         const res = await api(`/api/consulente/requests/${id}/action`, { body: { action, ...extra } });
         toast(res.ok ? "Operazione registrata." : res.error, res.ok ? "ok" : "err");
@@ -844,8 +861,9 @@ function AdminSection({ section, data, onAction, reload }: {
         <>
           <div className="admin-head"><h1>Perizie e pagamenti</h1><span className="pill pill-gray">{perizie.length} richieste</span></div>
           <Alert kind="info">
-            Il denaro è custodito dalla piattaforma: l&apos;utente paga dopo l&apos;accettazione, il consulente è accreditato (tariffa meno il 10%) solo dopo la consegna della relazione.
+            Il denaro è custodito dalla piattaforma: l&apos;utente paga dopo l&apos;accettazione (bonifico con la <b>causale-codice</b> della richiesta), il consulente è accreditato (tariffa meno il 10%) solo dopo la consegna della relazione entro il termine.
             La registrazione del pagamento e dell&apos;accredito è riservata al <b>super amministratore</b>: agli altri ruoli il server risponde con un rifiuto.
+            Le richieste <b>in bacheca di zona</b> (senza consulente) non hanno pagamenti da registrare: prima diventa di qualcuno.
           </Alert>
           <div className="table-wrap">
             <table className="table">
@@ -853,10 +871,19 @@ function AdminSection({ section, data, onAction, reload }: {
               <tbody>
                 {perizie.map(r => (
                   <tr key={r.id}>
-                    <td className="small"><b>{r.kind}</b><br />{r.address}<br /><span className="muted">{fmtDateTime(r.createdAt)}</span></td>
-                    <td className="small">Consulente: {r.consultant}<br /><span className="muted">IBAN: <span className="mono">{r.consultantIban || "—"}</span></span><br />Richiedente: {r.requester} ({r.requesterEmail})</td>
+                    <td className="small"><b>{r.kind}</b><br />{r.address}{r.zoneName ? <> · {r.zoneName}</> : null}<br />
+                      <span className="muted">{fmtDateTime(r.createdAt)}</span><br />
+                      {r.code ? <span className="mono">causale: perizia {r.code}</span> : null}
+                      {r.voidCount > 0 ? <><br /><span className="pill pill-amber">{r.voidCount} incarich{r.voidCount === 1 ? "o nullo" : "i nulli"}</span></> : null}
+                      {r.entityId ? <><br /><a href={`#/scheda/${r.entityId}`}>scheda creata/aggiornata</a></> : null}
+                    </td>
+                    <td className="small">Consulente: {r.consultant}{r.consultantIban ? <><br /><span className="muted">IBAN: <span className="mono">{r.consultantIban}</span></span></> : null}<br />Richiedente: {r.requester} ({r.requesterEmail})</td>
                     <td className="small">Tariffa: <b>{fmtE(r.feeCents)}</b><br />Accredito: {fmtE(r.payoutCents)}<br /><span className="muted">Commissione: {fmtE(r.commissionCents)}</span></td>
-                    <td className="small">{{ requested: "In attesa", accepted: "Accettata", rejected: "Rifiutata", paid: "Pagata", delivered: "Consegnata", closed: "Conclusa", cancelled: "Annullata" }[r.status] || r.status}{r.paymentRef ? <><br /><span className="muted">rif. {r.paymentRef}</span></> : null}</td>
+                    <td className="small">{STATUS_IT[r.status] || r.status}
+                      {r.expiresAt && r.status === "open" ? <><br /><span className="muted">bacheca fino al {dateIt(r.expiresAt)}</span></> : null}
+                      {r.deadlineAt && r.status === "paid" ? <><br /><span className="muted">consegna entro {dateIt(r.deadlineAt)}</span></> : null}
+                      {r.paymentRef ? <><br /><span className="muted">rif. {r.paymentRef}</span></> : null}
+                    </td>
                     <td>
                       {r.status === "accepted" ? (
                         <button className="btn btn-primary btn-xs mb1" onClick={() => {
@@ -874,6 +901,73 @@ function AdminSection({ section, data, onAction, reload }: {
                   </tr>
                 ))}
                 {!perizie.length ? <tr><td colSpan={5}>Nessuna richiesta.</td></tr> : null}
+              </tbody>
+            </table>
+          </div>
+        </>
+      );
+    }
+
+    case "abbonamenti": {
+      // percorso ② del modello D11: ordini dei piani Premium (bonifico con
+      // causale-codice, registrazione del solo super amministratore)
+      const orders = (d?.orders || []) as Array<{
+        id: string; user: string; email: string; planName: string; days: number;
+        priceCents: number; code: string; status: string; paymentRef: string | null;
+        premiumUntil: string | null; createdAt: string; paidAt: string | null;
+      }>;
+      const plans = (d?.plans || []) as Array<{ slug: string; name: string; days: number; priceCents: number }>;
+      const plansEnabled = d?.plansEnabled !== false;
+      const platformIban = String(d?.platformIban || "");
+      const fmtE = (c: number) => `€ ${(c / 100).toLocaleString("it-IT", { minimumFractionDigits: 2 })}`;
+      const ordAct = async (id: string, action: string, extra: Record<string, unknown> = {}) => {
+        const res = await api("/api/admin/action", { body: { action, id, ...extra } });
+        toast(res.ok ? "Operazione registrata." : res.error, res.ok ? "ok" : "err");
+        if (res.ok) void reload();
+      };
+      return (
+        <>
+          <div className="admin-head"><h1>Abbonamenti Premium</h1><span className="pill pill-gray">{orders.length} ordini</span></div>
+          <Alert kind="info">
+            Percorso «chi non contribuisce, paga»: l&apos;utente apre un ordine, paga con bonifico usando la <b>causale-codice</b> (SUB-XXXXXX) e il <b>super amministratore</b> registra l&apos;incasso: da quel momento nasce il grant Premium di origine «acquisto» e l&apos;utente riceve l&apos;avviso. Piani e prezzi si cambiano da <a href="#/admin/impostazioni">Impostazioni</a>.
+            {!platformIban ? " IBAN della piattaforma non ancora impostato: aggiungilo in Impostazioni, altrimenti gli utenti non sanno dove pagare." : ` IBAN della piattaforma: ${platformIban}.`}
+          </Alert>
+          <div className="card card-pad-s mb2">
+            <b className="small">Piani in vendita{plansEnabled ? "" : " (vendita sospesa)"}:</b>{" "}
+            {plans.map(p => `${p.name} ${p.days} gg / ${fmtE(p.priceCents)}`).join(" · ")}
+          </div>
+          <div className="table-wrap">
+            <table className="table">
+              <thead><tr><th scope="col">Ordine</th><th scope="col">Utente</th><th scope="col">Piano</th><th scope="col">Stato</th><th scope="col">Registrazioni</th></tr></thead>
+              <tbody>
+                {orders.map(o => (
+                  <tr key={o.id}>
+                    <td className="small">
+                      <span className="mono">causale: ZoomZoom Premium {o.code}</span><br />
+                      <span className="muted">{fmtDateTime(o.createdAt)}</span>
+                      {o.paymentRef ? <><br /><span className="muted">rif. {o.paymentRef}</span></> : null}
+                    </td>
+                    <td className="small">{o.user}<br /><span className="muted">{o.email}</span><br />{o.premiumUntil ? <span className="muted">Premium fino al {new Date(o.premiumUntil).toLocaleDateString("it-IT")}</span> : <span className="muted">senza Premium</span>}</td>
+                    <td className="small"><b>{o.planName}</b><br />{o.days} giorni · {fmtE(o.priceCents)}</td>
+                    <td className="small">
+                      {o.status === "pending" ? <span className="pill pill-amber">In attesa del bonifico</span>
+                        : o.status === "paid" ? <span className="pill pill-green">Pagato{o.paidAt ? ` · ${new Date(o.paidAt).toLocaleDateString("it-IT")}` : ""}</span>
+                        : <span className="pill pill-gray">Annullato</span>}
+                    </td>
+                    <td>
+                      {o.status === "pending" ? (
+                        <>
+                          <button className="btn btn-primary btn-xs mb1" onClick={() => {
+                            const ref = window.prompt("Riferimento del bonifico ricevuto (facoltativo, es. CRO):") ?? "";
+                            void ordAct(o.id, "subscription.pay", { paymentRef: ref });
+                          }}>Registra pagamento</button>
+                          <button className="btn btn-ghost btn-xs" onClick={() => void ordAct(o.id, "subscription.cancel")}>Annulla ordine</button>
+                        </>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+                {!orders.length ? <tr><td colSpan={5}>Nessun ordine.</td></tr> : null}
               </tbody>
             </table>
           </div>
@@ -1081,7 +1175,7 @@ function ContentsSection({ initial }: { initial: Record<string, unknown> | null 
 /* ---------- Impostazioni ---------- */
 function SettingsSection({ initial }: { initial: Record<string, unknown> | null }) {
   const { toast } = useApp();
-  const s = (initial?.settings || {}) as Record<string, number | boolean>;
+  const s = (initial?.settings || {}) as Record<string, unknown>;
   const [form, setForm] = useState({
     minReviews: Number(s.minReviews ?? 3),
     rettificaDays: Number(s.rettificaDays ?? 30),
@@ -1093,16 +1187,31 @@ function SettingsSection({ initial }: { initial: Record<string, unknown> | null 
     premiumDaysPerReview: Number(s.premiumDaysPerReview ?? 7),
     premiumMaxDays: Number(s.premiumMaxDays ?? 365),
     openReviewsPerDay: Number(s.openReviewsPerDay ?? 5),
+    bachecaExpiryDays: Number(s.bachecaExpiryDays ?? 14),
+    periziaDeadlineDays: Number(s.periziaDeadlineDays ?? 7),
     premiumEnabled: s.premiumEnabled !== false,
     openReviewsEnabled: s.openReviewsEnabled !== false,
     photosEnabled: s.photosEnabled !== false,
     votesEnabled: s.votesEnabled !== false,
     utilityEnabled: s.utilityEnabled !== false,
     consulentiEnabled: s.consulentiEnabled !== false,
+    premiumPlansEnabled: s.premiumPlansEnabled !== false,
+    periziaBachecaEnabled: s.periziaBachecaEnabled !== false,
+    periziaHideRequesterUntilAccept: s.periziaHideRequesterUntilAccept !== false,
     platformIban: String(s.platformIban ?? ""),
     paymentInstructions: String(s.paymentInstructions ?? ""),
   });
-  const fields: Array<[Exclude<keyof typeof form, "premiumEnabled" | "openReviewsEnabled" | "photosEnabled" | "votesEnabled" | "utilityEnabled" | "consulentiEnabled" | "platformIban" | "paymentInstructions">, string, string]> = [
+  // piani di abbonamento in vendita (percorso ②): modificabili uno a uno;
+  // il server li sanifica (slug univoci, giorni e prezzi nei limiti)
+  const [plans, setPlans] = useState(
+    Array.isArray(s.premiumPlans) && (s.premiumPlans as unknown[]).length
+      ? (s.premiumPlans as Array<{ slug?: unknown; name?: unknown; days?: unknown; priceCents?: unknown }>).map(p => ({
+          slug: String(p.slug || ""), name: String(p.name || ""),
+          days: Number(p.days) || 1, priceEuros: String((Number(p.priceCents) || 100) / 100),
+        }))
+      : [{ slug: "silver", name: "Silver", days: 1, priceEuros: "1" }, { slug: "gold", name: "Gold", days: 7, priceEuros: "5" }, { slug: "platinum", name: "Platinum", days: 30, priceEuros: "20" }],
+  );
+  const fields: Array<[Exclude<keyof typeof form, "premiumEnabled" | "openReviewsEnabled" | "photosEnabled" | "votesEnabled" | "utilityEnabled" | "consulentiEnabled" | "premiumPlansEnabled" | "periziaBachecaEnabled" | "periziaHideRequesterUntilAccept" | "platformIban" | "paymentInstructions">, string, string]> = [
     ["minReviews", "Soglia recensioni sufficienti (m della formula)", "Peso della media di categoria nella media ponderata; le schede sotto questa soglia sono segnala te come non sufficienti."],
     ["rettificaDays", "Finestra di rettifica (giorni)", "Giorni per aggiornare autonomamente una recensione con rettifica motivata."],
     ["inviteDailyCap", "Inviti al giorno per scheda", "Limite anti-abuso per soggetto verificato."],
@@ -1113,6 +1222,8 @@ function SettingsSection({ initial }: { initial: Record<string, unknown> | null 
     ["premiumDaysPerReview", "Premium: giorni per recensione", "Giorni di Membership Premium assegnati per ogni recensione pubblicata (verificata o dichiarata). 0 disattiva l'assegnazione automatica."],
     ["premiumMaxDays", "Premium: accumulo massimo (giorni)", "La scadenza del Premium non supera mai adesso + questo valore, per limitare i benefici della frode."],
     ["openReviewsPerDay", "Contributo aperto: limite giornaliero per utente", "Numero massimo di recensioni aperte E di nuove schede immobile che un utente può pubblicare in un giorno."],
+    ["periziaDeadlineDays", "Indagine professionale: termine di consegna (giorni solari)", "Dalla registrazione del pagamento: oltre, l'incarico risulta nullo, la richiesta torna in bacheca e il mancato conta nel feedback di serietà del consulente."],
+    ["bachecaExpiryDays", "Bacheca di zona: durata (giorni)", "Quanto resta disponibile una richiesta in bacheca prima di scadere; poi il richiedente può riproporla o annullarla."],
   ];
   return (
     <>
@@ -1121,7 +1232,18 @@ function SettingsSection({ initial }: { initial: Record<string, unknown> | null 
       <div className="card">
         <form onSubmit={async e => {
           e.preventDefault();
-          const res = await api("/api/admin/action", { body: { action: "settings.update", settings: form, reason: "Aggiornamento impostazioni." } });
+          const res = await api("/api/admin/action", {
+            body: {
+              action: "settings.update",
+              settings: {
+                ...form,
+                premiumPlans: plans
+                  .filter(p => p.slug.trim() && p.name.trim() && Number(p.days) >= 1 && Number(p.priceEuros.replace(",", ".")) >= 1)
+                  .map(p => ({ slug: p.slug, name: p.name, days: Number(p.days), priceCents: Math.round(Number(p.priceEuros.replace(",", ".")) * 100) })),
+              },
+              reason: "Aggiornamento impostazioni.",
+            },
+          });
           toast(res.ok ? "Impostazioni aggiornate." : res.error, res.ok ? "ok" : "err");
         }}>
           {fields.map(([k, label, hint]) => (
@@ -1179,6 +1301,58 @@ function SettingsSection({ initial }: { initial: Record<string, unknown> | null 
               Consulenti tecnici attivi (iscrizioni e richieste di perizia)
             </label>
             <span className="hint">Sospende nuove iscrizioni e nuove richieste; le schede esistenti restano nel catalogo e le pratiche avviate si concludono.</span>
+          </div>
+          <div className="field">
+            <label htmlFor="s-periziaBachecaEnabled">
+              <input id="s-periziaBachecaEnabled" type="checkbox" checked={form.periziaBachecaEnabled}
+                onChange={e => setForm(f => ({ ...f, periziaBachecaEnabled: e.target.checked }))} />{" "}
+              Bacheca di zona attiva (richieste di indagine senza consulente indicato)
+            </label>
+            <span className="hint">Se disattivata, restano solo le richieste dirette alla scheda di un consulente: l&apos;ingresso dalla ricerca senza risultati viene nascosto.</span>
+          </div>
+          <div className="field">
+            <label htmlFor="s-periziaHideRequesterUntilAccept">
+              <input id="s-periziaHideRequesterUntilAccept" type="checkbox" checked={form.periziaHideRequesterUntilAccept}
+                onChange={e => setForm(f => ({ ...f, periziaHideRequesterUntilAccept: e.target.checked }))} />{" "}
+              Privacy del richiedente: nascondi il nickname al consulente fino all&apos;accettazione (K9)
+            </label>
+            <span className="hint">Nella bacheca di zona i dati del richiedente restano SEMPRE nascosti; questo vale per le richieste dirette, prima dell&apos;accettazione. La scelta è del modello D11 (privacy by default) ed è reversibile qui.</span>
+          </div>
+          <div className="field">
+            <label htmlFor="s-premiumPlansEnabled">
+              <input id="s-premiumPlansEnabled" type="checkbox" checked={form.premiumPlansEnabled}
+                onChange={e => setForm(f => ({ ...f, premiumPlansEnabled: e.target.checked }))} />{" "}
+              Vendita dei piani di abbonamento Premium attiva (percorso «chi non contribuisce, paga»)
+            </label>
+            <span className="hint">Sospende la vendita: il Premium resta ottenibile contribuendo. Gli ordini già pagati non vengono toccati.</span>
+          </div>
+          <div className="field">
+            <label>Piani in vendita</label>
+            {plans.map((p, i) => (
+              <div className="row" key={`${p.slug}-${i}`} style={{ gap: 8, flexWrap: "wrap", marginBottom: 6, alignItems: "flex-end" }}>
+                <div className="field mb0" style={{ width: 110 }}>
+                  <label htmlFor={`sp-slug-${i}`} className="small">Sigla</label>
+                  <input id={`sp-slug-${i}`} value={p.slug} onChange={e => setPlans(ps => ps.map((x, j) => j === i ? { ...x, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "") } : x))} />
+                </div>
+                <div className="field mb0" style={{ width: 120 }}>
+                  <label htmlFor={`sp-name-${i}`} className="small">Nome</label>
+                  <input id={`sp-name-${i}`} value={p.name} onChange={e => setPlans(ps => ps.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} />
+                </div>
+                <div className="field mb0" style={{ width: 90 }}>
+                  <label htmlFor={`sp-days-${i}`} className="small">Giorni</label>
+                  <input id={`sp-days-${i}`} type="number" min={1} max={3650} value={p.days} onChange={e => setPlans(ps => ps.map((x, j) => j === i ? { ...x, days: Number(e.target.value) || 1 } : x))} />
+                </div>
+                <div className="field mb0" style={{ width: 100 }}>
+                  <label htmlFor={`sp-price-${i}`} className="small">Prezzo (€)</label>
+                  <input id={`sp-price-${i}`} value={p.priceEuros} onChange={e => setPlans(ps => ps.map((x, j) => j === i ? { ...x, priceEuros: e.target.value } : x))} />
+                </div>
+                {plans.length > 1 ? (
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPlans(ps => ps.filter((_, j) => j !== i))}>Rimuovi</button>
+                ) : null}
+              </div>
+            ))}
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPlans(ps => [...ps, { slug: "", name: "", days: 1, priceEuros: "" }])}>Aggiungi piano</button>
+            <span className="hint">Pagamento con bonifico e causale-codice, attivazione dopo la registrazione dello staff. Prezzi minimo 1 €, massimo 100.000 €. Sigla univoca per piano (silver, gold, platinum…).</span>
           </div>
           <div className="field">
             <label htmlFor="s-platformIban">IBAN della piattaforma (incassi perizie)</label>

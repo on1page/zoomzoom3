@@ -257,6 +257,9 @@ export async function publicConsultantForEntity(entityId: string) {
     include: { zone: true },
   });
   if (!c || c.status !== "approved") return null;
+  // feedback di serietà (percorso ③): incarichi consegnati entro la scadenza e
+  // incarichi mancati; pubblico solo se c'è almeno una consegna registrata
+  const totale = c.incarichiCompletati + c.incarichiNulli;
   return {
     id: c.id,
     firstName: c.firstName,
@@ -273,6 +276,10 @@ export async function publicConsultantForEntity(entityId: string) {
     vatNumber: c.vatNumber, // dato professionale pubblico
     hasPhoto: c.photoData != null,
     twoFactor: true, // garantito: l'approvazione richiede 2FA attiva
+    reliability: totale > 0 ? {
+      completati: c.incarichiCompletati,
+      mancati: c.incarichiNulli,
+    } : null,
   };
 }
 

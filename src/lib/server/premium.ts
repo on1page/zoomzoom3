@@ -48,6 +48,7 @@ export async function recomputePremiumUntil(userId: string): Promise<Date | null
 export type PremiumGrantResult = {
   grantedDays: number;
   until: Date | null;
+  grantId?: string; // dei grant da acquisto: per agganciare l'ordine
 };
 
 // Assegna i giorni Premium per una recensione pubblicata, rispettando il cap
@@ -80,6 +81,34 @@ export async function awardPremiumForReview(opts: {
   });
   const until = await recomputePremiumUntil(userId);
   return { grantedDays: effectiveDays, until };
+}
+
+// Percorso ② del modello D11 — chi non contribuisce, paga: attiva i giorni
+// Premium di un ordine di abbonamento registrato come pagato. Stessa regola
+// di accumulo dei contributi (base = scadenza attuale se valida; cap
+// premiumMaxDays mai oltre adesso + orizzonte). Il grant nasce con origine
+// «acquisto» e viene agganciato all'ordine: un solo grant per ordine.
+export async function awardPremiumForOrder(opts: {
+  userId: string; days: number; settings: AppSettings; grantedAt?: Date;
+}): Promise<PremiumGrantResult> {
+  const { userId, settings } = opts;
+  if (!settings.premiumEnabled || opts.days <= 0) {
+    return { grantedDays: 0, until: null };
+  }
+  const grantedAt = opts.grantedAt ?? new Date();
+  const user = await db.user.findUnique({ where: { id: userId }, select: { premiumUntil: true } });
+  const base = user?.premiumUntil && user.premiumUntil.getTime() > grantedAt.getTime() ? user.premiumUntil : grantedAt;
+  const cappedExpiry = new Date(Math.min(
+    base.getTime() + opts.days * 86400000,
+    grantedAt.getTime() + settings.premiumMaxDays * 86400000,
+  ));
+  const effectiveDays = Math.max(1, Math.round((cappedExpiry.getTime() - base.getTime()) / 86400000));
+  const expiresAt = new Date(base.getTime() + effectiveDays * 86400000);
+  const grant = await db.premiumGrant.create({
+    data: { userId, days: effectiveDays, origin: "acquisto", grantedAt, expiresAt },
+  });
+  const until = await recomputePremiumUntil(userId);
+  return { grantedDays: effectiveDays, until, grantId: grant.id };
 }
 
 // Revoca mirata: la moderazione nasconde una recensione → il Premium ottenuto

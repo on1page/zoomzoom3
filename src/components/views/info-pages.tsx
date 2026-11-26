@@ -78,14 +78,23 @@ export function HowItWorksView() {
         <p>Ogni indagine pubblicata attiva giorni di <a href="#/premium">Membership Premium</a> per l&apos;autore: è l&apos;incentivo del contributo. Le indagini che hanno attivato questo vantaggio portano l&apos;etichetta pubblica <b>«Contenuto incentivato»</b>, così chi legge sa sempre quando un contributo è stato premiato. Il riconoscimento di utilità invece è indipendente ed è assegnato solo dalla community, con la formula qui sopra.</p>
         <h2>Cosa contiene un&apos;indagine</h2>
         <p>Punteggio complessivo da 0 a 10 (step 0,5) mostrato con stelle e valore numerico; punteggi per i criteri <b>specifici della categoria</b> (le domande per un immobile riguardano manutenzione e rumori, quelle per un&apos;agenzia trasparenza e gestione della pratica: non vengono riusate tra categorie); punti di forza; criticità; dove pertinente, il <b>prezzo richiesto, proposto o concluso</b> (dato dichiarato dal recensore: non viene verificato, ed è sempre mostrato come tale); descrizione dell&apos;esperienza; dichiarazione di veridicità dell&apos;esperienza personale e di assenza di dati personali di terzi.</p>
+        <h2>Quando serve di più: l&apos;indagine professionale</h2>
+        <p>Quando un indirizzo non ha ancora indagini della community — o serve l&apos;occhio di un tecnico — si può chiedere un&apos;<a href="#/indagine">indagine professionale</a> ai <a href="#/categoria/consulente">Consulenti tecnici</a> approvati dallo staff (geometri, ingegneri, periti, agenti immobiliari), con accesso protetto da verifica in due passaggi. Come funziona, in trasparenza:</p>
+        <ul>
+          <li><b>Bacheca di zona.</b> La richiesta (perizia tecnica o valutazione immobiliare) entra in bacheca: la vedono i consulenti che coprono la zona, che ricevono l&apos;avviso via email. <b>Nessun dato del richiedente</b> (né nickname né email) è visibile al consulente <b>finché non accetta l&apos;incarico</b>;</li>
+          <li><b>Tariffa confermata prima di pagare.</b> Il consulente che ritira l&apos;incarico conferma la tariffa; solo dopo il richiedente paga, con <b>bonifico tracciato e causale-codice</b> della richiesta (nessun circuito automatico: la registrazione del pagamento è dello staff);</li>
+          <li><b>Consegna entro {s?.periziaDeadlineDays ?? 7} giorni solari</b> dal pagamento registrato, con relazione scritta resa in PDF. Se il termine scade, l&apos;incarico risulta <b>nullo</b>: la richiesta torna in bacheca e il mancato adempimento entra nel <b>feedback di serietà</b> pubblico del consulente (incarichi consegnati e mancati, visibili sulla sua scheda);</li>
+          <li><b>Il denaro passa dalla piattaforma.</b> L&apos;accredito al consulente avviene solo a consegna avvenuta, con una commissione del 10% che resta alla piattaforma;</li>
+          <li><b>Chiusura del cerchio.</b> Alla consegna, la scheda dell&apos;indirizzo <b>nasce o si aggiorna</b> con l&apos;indagine certificata (con una sintesi pubblica dell&apos;esito, se il consulente la pubblica): il prossimo che cerca quell&apos;indirizzo trova la scheda. La relazione integrale resta del richiedente che l&apos;ha pagata; le indagini della community restano dichiarate e non si mescolano con le perizie.</li>
+        </ul>
         <h2>Classifiche: il metodo</h2>
         <p>Le classifiche ordinano le schede per <code>PC = (n · M + m · C) / (n + m)</code>, dove M è la media della scheda, n il numero di indagini, C la media della categoria e m la soglia minima (m = {s?.minReviews ?? 3}). Con poche indagini il punteggio resta vicino alla media della categoria: una singola valutazione massima non conquista il primo posto. Le schede sotto soglia restano consultabili ma sono segnalate come &quot;dati insufficienti&quot;. I punteggi di categorie diverse non sono direttamente confrontabili.</p>
         <h2>Cosa non facciamo</h2>
         <ul>
           <li>Nessun annuncio di immobili in vendita o affitto;</li>
           <li>Nessun appuntamento, prenotazione o messaggistica tra utenti;</li>
-          <li>Nessun servizio a pagamento: la <a href="#/premium">Membership Premium</a> non si compra, si guadagna contribuendo con indagini della community;</li>
-          <li>Nessuna vendita di posizioni: la pubblicità, quando attiva, non influenza punteggi, medie né ordine dei risultati.</li>
+          <li>Nessuna vendita di posizioni: la pubblicità, quando attiva, non influenza punteggi, medie né ordine dei risultati;</li>
+          <li>Nessun punteggio in vendita: il <a href="#/abbonamento">piano Premium a pagamento</a> compra solo giorni di lettura delle indagini integrali, mai medie, classifiche, riconoscimenti o visibilità.</li>
         </ul>
         <h2>Modera, segnala, contesta</h2>
         <p>Ogni indagine ha un pulsante &quot;Segnala&quot; (per utenti autenticati) e ogni scheda permette di contestare l&apos;associazione a una persona o attività. Il flusso completo — stati, tempi, decisioni, appello — è descritto nella pagina <a href="#/moderazione">Moderazione e contestazioni</a>.</p>
@@ -373,6 +382,21 @@ export function PremiumView() {
           <li>Dalla pubblicazione hai {days} giorni di Premium;</li>
           <li>Ogni altro contributo somma giorni, entro un tetto massimo di accumulo.</li>
         </ol>
+        {s?.premiumPlansEnabled ? (
+          <>
+            <h2>Oppure acquistalo: i piani</h2>
+            <p>Chi non contribuisce può pagare un abbonamento: stessi vantaggi, nessuna differenza di accesso. Piani in vendita (prezzi dichiarati, nessun rinnovo automatico, nessun dato di carta: bonifico tracciato con causale-codice e attivazione dopo la registrazione dello staff):</p>
+            <div className="grid" style={{ gap: 10 }}>
+              {(s.premiumPlans || []).map(p => (
+                <p key={p.slug} className="small mb0 card card-pad-s" style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+                  <span><b>{p.name}</b> — {p.days} {p.days === 1 ? "giorno" : "giorni"} di Premium{p.slug === "gold" && p.days === days ? <span className="muted"> (lo stesso premio di una indagine pubblicata: taratura dichiarata)</span> : null}</span>
+                  <b>{(p.priceCents / 100).toLocaleString("it-IT", { minimumFractionDigits: 2 })} €</b>
+                </p>
+              ))}
+            </div>
+            <p className="small"><a className="btn btn-primary btn-sm" href="#/abbonamento">Acquista un abbonamento</a></p>
+          </>
+        ) : null}
         <h2>Le foto: si sbloccano contribuendo</h2>
         <p>Le indagini possono includere fino a <b>3 foto</b> dell&apos;immobile (ricompresse, con i metadati — posizione EXIF inclusa — rimossi). Le foto sono visibili a chi ha il Premium <b>e a chi ha allegato almeno una foto in una propria indagine</b>: chi contribuisce con la prova visiva accede a quella di tutti. Nessuna foto con persone riconoscibili o documenti: la moderazione rimuove e segnala.</p>
         <h2>I voti di utilità: l&apos;effetto community</h2>

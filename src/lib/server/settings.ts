@@ -1,6 +1,13 @@
 // ZoomZoom — impostazioni applicative modificabili dal back office.
 import { db } from "@/lib/db";
 
+export type PremiumPlan = {
+  slug: string;      // silver | gold | platinum
+  name: string;      // nome pubblico
+  days: number;      // giorni Premium concessi
+  priceCents: number; // importo in centesimi
+};
+
 export type AppSettings = {
   siteName: string;              // nome configurabile (verificare disponibilità marchio)
   adsEnabled: boolean;
@@ -25,6 +32,17 @@ export type AppSettings = {
   // riconoscimento di utilità: punti, badge e ricorsi (ricalcolo periodico)
   utilityEnabled: boolean;
   consulentiEnabled: boolean;    // Consulenti tecnici: iscrizioni e richieste di perizia
+  // percorso ② del modello D11: vendita di piani di abbonamento Premium
+  // (bonifico tracciato con causale-codice, registrazione staff — K8)
+  premiumPlansEnabled: boolean; // acquisto piani attivo
+  premiumPlans: PremiumPlan[];  // piani in vendita (modificabili dal back office)
+  // percorso ③ del modello D11: indagine professionale dalla ricerca
+  periziaBachecaEnabled: boolean; // bacheca di zona per le richieste senza consulente
+  bachecaExpiryDays: number;      // giorni prima che una richiesta in bacheca scada
+  periziaDeadlineDays: number;   // giorni solari per consegnare la relazione (dal pagamento)
+  // K9 (decisione del modello D11, modificabile): il nickname del richiedente
+  // resta NASCOSTO al consulente finché non accetta l'incarico
+  periziaHideRequesterUntilAccept: boolean;
   platformIban: string;          // IBAN della piattaforma per i pagamenti delle perizie (vuoto = istruzioni generiche)
   paymentInstructions: string;   // istruzioni mostrate all'utente per saldare una richiesta accettata
 };
@@ -60,9 +78,42 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // (mai le stelle, mai il volume); vedi src/lib/server/utility.ts
   utilityEnabled: true,
   consulentiEnabled: true,
+  // percorso ② del modello D11 — chi non contribuisce, paga: piani calibrati
+  // sul premio per recensione (7 gg = Gold a 5 €, K2)
+  premiumPlansEnabled: true,
+  premiumPlans: [
+    { slug: "silver", name: "Silver", days: 1, priceCents: 100 },
+    { slug: "gold", name: "Gold", days: 7, priceCents: 500 },
+    { slug: "platinum", name: "Platinum", days: 30, priceCents: 2000 },
+  ],
+  // percorso ③ del modello D11 — indagine professionale dalla ricerca
+  periziaBachecaEnabled: true,
+  bachecaExpiryDays: 14,
+  periziaDeadlineDays: 7,
+  // K9 del modello D11: privacy by default per il richiedente
+  periziaHideRequesterUntilAccept: true,
   platformIban: "",
   paymentInstructions: "",
 };
+
+// sanifica i piani arrivati dal database (JSON): i valori corrotti o fuori
+// limiti vengono scartati; nessun piano valido → si usano i default
+export function sanitizePlans(v: unknown): PremiumPlan[] {
+  const DEFAULT_PLANS = DEFAULT_SETTINGS.premiumPlans;
+  if (!Array.isArray(v)) return DEFAULT_PLANS;
+  const out: PremiumPlan[] = [];
+  for (const p of v) {
+    const slug = String((p as PremiumPlan)?.slug || "").toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 20);
+    const name = String((p as PremiumPlan)?.name || "").trim().slice(0, 40);
+    const days = Math.round(Number((p as PremiumPlan)?.days));
+    const priceCents = Math.round(Number((p as PremiumPlan)?.priceCents));
+    if (!slug || !name || !Number.isFinite(days) || days < 1 || days > 3650
+      || !Number.isFinite(priceCents) || priceCents < 100 || priceCents > 100_000_00) continue;
+    if (out.some(x => x.slug === slug)) continue;
+    out.push({ slug, name, days, priceCents });
+  }
+  return out.length ? out : DEFAULT_PLANS;
+}
 
 const SETTINGS_KEY = "app";
 
@@ -75,7 +126,11 @@ export async function getSettings(): Promise<AppSettings> {
   let value = DEFAULT_SETTINGS;
   if (row) {
     try {
-      value = { ...DEFAULT_SETTINGS, ...JSON.parse(row.value) as Partial<AppSettings> };
+      const parsed = { ...DEFAULT_SETTINGS, ...JSON.parse(row.value) as Partial<AppSettings> };
+      // i piani sono un array nel JSON: sanificati a ogni lettura (mai valori
+      // corrotti o vuoti nel back office o nella vetrina pubblica)
+      parsed.premiumPlans = sanitizePlans(parsed.premiumPlans);
+      value = parsed;
     } catch { /* valore corrotto: si usano i default */ }
   }
   cache = { value, at: Date.now() };

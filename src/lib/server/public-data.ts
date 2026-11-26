@@ -98,6 +98,38 @@ export type PublicEntity = {
   priceStats: { unit: string; min: number; max: number; median: number; n: number } | null;
 };
 
+// Indagine professionale certificata collegata alla scheda (chiusura del
+// cerchio, K7: la relazione consegnata crea o aggiorna la scheda). Nessun dato
+// del richiedente, nessun testo integrale: solo il fatto certificato, il
+// consulente e l'eventuale sintesi pubblica che ha scelto di pubblicare.
+export type CertifiedIndagine = {
+  id: string;
+  kind: string;
+  title: string;
+  summary: string | null;
+  deliveredAt: string;
+  consultantName: string;
+  consultantProfession: string;
+};
+
+export async function certifiedIndagineForEntity(entityId: string): Promise<CertifiedIndagine | null> {
+  const r = await db.periziaRequest.findFirst({
+    where: { entityId, status: { in: ["delivered", "closed"] } },
+    orderBy: { deliveredAt: "desc" },
+    include: { consultant: true },
+  });
+  if (!r || !r.consultant) return null;
+  return {
+    id: r.id,
+    kind: r.kind,
+    title: r.reportTitle || r.kind,
+    summary: r.publicSummary || null,
+    deliveredAt: (r.deliveredAt ?? r.updatedAt).toISOString(),
+    consultantName: `${r.consultant.firstName} ${r.consultant.lastName}`,
+    consultantProfession: r.consultant.profession,
+  };
+}
+
 export async function publicEntity(entityId: string, minReviews: number): Promise<PublicEntity | null> {
   const e = await db.entity.findUnique({ where: { id: entityId } });
   if (!e || e.status !== "published") return null;

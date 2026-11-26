@@ -14,7 +14,8 @@ import { LoginView, RegisterView, VerifyEmailView } from "@/components/views/aut
 import { ProfileInvitesView, ProfileSettingsView, ProfileView } from "@/components/views/profile";
 import { InviteView, ProposeView, SubjectAreaView, UpdateReviewView, VerifyExperienceView, WriteReviewView } from "@/components/views/review-flows";
 import { WriteReviewOpenView } from "@/components/views/write-review-open";
-import { ConsulenteView, ConsulenteRequestFormView, ConsulenteRequestsView } from "@/components/views/consulente";
+import { ConsulenteView, ConsulenteRequestFormView, ConsulenteRequestsView, IndagineProView } from "@/components/views/consulente";
+import { SubscriptionView } from "@/components/views/abbonamento";
 import { AdminView } from "@/components/admin/admin";
 
 function Router() {
@@ -41,6 +42,7 @@ function Router() {
       case "termini": return <TermsView />;
       case "regole-recensioni": return <ReviewRulesView />;
       case "premium": return <PremiumView />;
+      case "abbonamento": return <SubscriptionView />;
       case "moderazione": return <ModerationView />;
       case "contatti": return <ContactsView />;
       case "casella-demo": return <MailboxView />;
@@ -60,6 +62,7 @@ function Router() {
       case "consulente": return <ConsulenteView />;
       case "consulente-richieste": return <ConsulenteRequestsView />;
       case "consulente-richiesta": return <ConsulenteRequestFormView entityId={route.params.to} />;
+      case "indagine": return <IndagineProView prefill={route.params.addr} />;
       case "admin": return <AdminView section={segs[1] || "login"} />;
       default: return <NotFoundView />;
     }
