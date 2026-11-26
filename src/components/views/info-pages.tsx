@@ -337,7 +337,7 @@ export function MailboxView() {
 export function PremiumView() {
   const { boot, user } = useApp();
   const s = boot?.settings;
-  const days = s?.premiumDaysPerReview ?? 30;
+  const days = s?.premiumDaysPerReview ?? 7;
   return (
     <>
       <Crumbs items={[{ label: "Home", href: "#/" }, { label: "Membership Premium" }]} />

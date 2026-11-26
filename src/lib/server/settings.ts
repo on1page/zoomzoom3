@@ -42,7 +42,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   proofRetentionDays: 30,
   mapMinAggregate: 3,
   premiumEnabled: true,
-  premiumDaysPerReview: 30,
+  // 7 giorni dal 26/11/2026 (prima era 30): calibrato sul piano Gold
+  // (7 giorni a 5 €) della proposta "indagini della community" — D11/K2.
+  premiumDaysPerReview: 7,
   premiumMaxDays: 365,
   openReviewsEnabled: true,
   openReviewsPerDay: 5,

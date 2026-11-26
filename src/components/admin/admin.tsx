@@ -980,7 +980,7 @@ function SettingsSection({ initial }: { initial: Record<string, unknown> | null 
     inviteExpiryDays: Number(s.inviteExpiryDays ?? 7),
     proofRetentionDays: Number(s.proofRetentionDays ?? 30),
     mapMinAggregate: Number(s.mapMinAggregate ?? 3),
-    premiumDaysPerReview: Number(s.premiumDaysPerReview ?? 30),
+    premiumDaysPerReview: Number(s.premiumDaysPerReview ?? 7),
     premiumMaxDays: Number(s.premiumMaxDays ?? 365),
     openReviewsPerDay: Number(s.openReviewsPerDay ?? 5),
     premiumEnabled: s.premiumEnabled !== false,
