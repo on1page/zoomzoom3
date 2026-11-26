@@ -8,7 +8,7 @@
 // default (sola categoria): nickname e foto compaiono solo con il flag.
 import { useEffect, useState } from "react";
 import { useApp } from "@/lib/client/store";
-import { navigate } from "@/lib/client/router";
+import { navigate, popReturnTo } from "@/lib/client/router";
 import { api } from "@/lib/client/api";
 import { Alert } from "../ui-kit";
 import { AvatarInput } from "../avatar-input";
@@ -50,7 +50,9 @@ export function LoginView() {
       else {
         await refreshBoot();
         toast("Accesso riuscito. Benvenuto su ZoomZoom.");
-        navigate("#/profilo");
+        // DOVE ERI: chi accede per completare un'azione (recensire, votare…)
+        // torna alla pagina da cui era partito; altrimenti home.
+        navigate(popReturnTo("#/"));
       }
     } else if (res.error.includes("riservato all'area amministrativa")) {
       setErr(res.error);
@@ -68,7 +70,7 @@ export function LoginView() {
     if (res.ok) {
       await refreshBoot();
       toast("Accesso riuscito.");
-      navigate("#/profilo");
+      navigate(popReturnTo("#/"));
     } else setErr(res.error);
   };
 

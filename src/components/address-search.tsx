@@ -4,9 +4,14 @@
 // nazionale propone gli indirizzi reali della cartografia OpenStreetMap
 // (via, civico, comune). Sceglierne uno conferma in un colpo solo via,
 // civico, città e pin sulla mappa: niente più "località trovata ma non
-// confermabile". Il campo contiene SOLO la via: il civico scelto va al
-// campo dedicato (via onPick), perché in un civico possono esserci più
-// unità (condomini) e la via resta la base del confronto.
+// confermabile".
+// DUE MODALITÀ:
+//  · via (predefinita): nel campo resta SOLO la via; il civico scelto va
+//    al campo dedicato (via onPick), perché in un civico possono esserci
+//    più unità (condomini) e la via resta la base del confronto;
+//  · fullAddress (campo unico): nel campo resta la via COL civico — è la
+//    modalità della conferma scheda: un solo campo per l'indirizzo
+//    intero, il civico resta comunque separato nei dati (onPick lo porta).
 // Stessa condotta privacy di place-search: la stringa va al geocoder pubblico
 // SOLO tramite il proxy del server, con debounce (450 ms), minimo 4
 // caratteri e cache per query, nel rispetto della policy Nominatim.
@@ -24,7 +29,7 @@ export type AddressPlace = {
   lng: number;
 };
 
-export function AddressSearch({ id, value, onChange, onPick, label, hint, placeholder }: {
+export function AddressSearch({ id, value, onChange, onPick, label, hint, placeholder, fullAddress }: {
   id?: string;
   value: string;
   onChange: (v: string) => void;
@@ -32,6 +37,9 @@ export function AddressSearch({ id, value, onChange, onPick, label, hint, placeh
   label?: string;
   hint?: string;
   placeholder?: string;
+  // modalità campo unico: via + civico insieme nel campo (i dati restano
+  // separati: onPick porta via e civico distinti)
+  fullAddress?: boolean;
 }) {
   const [remote, setRemote] = useState<AddressPlace[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -71,10 +79,10 @@ export function AddressSearch({ id, value, onChange, onPick, label, hint, placeh
     <div className="field">
       {label ? <label htmlFor={id}>{label}</label> : null}
       <input id={id} type="search" autoComplete="off" required role="combobox"
-        aria-label={label || "Via"}
+        aria-label={label || (fullAddress ? "Indirizzo (via e numero civico)" : "Via")}
         aria-expanded={open && results.length > 0}
         aria-controls={id ? `${id}-list` : undefined}
-        placeholder={placeholder || "Es. Via dei Mille"}
+        placeholder={placeholder || (fullAddress ? "Es. Via dei Mille 15" : "Es. Via dei Mille")}
         value={value}
         onChange={e => onChange(e.target.value)}
         onKeyDown={e => {
@@ -107,9 +115,13 @@ export function AddressSearch({ id, value, onChange, onPick, label, hint, placeh
   );
 
   function pick(p: AddressPlace) {
-    // nel campo resta SOLO la via: il civico va nel suo campo dedicato
-    // (lo porta onPick), così via, civico e interno restano distinti
-    onChange(p.road || [p.road, p.houseNumber].filter(Boolean).join(" ") || value);
+    // nel campo resta la via (modalità dedicata) oppure l'indirizzo intero
+    // (modalità campo unico): i DATI restano sempre distinti — onPick porta
+    // via, civico, città e coordinate al chiamante
+    const keep = fullAddress
+      ? [p.road, p.houseNumber].filter(Boolean).join(" ") || p.road || value
+      : p.road || [p.road, p.houseNumber].filter(Boolean).join(" ") || value;
+    onChange(keep);
     setOpen(false);
     setRemote(null);
     onPick(p);

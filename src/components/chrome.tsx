@@ -326,6 +326,9 @@ export function Footer() {
             <a href="#/cerca">Cerca un soggetto</a>
             <a href="#/mappa">Mappa delle reputazioni</a>
             <a href="#/classifiche">Classifiche</a>
+            {/* richiamo stabile ai professionisti: chi cerca lo trova, gli
+                altri non lo vedono mai in primo piano (card in fondo al profilo) */}
+            <a href="#/consulente" title="Per geometri, ingegneri, periti, tecnici e agenti: scheda professionale, richieste di perizie e compenso a consegna.">Consulente tecnico (professionisti)</a>
           </div>
           <div>
             <h4>Informative</h4>

@@ -149,6 +149,55 @@ export async function publicZones() {
   return db.zone.findMany({ orderBy: { name: "asc" } });
 }
 
+/* ---------- collegamenti tra schede (raggruppare schede) ---------- */
+
+// scheda collegata, con i suoi aggregati pubblici (medie e conteggi restano
+// sempre pubblici: i testi integrali restano alle regole Premium)
+export type PublicEntityLink = {
+  id: string;
+  name: string;
+  mean: number | null;
+  n: number;
+};
+
+// Collegamenti di una scheda: per un immobile, chi lo amministra; per un
+// amministratore, i condomini che amministra. Solo schede pubblicate (se
+// la moderazione nasconde una scheda, il suo collegamento non appare).
+export async function entityLinksForEntity(entityId: string, minReviews: number): Promise<{
+  administrator: PublicEntityLink | null;
+  buildings: PublicEntityLink[];
+}> {
+  const [outgoing, incoming] = await Promise.all([
+    db.entityLink.findMany({
+      where: { fromEntityId: entityId, kind: "amministra" },
+      include: { toEntity: { select: { id: true, name: true, status: true } } },
+      orderBy: { createdAt: "asc" },
+      take: 50,
+    }),
+    db.entityLink.findMany({
+      where: { toEntityId: entityId, kind: "amministra" },
+      include: { fromEntity: { select: { id: true, name: true, status: true } } },
+      orderBy: { createdAt: "asc" },
+      take: 50,
+    }),
+  ]);
+  const withStats = async (e: { id: string; name: string }): Promise<PublicEntityLink> => {
+    const st = await statsForEntity(e.id, minReviews);
+    return { id: e.id, name: e.name, mean: st.mean, n: st.n };
+  };
+  // l'amministratore del condominio: il più recente se più di uno è stato
+  // dichiarato (il turnover esiste: la scheda mostra l'ultimo in carica, lo
+  // storico resta nel back office)
+  const admins = outgoing
+    .map(l => l.toEntity)
+    .filter(e => e && e.status === "published");
+  const administrator = admins.length ? await withStats(admins[admins.length - 1]) : null;
+  const buildings = await Promise.all(
+    incoming.map(l => l.fromEntity).filter(e => e && e.status === "published").map(withStats),
+  );
+  return { administrator, buildings };
+}
+
 // Metadati delle foto di ogni recensione di un'entità (mai i byte: le
 // immagini si servono da /api/public/photo/[id] con controllo di accesso).
 export type PublicPhotoMeta = { id: string; width: number; height: number };

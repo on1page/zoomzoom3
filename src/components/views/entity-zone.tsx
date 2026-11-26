@@ -77,6 +77,12 @@ type EntityPayload = {
     id: string; kind: string; title: string; summary: string | null;
     deliveredAt: string; consultantName: string; consultantProfession: string;
   } | null;
+  // collegamenti tra schede: per un immobile chi lo amministra, per un
+  // amministratore i condomini che amministra (nascono dalle indagini)
+  links?: {
+    administrator: { id: string; name: string; mean: number | null; n: number } | null;
+    buildings: { id: string; name: string; mean: number | null; n: number }[];
+  };
   reviews: ReviewItem[];
   teasers: ReviewItem[];
   hiddenCount: number;
@@ -365,6 +371,9 @@ export function EntityView({ id }: { id: string }) {
               {ent.address ? <span>· {[ent.address, ent.streetNumber].filter(Boolean).join(" ")}</span> : null}
               {ent.categoryId !== "zona" && zoneName ? <> · <a href={`#/zona/ent_z_${ent.zoneId}`}>{zoneName}</a></> : null}
               {ent.subtitle && !ent.address ? <> · {ent.subtitle}</> : null}
+              {ent.categoryId === "immobile" && data.links?.administrator ? (
+                <> · Amministrato da <a href={`#/scheda/${data.links.administrator.id}`} title="Scheda dell'amministratore: tutti i condomini che amministra."><b>{data.links.administrator.name}</b></a>{data.links.administrator.n > 0 ? <> ({fmt1(data.links.administrator.mean ?? 0)}/10 · {data.links.administrator.n})</> : null}</>
+              ) : null}
             </p>
           </div>
         </div>
@@ -395,6 +404,32 @@ export function EntityView({ id }: { id: string }) {
               ) : null}
             </div>
             {data.consultant ? <ConsultantCard c={data.consultant} entityId={ent.id} /> : null}
+            {/* condomini che amministra: il cerchio si chiude — la scheda
+                dell'amministratore raggruppa i condomini dichiarati da chi
+                ci vive, ognuno con le sue indagini */}
+            {ent.categoryId === "amministratore" && data.links?.buildings?.length ? (
+              <section className="card mb2">
+                <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 6 }}>
+                  <h2 style={{ margin: 0, fontSize: "1.1rem" }}>Condomini che amministra</h2>
+                  <span className="pill pill-gray" title="Il collegamento nasce dalle indagini di chi vive nell'edificio: in ogni scheda immobile compare chi lo amministra.">
+                    {data.links.buildings.length} {data.links.buildings.length === 1 ? "scheda collegata" : "schede collegate"}
+                  </span>
+                </div>
+                <div className="pick-list">
+                  {data.links.buildings.map(b => (
+                    <a key={b.id} className="pick-card" href={`#/scheda/${b.id}`} title="Scheda del condominio: indagini e medie.">
+                      <span className="pick-ico" style={{ background: "#33658A" }}>{iconSvg("immobile", 17)}</span>
+                      <span className="pick-body">
+                        <span className="pick-title">{b.name}</span>
+                        <span className="pick-sub">{b.n > 0 ? `${fmt1(b.mean ?? 0)}/10 · ${b.n} ${b.n === 1 ? "indagine" : "indagini"}` : "Nessuna indagine ancora"}</span>
+                      </span>
+                      <span className="pick-tags"><Stars score={b.mean} size={12} /></span>
+                    </a>
+                  ))}
+                </div>
+                <p className="small muted mb0" style={{ marginTop: 8 }}>L&apos;elenco nasce dalle indagini di chi vive negli edifici: nella scheda di ogni condominio compare chi lo amministra. Medie e conteggi restano pubblici; i testi integrali seguono le regole Premium.</p>
+              </section>
+            ) : null}
             {data.certified ? (
               <section className="card mb2" style={{ borderLeft: "4px solid var(--ok, #059669)" }}>
                 <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 6 }}>

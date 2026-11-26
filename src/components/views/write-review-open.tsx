@@ -78,6 +78,10 @@ export function WriteReviewOpenView({ presetEntityId }: { presetEntityId?: strin
   // com'è nata la scheda del passo 4: badge "Nuova scheda" o "Scheda esistente"
   const [schedaNote, setSchedaNote] = useState<{ created: boolean; reused: boolean } | null>(null);
   const [presetError, setPresetError] = useState<string | null>(null);
+  // indagine appena pubblicata su un immobile: il percorso resta aperto con
+  // l'offerta «due righe sull'amministratore di condominio» (raggruppare
+  // schede e chiudere i percorsi)
+  const [offer, setOffer] = useState<{ entityId: string; reviewId: string; name: string } | null>(null);
 
   // preselezione dalla scheda (#/recensione?entity=…): si accettano solo
   // immobili e zone; le persone restano sulla via invito/verifica
@@ -163,17 +167,26 @@ export function WriteReviewOpenView({ presetEntityId }: { presetEntityId?: strin
           onBack={() => setStep("place")}
           onReady={(ent, note) => { setSel(ent); setSchedaNote(note); setStep("form"); }}
         />
+      ) : offer ? (
+        <LinkedAdminOffer
+          condominio={offer}
+          onSkip={() => navigate(`#/scheda/${offer.entityId}`)}
+        />
       ) : sel ? (
         <ReviewStep
           key={sel.id}
           sel={sel}
           schedaNote={schedaNote}
-          onBack={() => { setSel(null); setStep(target === "altro" ? "place" : "place"); }}
-          onDone={async (entityId, premiumDays) => {
+          onBack={() => { setSel(null); setStep("place"); }}
+          onDone={async (entityId, reviewId, premiumDays) => {
             if (premiumDays > 0) toast(`Indagine pubblicata: Premium attivo per ${premiumDays} giorni.`);
             else toast("Indagine pubblicata: grazie.");
             await refreshBoot();
-            navigate(`#/scheda/${entityId}`);
+            // percorso chiuso: chi ha appena pubblicato l'indagine sul suo
+            // immobile può spendere due righe sull'amministratore — la sua
+            // scheda nasce (o si riusa) e il condominio viene collegato
+            if (sel.categoryId === "immobile") setOffer({ entityId, reviewId, name: sel.name });
+            else navigate(`#/scheda/${entityId}`);
           }}
         />
       ) : null}
@@ -652,7 +665,6 @@ function ConfirmStep({ target, draft, setDraft, onBack, onReady }: {
   const { boot, toast } = useApp();
   const [editZone, setEditZone] = useState(!draft.zone);
   const [editAddr, setEditAddr] = useState(target === "immobile" && draft.address.trim().length < 3);
-  const [editCivico, setEditCivico] = useState(target === "immobile" && !draft.civico.trim());
   const [editUnit, setEditUnit] = useState(false);
   const [showMap, setShowMap] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -750,7 +762,7 @@ function ConfirmStep({ target, draft, setDraft, onBack, onReady }: {
           <h1 style={{ margin: 0 }}>Controlla la scheda</h1>
           <p className="sub" style={{ margin: "6px 0 0" }}>
             {isImmobile
-              ? <>Serve <span className="pill pill-green">città</span>, <span className="pill pill-green">via</span> e <span className="pill pill-green">civico</span>: il resto è facoltativo.</>
+              ? <>Serve <span className="pill pill-green">città</span> e <span className="pill pill-green" title="Via e numero civico in un solo campo: i suggerimenti della cartografia li confermano insieme.">indirizzo (via e numero)</span>: il resto è facoltativo.</>
               : <>Serve la <span className="pill pill-green">località</span>: il resto arriva con l&apos;indagine.</>}
           </p>
         </div>
@@ -782,62 +794,68 @@ function ConfirmStep({ target, draft, setDraft, onBack, onReady }: {
             )}
           </div>
 
-          {/* --- via (solo immobile): il civico va nel campo suo --- */}
+          {/* --- indirizzo (via + civico, UN solo campo): il civico distingue
+              gli edifici nella stessa via, l'interno le unità dello stesso
+              civico. Tre stati: intero confermato · campo unico in modifica ·
+              via confermata con solo il numero mancante (ripiego piccolo) --- */}
           {isImmobile ? (
             <div className="zz-fact">
-              <span className="zz-fact-k">Via</span>
-              {addrOk && !editAddr ? (
+              <span className="zz-fact-k">Indirizzo</span>
+              {addrOk && civicoOk && !editAddr ? (
                 <>
-                  <span className="zz-fact-v ok"><CheckSvg size={11} /> {via}</span>
+                  <span className="zz-fact-v ok" title="Via e numero civico: insieme alla città e all'eventuale interno, è la discriminante della scheda."><CheckSvg size={11} /> {fullAddr}</span>
                   <span className="spacer" />
                   <button type="button" className="btn btn-ghost btn-xs" onClick={() => setEditAddr(true)}>Modifica</button>
                 </>
+              ) : addrOk && !editAddr ? (
+                <>
+                  <span className="zz-fact-v ok"><CheckSvg size={11} /> {via}</span>
+                  <div style={{ width: 150 }}>
+                    <input
+                      id="cf-civico" type="text" autoComplete="off" autoFocus={!civicoOk}
+                      aria-label="Numero civico" placeholder="Numero — es. 15"
+                      title="Numero civico: distingue gli edifici nella stessa via, piazza o largo."
+                      value={draft.civico}
+                      onChange={e => setDraft(d => ({ ...d, civico: e.target.value.slice(0, 10) }))}
+                      onKeyDown={e => { if (e.key === "Enter") e.preventDefault(); }}
+                    />
+                  </div>
+                  <span className="pill pill-amber" title="Il luogo scelto non aveva il numero: scrivilo qui (es. 15 o 15/A). In una via possono esserci più edifici: il civico distingue le schede.">Manca il numero</span>
+                  <button type="button" className="btn btn-ghost btn-xs" onClick={() => setEditAddr(true)} title="Cambia via e numero insieme, con i suggerimenti della cartografia.">Cambia</button>
+                </>
               ) : (
-                <div style={{ flex: 1, minWidth: 220 }}>
+                <div style={{ flex: 1, minWidth: 240 }}>
                   <AddressSearch
                     id="cf-addr" value={draft.address} onChange={v => setDraft(d => ({ ...d, address: v }))}
-                    placeholder="Via, piazza o largo — es. Via dei Mille"
+                    placeholder="Via e numero — es. Via dei Mille 15"
+                    fullAddress
                     onPick={p => {
                       setDraft(d => ({
                         ...d,
                         address: p.road || d.address,
                         civico: p.houseNumber || d.civico,
-                        geo: { lat: p.lat, lng: p.lng },
+                        geo: d.geo ?? { lat: p.lat, lng: p.lng },
                         zone: d.zone ?? (p.zoneName ? { name: p.zoneName, province: p.province, region: p.region, lat: p.lat, lng: p.lng } : null),
                       }));
                       setEditAddr(false);
-                      if (p.houseNumber) setEditCivico(false);
                     }}
                   />
+                  {!civicoOk ? (
+                    <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
+                      <input
+                        id="cf-civico" type="text" autoComplete="off"
+                        aria-label="Numero civico" placeholder="Numero — es. 15 o 15/A"
+                        title="Numero civico: distingue gli edifici nella stessa via, piazza o largo."
+                        style={{ maxWidth: 170 }}
+                        value={draft.civico}
+                        onChange={e => setDraft(d => ({ ...d, civico: e.target.value.slice(0, 10) }))}
+                        onKeyDown={e => { if (e.key === "Enter") e.preventDefault(); }}
+                      />
+                      <span className="pill pill-amber" title="Il luogo scelto non aveva il numero: scrivilo qui. Il civico distingue le schede nella stessa via.">Manca il numero</span>
+                    </div>
+                  ) : null}
                 </div>
               )}
-            </div>
-          ) : null}
-
-          {/* --- civico: distingue gli edifici nella stessa via --- */}
-          {isImmobile ? (
-            <div className="zz-fact">
-              <span className="zz-fact-k">Civico</span>
-              {civicoOk && !editCivico ? (
-                <>
-                  <span className="zz-fact-v ok" title="In una via, piazza o largo possono esserci più edifici: il civico distingue le schede."><CheckSvg size={11} /> {civico}</span>
-                  <span className="spacer" />
-                  <button type="button" className="btn btn-ghost btn-xs" onClick={() => setEditCivico(true)}>Modifica</button>
-                </>
-              ) : (
-                <div style={{ flex: 1, minWidth: 140, maxWidth: 220 }}>
-                  <input
-                    id="cf-civico" type="text" autoComplete="off" autoFocus={!civicoOk}
-                    aria-label="Numero civico" placeholder="Es. 15 o 15/A"
-                    title="Numero civico: distingue gli edifici nella stessa via, piazza o largo."
-                    value={draft.civico}
-                    onChange={e => setDraft(d => ({ ...d, civico: e.target.value.slice(0, 10) }))}
-                    onBlur={() => { if (civicoOk) setEditCivico(false); }}
-                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); if (civicoOk) setEditCivico(false); } }}
-                  />
-                </div>
-              )}
-              {!civicoOk ? <span className="pill pill-amber" title="In una via possono esserci più edifici: il civico distingue le schede.">Necessario</span> : null}
             </div>
           ) : null}
 
@@ -957,8 +975,8 @@ function ConfirmStep({ target, draft, setDraft, onBack, onReady }: {
 
         <div className="row" style={{ justifyContent: "flex-end", alignItems: "center", gap: 10 }}>
           {!valid ? (
-            <span className="zz-count todo" title="La città si sceglie dai suggerimenti; la via vuole almeno 3 caratteri e il civico almeno 1 (es. 15 o 15/A).">
-              Manca: {[!draft.zone ? "città" : "", !addrOk ? "via" : "", !civicoOk ? "civico" : ""].filter(Boolean).join(" · ")}
+            <span className="zz-count todo" title="La città si sceglie dai suggerimenti; l'indirizzo (via e numero) si conferma dal campo unico: la via vuole almeno 3 caratteri e il numero almeno 1 (es. 15 o 15/A).">
+              Manca: {[!draft.zone ? "città" : "", !addrOk || !civicoOk ? "indirizzo (via e numero)" : ""].filter(Boolean).join(" · ")}
             </span>
           ) : null}
           <button className="btn btn-primary" disabled={!valid || busy} onClick={() => void confirm()}>
@@ -975,7 +993,7 @@ function ReviewStep({ sel, schedaNote, onBack, onDone }: {
   sel: SelEntity;
   schedaNote: { created: boolean; reused: boolean } | null;
   onBack: () => void;
-  onDone: (entityId: string, premiumDays: number) => void | Promise<void>;
+  onDone: (entityId: string, reviewId: string, premiumDays: number) => void | Promise<void>;
 }) {
   const { boot, toast } = useApp();
   const cat = boot?.categories.find(c => c.id === sel.categoryId) || null;
@@ -1077,7 +1095,7 @@ function ReviewStep({ sel, schedaNote, onBack, onDone }: {
           setBusy(false);
           if (res.ok) {
             if (res.photos && res.photos.skipped > 0) toast(`${res.photos.skipped} ${res.photos.skipped === 1 ? "foto non valida è stata" : "foto non valide sono state"} scartata/e: l&apos;indagine è comunque pubblicata.`, "err");
-            await onDone(res.entityId, res.premium?.grantedDays || 0);
+            await onDone(res.entityId, res.reviewId, res.premium?.grantedDays || 0);
           } else setErr(res.error);
         }}>
           <div className="field">
@@ -1126,6 +1144,181 @@ function ReviewStep({ sel, schedaNote, onBack, onDone }: {
           </p>
         </form>
       </div>
+    </div>
+  );
+}
+
+/* ---------- Dopo la pubblicazione: due righe sull'amministratore ----------
+   Percorso chiuso (raggruppare schede): chi ha appena pubblicato l'indagine
+   sull'immobile dove abita ha l'esperienza diretta con chi lo amministra — la
+   mini-indagine nasce VERIFICATA, la scheda dell'amministratore nasce o si
+   riusa (dedup per nome nella stessa zona) e il condominio viene collegato:
+   nella scheda dell'amministratore compaiono tutti i condomini che amministra. */
+function LinkedAdminOffer({ condominio, onSkip }: {
+  condominio: { entityId: string; reviewId: string; name: string };
+  onSkip: () => void;
+}) {
+  const { boot, toast, refreshBoot } = useApp();
+  const cat = boot?.categories.find(c => c.id === "amministratore") || null;
+  const [open, setOpen] = useState(false);
+  const [kind, setKind] = useState("");
+  const [adminName, setAdminName] = useState("");
+  const [score, setScore] = useState(5);
+  const [crit, setCrit] = useState<Record<string, number>>({});
+  const [pros, setPros] = useState("");
+  const [cons, setCons] = useState("");
+  const [text, setText] = useState("");
+  const [honesty, setHonesty] = useState(false);
+  const [hp, setHp] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => { if (cat?.experienceKinds.length) setKind(k => k || cat.experienceKinds[0]); }, [cat]);
+
+  // stesse regole del server (che resta l'autorità)
+  const okName = adminName.trim().length >= 3;
+  const okPros = pros.trim().length >= 3;
+  const okText = text.trim().length >= 100;
+  const canSend = okName && okPros && okText && honesty && !!kind && !busy;
+
+  const send = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canSend) return;
+    setErr(null); setBusy(true);
+    const res = await api<{ reviewId: string; entityId: string; alreadyReviewed?: boolean }>("/api/reviews/linked", {
+      body: {
+        parentReviewId: condominio.reviewId, adminName: adminName.trim(),
+        experienceKind: kind, score, crit, pros, cons, text, honesty, hp,
+      },
+    });
+    setBusy(false);
+    if (!res.ok) { setErr(res.error); return; }
+    toast(res.alreadyReviewed
+      ? "Avevi già un'indagine su questo amministratore: il condominio è comunque collegato alla sua scheda."
+      : "Indagine sull'amministratore pubblicata: condominio collegato.");
+    await refreshBoot();
+    navigate(`#/scheda/${res.entityId}`);
+  };
+
+  return (
+    <div className="container" style={{ maxWidth: 640, paddingTop: 18, paddingBottom: 30 }}>
+      {!open ? (
+        <div className="card">
+          <div className="premium-card-head">
+            <h1 style={{ margin: 0, fontSize: "1.2rem" }}>Indagine pubblicata</h1>
+            <span className="pill pill-green">grazie</span>
+          </div>
+          <p className="small mb1">La tua indagine su <b>{condominio.name}</b> è online. Il Premium, se previsto, è già attivo sul tuo profilo.</p>
+          {cat ? (
+            <>
+              <p className="small mb2">
+                <span className="pill pill-blue">Vivi in condominio?</span>{" "}
+                Spendete <b>due righe sul vostro amministratore</b>: la sua scheda nasce all&apos;istante (o si riusa se esiste già), il condominio viene collegato e chi cerca il palazzo trova anche chi lo amministra.
+              </p>
+              <div className="row">
+                <button className="btn btn-primary" onClick={() => setOpen(true)}>Sì, due righe sull&apos;amministratore</button>
+                <button className="btn btn-ghost" onClick={onSkip}>Vai alla scheda pubblicata →</button>
+              </div>
+            </>
+          ) : (
+            <div className="row">
+              <button className="btn btn-primary" onClick={onSkip}>Vai alla scheda pubblicata →</button>
+            </div>
+          )}
+        </div>
+      ) : cat ? (
+        <div className="card">
+          <div className="section-head" style={{ paddingTop: 0 }}>
+            <div>
+              <h1 style={{ margin: 0, fontSize: "1.25rem" }}>L&apos;amministratore</h1>
+              <p className="sub" style={{ margin: "6px 0 0" }}>
+                Mini-indagine su chi amministra <b>{condominio.name}</b>: nasce <span className="pill pill-green" title="L'esperienza è quella di chi vive nell'edificio appena recensito: la verifica deriva dall'indagine pubblicata.">verificata</span> e il condominio viene collegato alla sua scheda.
+              </p>
+            </div>
+          </div>
+          <form onSubmit={send}>
+            <div className="field">
+              <label htmlFor="la-kind">Che esperienza hai avuto?</label>
+              <select id="la-kind" required value={kind} onChange={e => setKind(e.target.value)}>
+                {cat.experienceKinds.map(k => <option key={k} value={k}>{k}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="la-name">Chi amministra il condominio?</label>
+              <input id="la-name" required maxLength={80} value={adminName}
+                placeholder="Es. Studio Amministrazioni Rossi"
+                onChange={e => setAdminName(e.target.value)} />
+              <span className="hint">Il nome dello studio o dell&apos;amministratore, come lo conoscete. Se la scheda esiste già la riusiamo, così i condomini restano uniti.</span>
+            </div>
+            <div className="field">
+              <label htmlFor="la-score">Voto complessivo (0–10)</label>
+              <div className="range-wrap">
+                <input type="range" id="la-score" min={0} max={10} step={0.5} value={score}
+                  onChange={e => setScore(Number(e.target.value))} aria-describedby="la-score-val" />
+                <span className="range-val" id="la-score-val" aria-live="polite">{fmt1(score)}</span>
+              </div>
+            </div>
+            <details>
+              <summary className="small">Valuta anche i criteri (facoltativo: conti, trasparenza, parti comuni…)</summary>
+              <fieldset>
+                <legend className="small muted">Se non li tocchi non incidono sul voto complessivo.</legend>
+                {cat.criteria.map(c => (
+                  <div className="field" key={c.key}>
+                    <label htmlFor={`la-crit-${c.key}`}>{c.label}</label>
+                    <div className="range-wrap">
+                      <input type="range" id={`la-crit-${c.key}`} min={0} max={10} step={0.5}
+                        value={crit[c.key] ?? 5}
+                        onChange={e => setCrit({ ...crit, [c.key]: Number(e.target.value) })}
+                        aria-describedby={`la-crit-${c.key}-val`} />
+                      <span className="range-val" id={`la-crit-${c.key}-val`} aria-live="polite">{fmt1(crit[c.key] ?? 5)}</span>
+                    </div>
+                  </div>
+                ))}
+              </fieldset>
+            </details>
+            <div className="field">
+              <label htmlFor="la-pros">Un pregio, in una riga</label>
+              <input id="la-pros" required value={pros} maxLength={120}
+                placeholder="Es. conti chiari e preventivi sempre approvati"
+                onChange={e => setPros(e.target.value)} />
+            </div>
+            <div className="field">
+              <label htmlFor="la-cons">Una criticità, in una riga <span className="muted">(facoltativa)</span></label>
+              <input id="la-cons" maxLength={120} value={cons}
+                placeholder="Es. interventi ordinari lenti"
+                onChange={e => setCons(e.target.value)} />
+            </div>
+            <div className="field">
+              <label htmlFor="la-text">Due righe sull&apos;esperienza</label>
+              <textarea id="la-text" rows={4} required value={text}
+                placeholder="Com&apos;è vivere amministrati da questo studio: assemblee, conti, parti comuni, interventi…"
+                onChange={e => setText(e.target.value)} />
+              <span className="hint">Almeno 100 caratteri: serve a chi cerca di decidere.</span>
+            </div>
+            <label className="checkline mb2">
+              <input type="checkbox" checked={honesty} onChange={e => setHonesty(e.target.checked)} required />
+              <span><b>Dichiarazione:</b> l&apos;esperienza è personale e rispetto le <a href="#/regole-recensioni">regole</a>: niente dati di terzi senza autorizzazione, niente finalità promozionali.</span>
+            </label>
+            <div className="hp-field"><label htmlFor="la-hp">Non compilare</label><input id="la-hp" tabIndex={-1} autoComplete="off" value={hp} onChange={e => setHp(e.target.value)} /></div>
+            <div className="zz-counts" aria-live="polite">
+              <span className={`zz-count ${okName ? "ok" : "todo"}`}>Nome</span>
+              <span className={`zz-count ${okPros ? "ok" : "todo"}`}>Pregio</span>
+              <span className={`zz-count ${okText ? "ok" : "todo"}`}>Testo {text.trim().length}/100</span>
+              <span className={`zz-count ${honesty ? "ok" : "todo"}`}>Dichiarazione</span>
+            </div>
+            {err ? <p className="error-msg" style={{ display: "block" }}>{err}</p> : null}
+            <button className="btn btn-primary btn-block" type="submit" disabled={!canSend}>
+              {busy ? "Pubblico…" : "Pubblica le due righe"}
+            </button>
+          </form>
+          <p className="small muted mt2 mb0">Hai cambiato idea? <button className="link" onClick={onSkip}>Salta e vai alla scheda pubblicata</button>.</p>
+        </div>
+      ) : (
+        <div className="card">
+          <p className="small mb1">La tua indagine su <b>{condominio.name}</b> è online.</p>
+          <div className="row"><button className="btn btn-primary" onClick={onSkip}>Vai alla scheda pubblicata →</button></div>
+        </div>
+      )}
     </div>
   );
 }

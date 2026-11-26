@@ -73,7 +73,11 @@ export async function GET(req: NextRequest) {
       httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production",
       path: "/", maxAge: 7 * 24 * 3600,
     });
-    return NextResponse.redirect(new URL("/#/profilo", origin));
+    // si atterra sulla home (con la barra di ricerca): il redirect è una
+    // pagina intera dal server, che non conosce la pagina di provenienza —
+    // chi accedeva per completare un'azione la ritrova dal menu. Coerente
+    // con l'atterraggio post-login del sito («dove eri, altrimenti home»).
+    return NextResponse.redirect(new URL("/", origin));
   } catch {
     return failRedirect("Errore durante l'accesso con Google: riprova.");
   }

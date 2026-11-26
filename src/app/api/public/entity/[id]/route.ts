@@ -16,7 +16,7 @@ import { getCategory } from "@/lib/server/categories";
 import { getSettings } from "@/lib/server/settings";
 import { getCurrentUser } from "@/lib/server/auth";
 import { hasPremiumAccess, premiumStateOf } from "@/lib/server/premium";
-import { publicEntity, publicReviewsForEntity, photoMetaForEntity, certifiedIndagineForEntity } from "@/lib/server/public-data";
+import { publicEntity, publicReviewsForEntity, photoMetaForEntity, certifiedIndagineForEntity, entityLinksForEntity } from "@/lib/server/public-data";
 import { obfuscateReviewText, photoAccessOf, voteSummariesForEntity, myVotesForEntity } from "@/lib/server/review-access";
 import { utilitySummariesForEntity } from "@/lib/server/utility";
 import { publicConsultantForEntity } from "@/lib/server/consultants";
@@ -39,13 +39,15 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
       return NextResponse.json({ ok: false, error: "Scheda non trovata." }, { status: 404 });
     }
     const cat = await getCategory(ent.categoryId);
-    const [pub, reviews, consultant, certified] = await Promise.all([
+    const [pub, reviews, consultant, certified, links] = await Promise.all([
       publicEntity(id, settings.minReviews),
       publicReviewsForEntity(id),
       // scheda professionale (solo per la categoria Consulenti tecnici)
       ent.categoryId === "consulente" ? publicConsultantForEntity(id) : Promise.resolve(null),
       // indagine professionale certificata collegata a questa scheda (K7)
       certifiedIndagineForEntity(id),
+      // collegamenti tra schede: condominio ↔ amministratore
+      entityLinksForEntity(id, settings.minReviews),
     ]);
     const published = reviews.filter(r => r.status === "published");
     const hiddenCount = reviews.length - published.length;
@@ -125,6 +127,8 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
       category: cat,
       consultant,
       certified,
+      // condominio ↔ amministratore: chi amministra e cosa si amministra
+      links,
       reviews: reviewsOut,
       teasers,
       hiddenCount,

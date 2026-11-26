@@ -214,6 +214,10 @@ model Entity {
   // indagini professionali consegnate collegate a questa scheda (chiusura
   // del cerchio: la relazione consegnata crea o aggiorna la scheda)
   perizie     PeriziaRequest[] @relation("perizieEntity")
+  // collegamenti tra schede (modello generico): chi amministra un condominio,
+  // chi gestisce un immobile… direzione: from → to secondo il tipo
+  linksFrom   EntityLink[] @relation("linksFrom")
+  linksTo     EntityLink[] @relation("linksTo")
 
   @@index([categoryId, status])
   @@index([zoneId])
@@ -238,6 +242,31 @@ model EntityProposal {
   decidedAt     DateTime?
   createdAt     DateTime @default(now())
   isDemo        Boolean  @default(false)
+}
+
+// Collegamento tra due schede (modello generico, «raggruppare schede e
+// chiudere i percorsi»). Primo tipo: «amministra» — fromEntity = immobile
+// (il condominio), toEntity = scheda della categoria Amministratori: nella
+// scheda dell'amministratore compaiono tutti i condomini che amministra, in
+// quella del condominio chi lo amministra. Il collegamento nasce dalla
+// mini-indagine post-pubblicazione (chi ha appena pubblicato l'indagine
+// sull'immobile dove abita ha l'esperienza diretta) oppure dallo staff.
+model EntityLink {
+  id           String   @id @default(cuid())
+  fromEntityId String
+  fromEntity   Entity   @relation("linksFrom", fields: [fromEntityId], references: [id], onDelete: Cascade)
+  toEntityId   String
+  toEntity     Entity   @relation("linksTo", fields: [toEntityId], references: [id], onDelete: Cascade)
+  // «amministra» (condominio → amministratore); altri tipi in futuro
+  kind         String
+  // indagine (dichiarata da chi ha pubblicato l'indagine sull'immobile) | staff
+  source       String   @default("indagine")
+  createdById  String?
+  createdAt    DateTime @default(now())
+
+  @@unique([fromEntityId, toEntityId, kind])
+  @@index([toEntityId, kind])
+  @@index([fromEntityId, kind])
 }
 
 model Experience {

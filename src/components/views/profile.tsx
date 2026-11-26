@@ -186,15 +186,6 @@ export function ProfileView() {
         </div>
       </div>
       <ProfileTabs active="#/profilo" />
-      <div className="card mb2">
-        <div className="premium-card-head">
-          <h2 style={{ fontSize: "1.05rem", margin: 0 }}>Consulente Tecnico</h2>
-          <span className="pill pill-blue">Novità</span>
-        </div>
-        <p className="small mb1">Sei un geometra, ingegnere, perito, tecnico o agente immobiliare? Iscriviti come <b>Consulente Tecnico</b>: scheda professionale nel catalogo, richieste di perizie e valutazioni con relazione in PDF e compenso accreditato a consegna avvenuta. Iscrizione con approvazione dello staff e 2FA obbligatoria.</p>
-        <p className="small muted mb1">Hai già richiesto una perizia? Trovi lo stato e i PDF nelle <a href="#/consulente-richieste">tue richieste</a>.</p>
-        <a className="btn btn-primary btn-sm" href="#/consulente">Iscriviti o consulta lo stato</a>
-      </div>
       {data.premium.enabled ? (
         <div className={`card mb2 premium-card${data.premium.active ? " on" : ""}`}>
           <div className="premium-card-head">
@@ -301,6 +292,19 @@ export function ProfileView() {
             ))}
           </ul>
         ) : <p className="small muted mb0">Nessuna segnalazione presentata.</p>}
+      </div>
+      {/* Consulente Tecnico: in fondo e chiuso — per chi non è un
+          professionista è rumore in primo piano; chi cerca lo apre in un
+          clic. Il richiamo stabile sta nel piè di pagina. */}
+      <div className="card mb2">
+        <details>
+          <summary className="small" title="Scheda professionale nel catalogo, richieste di perizie e valutazioni con relazione in PDF.">
+            <b>Consulente Tecnico</b> — geometri, ingegneri, periti, tecnici, agenti: <span className="muted">iscrizione, richieste e compenso a consegna</span>
+          </summary>
+          <p className="small mt2 mb1">Iscriviti come <b>Consulente Tecnico</b>: scheda professionale nel catalogo, richieste di perizie e valutazioni con relazione in PDF e compenso accreditato a consegna avvenuta. Iscrizione con approvazione dello staff e 2FA obbligatoria.</p>
+          <p className="small muted mb1">Hai già richiesto una perizia? Trovi lo stato e i PDF nelle <a href="#/consulente-richieste">tue richieste</a>.</p>
+          <a className="btn btn-primary btn-sm" href="#/consulente">Iscriviti o consulta lo stato</a>
+        </details>
       </div>
     </div>
   );
